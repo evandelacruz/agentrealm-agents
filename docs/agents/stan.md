@@ -1,6 +1,6 @@
 # Starter Stan
 
-**Short name:** `stan`. **File:** `python/starter_agent.py`.
+**Short name:** `stan`. **File:** `python/starter_agent.py`, on the agent ADK's client, world model and pathing (`python/agentrealm_adk/`).
 
 **Plays to:** staying alive while wandering. He clears nothing and buys nothing.
 

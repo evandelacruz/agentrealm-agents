@@ -4,13 +4,13 @@ import random
 import unittest
 
 from agentrealm_agent.brain import Memory, choose_call, decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.navigation import cost_path
-from agentrealm_agent.navigation.rejection import NavMemory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation.rejection import NavMemory
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.world import Entity, WorldModel, terrain_cells
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel, terrain_cells
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 def world(rows: list[str], at=(0, 0), perception=3) -> WorldModel:

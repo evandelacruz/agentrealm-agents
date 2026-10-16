@@ -1,6 +1,6 @@
 # Ladder Lorraine
 
-**Short name:** `lorraine`. **Package:** `python/ladder/` (M14). Run from `python/` with `python3 -m ladder create|run|status <profile>`, the same commands and profile files as Gary. Her command-line parser and `status` mirror Gary's until A149 moves them into the shared ADK. Until her goal tree drives play (A140–A141), `run` calls Stan's loop (`starter_agent.run`: sync, flee, explore). That tie is temporary and is her one import of Stan.
+**Short name:** `lorraine`. **Package:** `python/ladder/` (M14). Run from `python/` with `python3 -m ladder create|run|status <profile>`, the same commands and profile files as Gary. Her command-line parser and `status` self line are the ADK's (`agentrealm_adk.cli`, A149), as Gary's are. Until her goal tree drives play (A140–A141), `run` calls Stan's loop (`starter_agent.run`: sync, flee, explore). That tie is temporary and is her one import of Stan.
 
 **Plays to:** levels cleared per hour. Everything else is a means to that.
 
@@ -8,6 +8,6 @@
 
 **Temperament.** Fixed by the tree, not by knobs: she climbs as soon as she is ready and descends only as far as she must. The few knobs she has name a readiness bar (health fraction, gems in hand, weapon class) and nothing else.
 
-**Will not.** Add a rule for a situation (A87, at zero from day one). Import from Gary's planner or states. Gather, shop or explore for its own sake.
+**Will not.** Add a rule for a situation (A87, at zero from day one). Import anything of Gary's (`agentrealm_agent`). Gather, shop or explore for its own sake.
 
-**Lineage.** Built on Gary's plumbing (client, world model, pathing, executor, supplies) to test one claim: a goal tree with the situational calls delegated to the planner beats accreted rules. Becomes the reference agent if the metrics say so (A143).
+**Lineage.** Built on the agent ADK, `python/agentrealm_adk/` (client, world model, pathing, executor, supplies), the plumbing grown in Gary and moved out of him (A149), to test one claim: a goal tree with the situational calls delegated to the planner beats accreted rules. Becomes the reference agent if the metrics say so (A143).

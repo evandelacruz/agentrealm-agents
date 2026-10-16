@@ -13,15 +13,16 @@ now (``can_try``).
 
 from __future__ import annotations
 
-from ..break_memory import choice_at, given_up_blocks
-from ..healing import carried_heal, hurt, in_combat, potion_count
-from ..memory import Memory, queue_signal
-from ..navigation import cost_path
-from ..navigation import stuck as nav_stuck
-from .. import targets as targets_mod
-from ..pathing import bounded_step, nav_search
-from ..survival import hostiles_in_range, hostiles_reaching
-from ..world import Pos, WorldModel, chebyshev
+from agentrealm_adk.break_memory import choice_at, given_up_blocks
+from agentrealm_adk.healing import carried_heal, hurt, in_combat, potion_count
+from agentrealm_adk.memory import Memory, queue_signal
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk import targets as targets_mod
+from agentrealm_adk.pathing import bounded_step, nav_search
+from agentrealm_adk.survival import hostiles_in_range, hostiles_reaching
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .break_state import break_toward, in_break_reach
 from .food import block_target, food_target, take_reach, walk_grids

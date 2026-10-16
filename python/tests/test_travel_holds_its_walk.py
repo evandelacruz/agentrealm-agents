@@ -16,15 +16,15 @@ from types import SimpleNamespace
 from unittest import mock
 
 from agentrealm_agent.brain import decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import BUILTIN_EXPLORE_RADIUS, EXPLORE_ANYWHERE, Plan, builtin_way_on, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.ask import ask_the_planner
 from agentrealm_agent.strategist import MAP_RADIUS, Strategist
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
 
 GLYPHS = {".": "dirt", "#": "wall"}
 

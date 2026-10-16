@@ -7,19 +7,19 @@ seen attacking or dying."""
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.navigation.planner import hostile_cost
-from agentrealm_agent.pathing import grid_params
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.poll_cadence import hostile_within
+from agentrealm_adk.config import Policy
+from agentrealm_adk.navigation.planner import hostile_cost
+from agentrealm_adk.pathing import grid_params
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.poll_cadence import hostile_within
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.gather import _barred_by_hostile, ground
-from agentrealm_agent.hostile_ground import hostiles_near
+from agentrealm_adk.hostile_ground import hostiles_near
 from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_agent.states.greet import threat_near
 from agentrealm_agent.states.heal import _wants_heal
 from agentrealm_agent.strategist import npc_lines
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 POLICY = Policy(kind="scripted", hostile=["npc"], hostile_range=2)
 

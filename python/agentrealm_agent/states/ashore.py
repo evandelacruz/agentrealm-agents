@@ -10,11 +10,12 @@ not run.
 
 from __future__ import annotations
 
-from ..fording import on_water, stranded_unarmed
-from ..navigation import nearest_target
-from ..pathing import grid_params, plan_sets
-from ..survival import flee_from, recently_attacked
-from ..world import WATER, WorldModel, chebyshev
+from agentrealm_adk.fording import on_water, stranded_unarmed
+from agentrealm_adk.navigation import nearest_target
+from agentrealm_adk.pathing import grid_params, plan_sets
+from agentrealm_adk.survival import flee_from, recently_attacked
+from agentrealm_adk.world import WATER, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position
 

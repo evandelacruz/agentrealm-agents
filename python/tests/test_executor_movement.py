@@ -1,6 +1,6 @@
 import unittest
 
-from agentrealm_agent.executor.movement import (
+from agentrealm_adk.executor.movement import (
     build_paced_walk_queue,
     direction_between,
     ticks_per_step,

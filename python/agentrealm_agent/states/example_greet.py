@@ -6,8 +6,9 @@ Opt-in: not in the shipped ``STATES``. Add one line there to try it
 
 from __future__ import annotations
 
-from ..investigation import in_sight
-from ..world import Entity, WorldModel
+from agentrealm_adk.investigation import in_sight
+from agentrealm_adk.world import Entity, WorldModel
+
 from .base import PlayContext, State, StateOutcome
 
 

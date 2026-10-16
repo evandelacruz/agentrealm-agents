@@ -11,20 +11,20 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.break_memory import BREAK_GOAL, given_up_blocks, nominate_on_path
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import oscillation
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.break_memory import BREAK_GOAL, given_up_blocks, nominate_on_path
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import oscillation
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states.base import PlayContext, State, StateOutcome, my_op
 from agentrealm_agent.states.break_state import break_outcome
 from agentrealm_agent.states.explore import ExploreState
 from agentrealm_agent.states.intents import set_position
 from agentrealm_agent.states.travel import TravelState
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 # The module, not the ``dispatch`` function the package re-exports.
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")

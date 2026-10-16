@@ -4,20 +4,20 @@ chest applied once held, and an ``equip`` that applies nothing is dropped."""
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.executor.supply_refusals import NoopUse, Refusal, can_try, noop_situation, refusal_situation
-from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.pack import reserved_supplies
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.executor.supply_refusals import NoopUse, Refusal, can_try, noop_situation, refusal_situation
+from agentrealm_adk.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pack import reserved_supplies
 from agentrealm_agent.plan import Plan, collect_rejections, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.dispatch import PROBE_STATES
 from agentrealm_agent.states.equip import EquipState
 from agentrealm_agent.states.use_item import chest_to_apply
-from agentrealm_agent.supplies import chest_upgrade, used_on_self
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.supplies import chest_upgrade, used_on_self
+from agentrealm_adk.world import Entity, WorldModel
 
 USE_SELF = {"verb": "Use", "target": {"kind": "self"}}
 

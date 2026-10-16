@@ -40,19 +40,19 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from agentrealm_agent import config
-from agentrealm_agent.character_select import (
+from agentrealm_adk import config
+from agentrealm_adk.character_select import (
     DEFAULT_CREATE_AVATAR,
     DEFAULT_CREATE_NAME,
     CharacterSelectionError,
     create,
     resolve_character_id,
 )
-from agentrealm_agent.client import ApiError, Client
-from agentrealm_agent.executor import wait
-from agentrealm_agent.executor.movement import ticks_per_step
-from agentrealm_agent.pathing import flee_step
-from agentrealm_agent.world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.client import ApiError, Client
+from agentrealm_adk.executor import wait
+from agentrealm_adk.executor.movement import ticks_per_step
+from agentrealm_adk.pathing import flee_step
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 SELF_REFRESH = 60
 WINDOW_MARGIN = 0.05

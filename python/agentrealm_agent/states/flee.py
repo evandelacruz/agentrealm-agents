@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import dataclasses
 
-from ..directives import attack_forbidden
-from ..memory import Memory, queue_signal
-from ..navigation import cost_path, oscillation
-from ..pathing import flee_run, flee_step, grid_params, outruns, plan_sets, retreat_safe_goal, step_open
-from ..engagement import cannot_outrun, fights
-from ..fording import dropped_loadout, ford_gate, loadout_memory
-from ..survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
-from ..world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.directives import attack_forbidden
+from agentrealm_adk.memory import Memory, queue_signal
+from agentrealm_adk.navigation import cost_path, oscillation
+from agentrealm_adk.pathing import flee_run, flee_step, grid_params, outruns, plan_sets, retreat_safe_goal, step_open
+from agentrealm_adk.engagement import cannot_outrun, fights
+from agentrealm_adk.fording import dropped_loadout, ford_gate, loadout_memory
+from agentrealm_adk.survival import GAP_PROBE_TICKS, at_health_floor, combat_group, flee_from, is_attacker, on_safe_tile
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .fight import can_engage, engage, fight_target, in_weapon_reach

@@ -2,70 +2,33 @@
 
 from __future__ import annotations
 
-import argparse
 import json
-import os
 import sys
 import threading
 from pathlib import Path
 
-from . import config
-from .character_select import (
-    DEFAULT_CREATE_AVATAR,
-    DEFAULT_CREATE_NAME,
-    CharacterSelectionError,
-    create,
-    resolve_character_id,
-)
-from .client import ApiError, Client
-from .knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
-from .park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, install_stop_signals
-from .run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
+from agentrealm_adk import config
+from agentrealm_adk.character_select import CharacterSelectionError, create, resolve_character_id
+from agentrealm_adk.cli import parser, profile_parser, status
+from agentrealm_adk.client import ApiError, Client
+from agentrealm_adk.knowledge_base import KnowledgeBase, KnowledgeBaseError, load as load_knowledge, save as save_knowledge
+from agentrealm_adk.park import ABORT_JOIN_SECONDS, DEFAULT_PARK_SECONDS, PARK_SECONDS_HELP, install_stop_signals
+from agentrealm_adk.run_metrics import RunMetrics, compare_run_metrics, load_metrics_source, metrics_from_trace
+from agentrealm_adk.supplies import load_for_run as load_supplies
+
 from .runner import Runner
 from .strategist import PlannerConfigError, Strategist
-from .supplies import load_for_run as load_supplies
 
 # How long `run` waits for the driver thread to stop before saving, once it
 # has stopped waiting on the park phase (A66): the driver returned, or a
 # second signal set ``abort``.
 SHUTDOWN_JOIN_SECONDS = ABORT_JOIN_SECONDS
 
-# The reference runner's characters play the scripted model agent.
-DEFAULT_CREATE_MODEL = "agentrealm-reference/scripted"
-
-
-def _profile_parser() -> argparse.ArgumentParser:
-    """The profile operand and the flags that pick the character to play."""
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("profile", help="behavior profile .toml file")
-    p.add_argument(
-        "--character-id",
-        type=int,
-        default=None,
-        help="character id to play (overrides AGENTREALM_CHARACTER_ID)",
-    )
-    p.add_argument(
-        "--character-name",
-        default=None,
-        help="pick an existing character by name in the profile's world (overrides AGENTREALM_CHARACTER_ID)",
-    )
-    return p
-
-
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="agentrealm_agent", description="Reference agent for Agent Realm.")
-    ap.add_argument("--base-url", default=os.environ.get("AGENTREALM_BASE_URL", "https://api.agentrealm.gg"))
-    ap.add_argument("--api-key", default=os.environ.get("AGENTREALM_API_KEY", ""))
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    create_p = sub.add_parser("create", help="create a character in the profile's world and print its id")
-    create_p.add_argument("profile", help="behavior profile .toml file")
-    create_p.add_argument("--name", default=DEFAULT_CREATE_NAME, help="new character name")
-    create_p.add_argument("--avatar", default=DEFAULT_CREATE_AVATAR, help="outfit code")
-    create_p.add_argument("--model-agent", default=DEFAULT_CREATE_MODEL, help="model agent code")
+    ap, sub = parser("agentrealm_agent", "Reference agent for Agent Realm.")
 
     run_p = sub.add_parser(
-        "run", parents=[_profile_parser()], help="drive one character until interrupted, then park it on safe ground"
+        "run", parents=[profile_parser()], help="drive one character until interrupted, then park it on safe ground"
     )
     run_p.add_argument("--park-seconds", type=float, default=DEFAULT_PARK_SECONDS, help=PARK_SECONDS_HELP)
     run_p.add_argument(
@@ -73,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="test mode: play without the AI planner (the built-in plan from policy.goals)",
     )
-    sub.add_parser("status", parents=[_profile_parser()], help="print the character's self and position")
+    sub.add_parser("status", parents=[profile_parser()], help="print the character's self and position")
 
     # Offline: needs no key, so no --character-name. The operand is a trace, or
     # a profile plus --character-id to build the keyed trace path.
@@ -133,16 +96,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "status":
         return status(client, cfg, cid)
     return run(client, cfg, cid, planner, park_seconds=args.park_seconds)
-
-
-def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
-    try:
-        s = client.self_(cid)
-        print(f"{cfg.profile} ({cid}): lives={s['lives']} alive={s['alive']} placed={s['placed']}")
-    except ApiError as e:
-        print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
-        return 1
-    return 0
 
 
 def _metrics_from_path(path: Path) -> RunMetrics:

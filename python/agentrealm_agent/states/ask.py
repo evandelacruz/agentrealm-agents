@@ -11,14 +11,15 @@ above every state that asks, so a hold never stands taking hits.
 
 from __future__ import annotations
 
-from ..hostile_ground import held_by_hostile
-from ..break_memory import breakable_block, choice_at, given_up_blocks, straight_route
-from ..memory import queue_signal
-from ..navigation import cost_path
-from ..pathing import HostileReach, grid_params, plan_sets
+from agentrealm_adk.hostile_ground import held_by_hostile
+from agentrealm_adk.break_memory import breakable_block, choice_at, given_up_blocks, straight_route
+from agentrealm_adk.memory import queue_signal
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.pathing import HostileReach, grid_params, plan_sets
+from agentrealm_adk.survival import hostiles_reaching
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+
 from ..plan import GoalOp
-from ..survival import hostiles_reaching
-from ..world import Pos, WorldModel, chebyshev
 from .base import PlayContext, StateOutcome, op_walk
 
 

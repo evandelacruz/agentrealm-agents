@@ -6,13 +6,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, item_table as it
+from agentrealm_adk import config, item_table as it
 from agentrealm_agent.brain import Decision
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.healing import absorb_heal_pending
-from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.healing import absorb_heal_pending
+from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 OUT_OF_RANGE = {
     "outcome": "rejected",

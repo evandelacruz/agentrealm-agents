@@ -4,18 +4,18 @@ import random
 import unittest
 import unittest.mock
 
-from agentrealm_agent import healing
+from agentrealm_adk import healing
 from agentrealm_agent.brain import decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
-from agentrealm_agent.healing import absorb_heal_pending, hurt, note_heal_pending
-from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
-from agentrealm_agent.item_table import InventorySupply, carried_from_inventory
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
+from agentrealm_adk.healing import absorb_heal_pending, hurt, note_heal_pending
+from agentrealm_adk.executor.supply_refusals import Refusal, note_refusal, refusal_situation
+from agentrealm_adk.item_table import InventorySupply, carried_from_inventory
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 
 
 def grid(at=(1, 1), size=5) -> WorldModel:
@@ -174,7 +174,7 @@ class HealStateTest(unittest.TestCase):
         import threading
         from pathlib import Path
 
-        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_adk.config import CharacterConfig
         from agentrealm_agent.runner import Runner
 
         cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
@@ -265,7 +265,7 @@ class HealStateTest(unittest.TestCase):
 
     def test_heal_supplies_rearmed_by_a_full_heal_another_state_saw(self):
         # Review: a full heal seen while Fight or Flee held the round re-arms the ask.
-        from agentrealm_agent.healing import note_heal_window
+        from agentrealm_adk.healing import note_heal_window
 
         m = Memory(heal_supplies_asked=True)
         w = grid()
@@ -383,14 +383,14 @@ def open_ground(health: int):
 
 
 def line_ctx(plan=None, **params) -> PlayContext:
-    from agentrealm_agent.directives import PARAM_DEFAULTS
+    from agentrealm_adk.directives import PARAM_DEFAULTS
 
     policy = Policy(kind="scripted", goals=[], hostile=["npc"])
     return PlayContext(Memory(), policy, random.Random(0), params={**PARAM_DEFAULTS, **params}, plan=plan)
 
 
 def travel_plan():
-    from agentrealm_agent.directives import PARAM_DEFAULTS
+    from agentrealm_adk.directives import PARAM_DEFAULTS
     from agentrealm_agent.plan import Plan
 
     return Plan([dict(TRAVEL)], dict(PARAM_DEFAULTS))
@@ -447,7 +447,7 @@ class LowHealthLineTest(unittest.TestCase):
 
     def test_the_planner_may_only_raise_the_line(self):
         # A lower line drinks later: a loosening, like any survival param.
-        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_adk.directives import PARAM_DEFAULTS
         from agentrealm_agent.plan import apply_set_param, collect_rejections, validate_goal_op
 
         raised = {"op": "set_param", "name": "low_health", "value": 0.8}
@@ -461,7 +461,7 @@ class LowHealthLineTest(unittest.TestCase):
 
 def targets_committed(m: Memory, w: WorldModel):
     """Heal's only commitment, the food it walks to; no safe cell is ever one."""
-    from agentrealm_agent import targets
+    from agentrealm_adk import targets
 
     return targets.committed(m, w, "heal_food")
 
@@ -557,7 +557,7 @@ class HealWalkOpensItsPricedWayTest(unittest.TestCase):
         # block is Heal's: on its ground (the reach costly), bounded by stuck
         # detection, and its goal kept, so a hostile seen later replans it.
         from agentrealm_agent.states import heal
-        from agentrealm_agent.survival import hostile_reach
+        from agentrealm_adk.survival import hostile_reach
 
         w = ringed(grid(at=(0, 0), size=11), 11)
         w.zones[7] = {}

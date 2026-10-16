@@ -9,10 +9,10 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.world import Entity
+from agentrealm_adk import config
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.world import Entity
 from starter_agent import (
     StarterDecision,
     StarterMemory,

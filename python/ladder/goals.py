@@ -42,18 +42,18 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from agentrealm_agent.entrance_needs import lying_in_sight, meets
-from agentrealm_agent.level_order import target_level
-from agentrealm_agent.supplies import heal_of, is_potion
-from agentrealm_agent.targets import EXPLORE_ANYWHERE, GoalOp
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.entrance_needs import lying_in_sight, meets
+from agentrealm_adk.level_order import target_level
+from agentrealm_adk.supplies import heal_of, is_potion
+from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
+from agentrealm_adk.world import Entity, WorldModel
 
 from . import readiness as r
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentrealm_agent.knowledge_base import KnowledgeBase
+    from agentrealm_adk.knowledge_base import KnowledgeBase
 
 # How long a planner's ``cannot`` keeps a node blocked, in ticks (5 minutes at 10 Hz).
 BLOCK_TICKS = 3000

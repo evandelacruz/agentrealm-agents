@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 
 
 class ConfigTest(unittest.TestCase):

@@ -7,13 +7,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent import knowledge_base as kb_mod
+from agentrealm_adk import config
+from agentrealm_adk import knowledge_base as kb_mod
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.navigation import CostGridParams, cost_path
-from agentrealm_agent.navigation.rejection import (
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.navigation import CostGridParams, cost_path
+from agentrealm_adk.navigation.rejection import (
     OCCUPANT_LEARN_TICKS,
     NavMemory,
     learn_step_rejection,
@@ -22,7 +22,7 @@ from agentrealm_agent.navigation.rejection import (
 )
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient, rejected
 

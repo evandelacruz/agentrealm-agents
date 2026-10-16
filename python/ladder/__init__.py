@@ -1,10 +1,8 @@
 """Ladder Lorraine (``lorraine``, M14): the goal-tree agent (``docs/agents/lorraine.md``).
 
-She is built on Gary's plumbing in ``agentrealm_agent`` (client, world model,
-pathing, navigation, executor, supplies, knowledge base) and imports nothing
-from his planner or states: not ``strategist``, ``plan``, ``brain``,
-``runner`` or any ``states`` module. ``tests/test_architecture.py`` holds
-that line on the import closure of this package.
+She is built on the agent ADK in ``agentrealm_adk`` (client, world model,
+pathing, navigation, executor, supplies, knowledge base, the command line)
+and imports nothing of Gary's (``agentrealm_agent``).
 
 Her goal tree is ``goals`` (A139) and what it reads is ``readiness``; ``status``
 prints the tree's readiness. She still plays as Starter Stan does (sync, flee,

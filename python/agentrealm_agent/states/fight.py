@@ -11,20 +11,21 @@ from __future__ import annotations
 import dataclasses
 from collections import deque
 
-from ..directives import attack_forbidden
-from ..executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
-from ..executor.intents import step
-from ..executor.movement import direction_between
-from ..fording import rearm_ashore
-from ..knowledge_base import KnowledgeBase
-from ..navigation import cost_path
-from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
-from ..reach import weapon_reach
-from ..engagement import Engagement, fights, held_members
-from ..survival import RETREAT_NAV, at_health_floor, combat_group, is_hostile, on_safe_tile, pursuer_peaks
+from agentrealm_adk.directives import attack_forbidden
+from agentrealm_adk.executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
+from agentrealm_adk.executor.intents import step
+from agentrealm_adk.executor.movement import direction_between
+from agentrealm_adk.fording import rearm_ashore
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
+from agentrealm_adk.reach import weapon_reach
+from agentrealm_adk.engagement import Engagement, fights, held_members
+from agentrealm_adk.survival import RETREAT_NAV, at_health_floor, combat_group, is_hostile, on_safe_tile, pursuer_peaks
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import known_safe
+
 from ..plan import op_npc
-from ..world import Entity, Pos, WorldModel, chebyshev
-from ..zone_discovery import known_safe
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import set_position, use_npc, use_on
 from .way import clear_the_way

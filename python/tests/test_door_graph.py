@@ -7,17 +7,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent import knowledge_base as kb_mod
+from agentrealm_adk import config
+from agentrealm_adk import knowledge_base as kb_mod
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.level_order import MINIMAP_TRIES, landing_cell, minimap_due
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view, view_from_kb
-from agentrealm_agent.navigation import CostGridParams, doors_goal_path, route_first_leg
+from agentrealm_adk.level_order import MINIMAP_TRIES, landing_cell, minimap_due
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view, view_from_kb
+from agentrealm_adk.navigation import CostGridParams, doors_goal_path, route_first_leg
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import MapView, WorldModel
+from agentrealm_adk.world import MapView, WorldModel
 
 
 def _grid(rows: list[str], at=(0, 0), map_id=1, perception=25) -> WorldModel:

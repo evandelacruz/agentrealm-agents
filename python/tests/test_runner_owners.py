@@ -17,14 +17,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentrealm_agent.executor.held_queue import held_queue_matches, possible_positions
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_base.hostiles import load_hostiles, save_hostiles
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.executor.held_queue import held_queue_matches, possible_positions
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states.dispatch import PROBE_NEVER_KEEPS, probe_held_queue
-from agentrealm_agent.trace import Trace, fmt_submit, oscillation_detail, tick_detail
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.trace import Trace, fmt_submit, oscillation_detail, tick_detail
+from agentrealm_adk.world import WorldModel
 
 RUNNER_SOURCE = Path(__file__).resolve().parents[1] / "agentrealm_agent" / "runner.py"
 
@@ -139,7 +139,9 @@ class RunnerIsTheLoopTest(unittest.TestCase):
             self.assertNotIn(gone, src)
 
     def test_the_executor_imports_nothing_from_states(self):
-        for path in (RUNNER_SOURCE.parent / "executor").glob("*.py"):
+        executor = sorted((Path(__file__).resolve().parents[1] / "agentrealm_adk" / "executor").glob("*.py"))
+        self.assertTrue(executor, "no executor source found: the check would pass on nothing")
+        for path in executor:
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.ImportFrom):
                     modules = [node.module or ""] + [f"{node.module or ''}.{a.name}" for a in node.names]

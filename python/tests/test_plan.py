@@ -9,12 +9,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import note_goto_reached, path_for_plan_op, path_owned_by, replan
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import note_goto_reached, path_for_plan_op, path_owned_by, replan
 from agentrealm_agent.plan import (
     EXPLORE_ANYWHERE,
     MAX_WAIT_SECONDS,
@@ -31,9 +31,9 @@ from agentrealm_agent.plan import (
 )
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.item_table import InventorySupply
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_agent.states.base import StateOutcome
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 from tests.test_cost_grid import grid
 from tests.test_runner import FakeClient
 
@@ -191,8 +191,8 @@ class GoalStackTest(unittest.TestCase):
         self.assertEqual(out.state, "Travel")
 
     def test_travel_shop_paths_to_a_known_cell(self):
-        from agentrealm_agent.knowledge_base import KnowledgeBase
-        from agentrealm_agent.travel.knowledge import record_shop_cell
+        from agentrealm_adk.knowledge_base import KnowledgeBase
+        from agentrealm_adk.travel.knowledge import record_shop_cell
 
         kb = KnowledgeBase.empty("sandbox")
         record_shop_cell(kb, 1, (3, 0))
@@ -205,8 +205,8 @@ class GoalStackTest(unittest.TestCase):
         self.assertEqual(m.path[-1], (3, 0))
 
     def test_travel_shop_pops_at_a_bought_out_known_cell(self):
-        from agentrealm_agent.knowledge_base import KnowledgeBase
-        from agentrealm_agent.travel.knowledge import record_shop_cell
+        from agentrealm_adk.knowledge_base import KnowledgeBase
+        from agentrealm_adk.travel.knowledge import record_shop_cell
 
         kb = KnowledgeBase.empty("sandbox")
         record_shop_cell(kb, 1, (3, 0))
@@ -519,7 +519,7 @@ class PathForPlanOpTest(unittest.TestCase):
                                            Policy(kind="scripted"), set(), set(), None))
 
     def test_compose_goal_done_when_whole_held(self):
-        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_adk.item_table import InventorySupply
 
         op = {"op": "compose", "composes_into": "master_key"}
         w = WorldModel(character_id=1, map_id=1, pos=(0, 0))
@@ -676,7 +676,7 @@ class SymbolicTravelTest(unittest.TestCase):
         self.assertIsNotNone(validate_goal_op({"op": "travel", "to": "shop", "x": 3, "y": 4}))
 
     def test_a_town_op_without_coordinates_resolves_to_town(self):
-        from agentrealm_agent.travel.ops import travel_op_from_plan_goal
+        from agentrealm_adk.travel.ops import travel_op_from_plan_goal
 
         op = validate_goal_op({"op": "travel", "to": "town"})
         self.assertEqual(travel_op_from_plan_goal(op).to, "town")

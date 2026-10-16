@@ -6,9 +6,9 @@ Field names match https://agentrealm.gg/docs/api — wrong shapes are rejected a
 
 from __future__ import annotations
 
-from ..executor import arm_then_use, attack_cooldown_ticks, queue_horizon_intents
-from ..memory import Memory
-from ..world import Entity, Pos, WorldModel
+from agentrealm_adk.executor import arm_then_use, attack_cooldown_ticks, queue_horizon_intents
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.world import Entity, Pos, WorldModel
 
 
 def set_position(p: Pos) -> dict:

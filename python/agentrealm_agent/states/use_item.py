@@ -9,15 +9,16 @@ item does nothing; only its ``Use`` applies it.
 
 from __future__ import annotations
 
-from ..equip import weapon_to_rearm
-from ..executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
-from ..healing import in_combat, spend_potion, walk_seconds
-from ..item_table import InventorySupply
-from ..memory import Memory
+from agentrealm_adk.equip import weapon_to_rearm
+from agentrealm_adk.executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
+from agentrealm_adk.healing import in_combat, spend_potion, walk_seconds
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.supplies import BLOCK_FOOD, chest_capacity, chest_upgrade, heal_of, is_potion, used_on_self
+from agentrealm_adk.survival import hostiles_in_range
+from agentrealm_adk.world import WorldModel
+
 from ..plan import Plan
-from ..supplies import BLOCK_FOOD, chest_capacity, chest_upgrade, heal_of, is_potion, used_on_self
-from ..survival import hostiles_in_range
-from ..world import WorldModel
 from .base import PlayContext, State, StateOutcome, my_op
 from .food import food_route
 from .intents import arm_and_use, use_self

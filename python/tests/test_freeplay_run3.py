@@ -12,13 +12,13 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import SAFE_UNREACHABLE_TICKS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import SAFE_UNREACHABLE_TICKS
 from agentrealm_agent.states import dispatch
-from agentrealm_agent.travel import sync_town
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.travel import sync_town
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 from tests.test_survival_runs import MAP, ctx, hit, world
 
 STUCK = (6, 10)  # nearer than OPEN to the agent at (10, 10)

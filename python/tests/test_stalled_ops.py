@@ -8,14 +8,14 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent import runner as runner_module
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.stalled import (
+from agentrealm_adk.stalled import (
     STALLED_KEPT,
     below_progress,
     find,
@@ -28,7 +28,7 @@ from agentrealm_agent.stalled import (
 )
 from agentrealm_agent.states.dispatch import dispatch
 from agentrealm_agent.strategist import system_prompt
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 from tests.test_strategist import FakeLLM, fake_runner, make, round_trip, state_of
 from tests.test_travel import ctx_for, grid, travel_plan
 

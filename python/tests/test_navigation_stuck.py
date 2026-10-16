@@ -6,21 +6,21 @@ import json
 import random
 import unittest
 
-from agentrealm_agent.executor.constants import DEFAULT_TICK_RATE_HZ
+from agentrealm_adk.executor.constants import DEFAULT_TICK_RATE_HZ
 from agentrealm_agent.plan import PLAN_STALL_SECONDS
 from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
-from agentrealm_agent.navigation import CostGridParams
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.navigation.planner import FOG
-from agentrealm_agent.pathing import escalation_step, guided_step, path_for_plan_op, replan
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
+from agentrealm_adk.navigation import CostGridParams
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.navigation.planner import FOG
+from agentrealm_adk.pathing import escalation_step, guided_step, path_for_plan_op, replan
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 from tests.fixtures.navigation import grids, sim
 from tests.test_cost_grid import grid
 from tests.test_recover import apply_zone, ctx, died_at, world

@@ -12,23 +12,23 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent import supplies
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import decide
-from agentrealm_agent.equip import best_equip_upgrade, never_worn
-from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
-from agentrealm_agent.loot import learn_chest_upgrade
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.survival import (
+from agentrealm_adk import supplies
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.engagement import decide
+from agentrealm_adk.equip import best_equip_upgrade, never_worn
+from agentrealm_adk.item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
+from agentrealm_adk.loot import learn_chest_upgrade
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.survival import (
     health_floor,
     hit_damage,
     hostile_swing_damage,
     win_ratio,
     worn_defense,
 )
-from agentrealm_agent.threat import UNMEASURED_DEFAULT, ThreatTable, absorb_damaged
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.threat import UNMEASURED_DEFAULT, ThreatTable, absorb_damaged
+from agentrealm_adk.world import Entity, WorldModel
 
 CODE = "fake_biter"
 KEY = ("npc", CODE)

@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan, goal_done
-from agentrealm_agent.world import WorldModel, ZoneFact
+from agentrealm_adk.world import WorldModel, ZoneFact
 
 POTIONS = [InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion"), InventorySupply(5, "small_potion")]
 

@@ -11,12 +11,14 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import acceptance_smoke, config
+from agentrealm_adk import config
+
+from agentrealm_agent import acceptance_smoke
 from agentrealm_agent.m11_acceptance import TARGET_SECONDS, M11AcceptanceMetrics
 from agentrealm_agent.acceptance_survival import OSCILLATION_ABORT_COUNT
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.strategist import Strategist
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 from tests.test_m7_acceptance import OVERWORLD, decide, gave_up, metrics as m7_metrics, open_world
 
 REPO = Path(__file__).resolve().parents[2]

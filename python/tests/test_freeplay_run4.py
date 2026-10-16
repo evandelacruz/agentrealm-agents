@@ -19,22 +19,22 @@ import random
 import unittest
 
 from agentrealm_agent.brain import walkable_prefix
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.executor.movement import direction_between
-from agentrealm_agent.gem_yield import KEY as GEM_YIELD, VERSION as GEM_YIELD_VERSION, region_key
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.navigation import planner
-from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, _toward, cost_path, macro_cell
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.executor.movement import direction_between
+from agentrealm_adk.gem_yield import KEY as GEM_YIELD, VERSION as GEM_YIELD_VERSION, region_key
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.navigation import planner
+from agentrealm_adk.navigation.planner import CostGridParams, NavSearchState, _toward, cost_path, macro_cell
 from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.pathing import route_ahead
+from agentrealm_adk.pathing import route_ahead
 from agentrealm_agent.states.detour import detour_find, extra_steps
 from agentrealm_agent.states.retreat import no_progress
-from agentrealm_agent.travel import sync_town
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.travel import sync_town
+from agentrealm_adk.world import Entity, WorldModel
 
 from tests.test_strategist import FakeLLM, fake_runner, make, round_trip
 
@@ -345,7 +345,7 @@ class GatherArrivalClockTest(unittest.TestCase):
     """Gather writes ``Memory.gather_in_region`` itself: the clock runs from its last nearer step or its arrival."""
 
     def test_the_clock_runs_from_the_last_approach_or_arrival(self):
-        from agentrealm_agent.gem_yield import GemYieldTracker, STALL_SECONDS
+        from agentrealm_adk.gem_yield import GemYieldTracker, STALL_SECONDS
         from agentrealm_agent.states import gather_outcome
 
         w, m = open_field(at=(30, 5), size=48), Memory()
@@ -392,9 +392,9 @@ class RetreatWindowPausedTest(unittest.TestCase):
 
     def test_a_losing_retreat_that_drinks_marks_the_pause(self):
         """Through ``retreat_step``: the drink it sends instead of a step pauses its safe walk's window."""
-        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_adk.item_table import InventorySupply
         from agentrealm_agent.states.retreat import RETREAT_PROBE_TICKS
-        from agentrealm_agent.zone_discovery import apply_zone
+        from agentrealm_adk.zone_discovery import apply_zone
         from tests.test_survival_runs import MAP as SURVIVAL_MAP, ctx as survival_ctx, hit, world
 
         w, c = world(health=4), survival_ctx(on_hostile="fight")

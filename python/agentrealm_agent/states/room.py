@@ -8,9 +8,10 @@ all come here.
 
 from __future__ import annotations
 
-from ..loot import Pickup
-from ..pack import DROP, MOVE, TAKE, Room, drop_spot, make_room
-from ..world import WorldModel
+from agentrealm_adk.loot import Pickup
+from agentrealm_adk.pack import DROP, MOVE, TAKE, Room, drop_spot, make_room
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, StateOutcome, top_op
 from .intents import drop, set_position, take
 

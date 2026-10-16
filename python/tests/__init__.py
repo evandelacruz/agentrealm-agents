@@ -48,7 +48,7 @@ def _watch_real_state(event, args):
 
 sys.addaudithook(_watch_real_state)
 
-from agentrealm_agent import config, knowledge_base, supplies  # noqa: E402  (after the env override above)
+from agentrealm_adk import config, knowledge_base, supplies  # noqa: E402  (after the env override above)
 
 REAL_FETCH = supplies.fetch  # for the test of fetch itself
 mock.patch.object(supplies, "fetch", lambda *args, **kwargs: None).start()

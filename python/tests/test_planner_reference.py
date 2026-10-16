@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from agentrealm_agent.directives import Directives, PARAM_DEFAULTS
+from agentrealm_adk.directives import Directives, PARAM_DEFAULTS
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.planner_reference import (
+from agentrealm_adk.planner_reference import (
     CORE_SECTIONS,
     REFERENCE_PATH,
     missing_sections,
@@ -21,7 +21,7 @@ from agentrealm_agent.planner_reference import (
     split_sections,
 )
 from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, estimate_tokens
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "refresh_planner_reference.py"

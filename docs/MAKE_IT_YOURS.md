@@ -56,7 +56,7 @@ That one line in `REFLEXES` or `EXECUTORS` is the switch: a state that is not in
 
 ## Reading the world
 
-**World model** (`python/agentrealm_agent/world.py`) — what this run has seen:
+**World model** (`python/agentrealm_adk/world.py`) — what this run has seen:
 
 - `world.pos`, `world.map_id`, `world.alive`, `world.health`, `world.tick`
 - `world.view.tiles` — ground and blocks in cached terrain
@@ -71,7 +71,7 @@ That one line in `REFLEXES` or `EXECUTORS` is the switch: a state that is not in
 - `ctx.directives` — hot-reloaded `characters/<name>.directives.toml`
 - `ctx.plan` — strategist goal stack when present
 
-**Knowledge base** — survives across runs for the same world (`python/agentrealm_agent/knowledge_base/`). Use `knowledge_items(kb)` for the shared `items` section (weapon stats, shop prices). Example: `investigation.spoken_npc_ids(kb)` and `mark_npc_spoken` (called by the runner after a successful `Say`) so you do not greet the same NPC twice. Door warps and read cells work the same way (`knowledge_maps.py`, `investigation.py`).
+**Knowledge base** — survives across runs for the same world (`python/agentrealm_adk/knowledge_base/`). Use `knowledge_items(kb)` for the shared `items` section (weapon stats, shop prices). Example: `investigation.spoken_npc_ids(kb)` and `mark_npc_spoken` (called by the runner after a successful `Say`) so you do not greet the same NPC twice. Door warps and read cells work the same way (`knowledge_maps.py`, `investigation.py`).
 
 Pathing helpers (`navigation/`, `pathing.py`, `explore.py`) build steps when you need to walk somewhere; reuse `set_position(step)` from `states/intents.py`.
 

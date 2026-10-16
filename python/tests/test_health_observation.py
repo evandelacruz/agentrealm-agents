@@ -2,7 +2,7 @@
 
 import unittest
 
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 
 def complete(**snap):

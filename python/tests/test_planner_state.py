@@ -8,19 +8,19 @@ import unittest
 import unittest.mock
 from types import SimpleNamespace
 
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory, queue_signal
-from agentrealm_agent.navigation import entrance_routes
-from agentrealm_agent.navigation import planner as P
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory, queue_signal
+from agentrealm_adk.navigation import entrance_routes
+from agentrealm_adk.navigation import planner as P
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.shop import note_shop_result, sync_shop
 from agentrealm_agent.states.shop import shop_outcome
 from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, eaten_on_pickup_line, held_line, no_seller_line
-from agentrealm_agent.sellers import SELLER_ITEMS_SHOWN, sellers_line
-from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.sellers import SELLER_ITEMS_SHOWN, sellers_line
+from agentrealm_adk.travel.knowledge import entrance_key, record_shop_cell
+from agentrealm_adk.world import Entity, WorldModel
 
 from .test_strategist import FakeLLM, fake_runner, make, round_trip
 

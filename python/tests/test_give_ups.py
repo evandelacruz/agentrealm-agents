@@ -11,15 +11,15 @@ from __future__ import annotations
 import json
 import unittest
 
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.strategist import build_prompt
-from agentrealm_agent.travel.resolve import given_up_travel
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.travel.resolve import given_up_travel
+from agentrealm_adk.world import WorldModel
 from tests.test_strategist import FakeLLM, fake_runner, make, round_trip
 from tests.test_survival_runs import MAP, ctx, world
 

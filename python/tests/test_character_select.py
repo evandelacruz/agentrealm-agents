@@ -7,9 +7,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import __main__ as cli, config
-from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id
-from agentrealm_agent.client import ApiError
+from agentrealm_adk import config
+
+from agentrealm_agent import __main__ as cli
+from agentrealm_adk.character_select import CharacterSelectionError, resolve_character_id
+from agentrealm_adk.client import ApiError
 
 
 class ResolveCharacterIdTest(unittest.TestCase):

@@ -9,18 +9,18 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .config import Policy
-from .directives import PARAM_DEFAULTS, _valid_param
-from .healing import supply_matches
-from .fragments import holds_whole
-from .executor.constants import DEFAULT_TICK_RATE_HZ
-from .passage import went_through
-from .memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
-from .stalled import below_progress, find as find_stalled, forget as forget_stalled
-from .supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
-from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
-from .travel.ops import parse_travel_string, travel_op_from_plan_goal
-from .world import DOORS, Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, _valid_param
+from agentrealm_adk.healing import supply_matches
+from agentrealm_adk.fragments import holds_whole
+from agentrealm_adk.executor.constants import DEFAULT_TICK_RATE_HZ
+from agentrealm_adk.passage import went_through
+from agentrealm_adk.memory import Memory, note_goal_done, note_goal_failed, note_goal_stalled
+from agentrealm_adk.stalled import below_progress, find as find_stalled, forget as forget_stalled
+from agentrealm_adk.supplies import CAPABILITIES, chest_applied, eaten_on_pickup, used_on_self
+from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
+from agentrealm_adk.travel.ops import parse_travel_string, travel_op_from_plan_goal
+from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 
 log = logging.getLogger(__name__)
 

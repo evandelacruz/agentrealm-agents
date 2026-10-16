@@ -6,11 +6,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
 from agentrealm_agent.brain import Memory, choose_call
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.poll_cadence import calm_poll_interval, gate_tick_call, hostile_within, is_urgent
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.poll_cadence import calm_poll_interval, gate_tick_call, hostile_within, is_urgent
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def world(at=(5, 5), tick=20) -> WorldModel:

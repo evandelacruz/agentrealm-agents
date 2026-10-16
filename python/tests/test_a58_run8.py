@@ -13,15 +13,15 @@ goto, then Explore must walk west into the fog and keep going.
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 GOTO = (11, 0)
 WEST_END = -60  # the corridor runs on into the fog this far

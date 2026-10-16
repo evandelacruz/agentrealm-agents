@@ -29,10 +29,10 @@ REPO = Path(__file__).resolve().parents[1]
 PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
-from agentrealm_agent import config  # noqa: E402
+from agentrealm_adk import config  # noqa: E402
 from agentrealm_agent.acceptance_smoke import DEFAULT_BASE, NO_PLANNER_HELP, STOP_ON_DEATH_HELP, add_park_argument, alive_at_end_failures, navigation_start, pin_goto, planner_for, run_acceptance_smoke, wake  # noqa: E402
-from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
-from agentrealm_agent.client import ApiError, Client  # noqa: E402
+from agentrealm_adk.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
+from agentrealm_adk.client import ApiError, Client  # noqa: E402
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, TARGET_SECONDS, M7AcceptanceMetrics  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError  # noqa: E402
 

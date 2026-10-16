@@ -4,7 +4,7 @@
 Downloads https://agentrealm.gg/docs and https://agentrealm.gg/guides and
 every page they link under ``/docs`` and ``/guides``, turns each page's
 article into compact Markdown, and writes
-``python/agentrealm_agent/reference/agentrealm_reference.md``. The planner
+``python/agentrealm_adk/reference/agentrealm_reference.md``. The planner
 reads that file at start, so play never fetches the website.
 
     python3 scripts/refresh_planner_reference.py
@@ -26,7 +26,7 @@ from pathlib import Path
 
 SITE = "https://agentrealm.gg"
 ROOTS = ("/docs", "/guides")
-OUT = Path(__file__).resolve().parent.parent / "python" / "agentrealm_agent" / "reference" / "agentrealm_reference.md"
+OUT = Path(__file__).resolve().parent.parent / "python" / "agentrealm_adk" / "reference" / "agentrealm_reference.md"
 USER_AGENT = "agentrealm-agents-reference-refresh/1"
 
 SKIP_TAGS = {"script", "style", "nav", "header", "footer", "svg", "button", "form", "noscript", "head"}
@@ -254,7 +254,7 @@ def render(pages: list[tuple[str, str, str]], fetched: dt.date) -> str:
 def check_core(text: str) -> None:
     """Stop before writing when a core or last section the planner names is gone (a renamed heading)."""
     sys.path.insert(0, str(OUT.parents[2]))
-    from agentrealm_agent.planner_reference import CORE_SECTIONS, LAST_SECTIONS, missing_sections, split_sections
+    from agentrealm_adk.planner_reference import CORE_SECTIONS, LAST_SECTIONS, missing_sections, split_sections
 
     missing = missing_sections(split_sections(text))
     if missing:

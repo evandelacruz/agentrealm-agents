@@ -12,23 +12,23 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent import targets
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.investigation import mark_cell_read
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk import targets
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.investigation import mark_cell_read
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states.detour import GEM_PILE_STEPS, extra_steps
 from agentrealm_agent.states.explore import explore_outcome
 from agentrealm_agent.states.level import ENTRANCE_GOAL
 from agentrealm_agent.states.travel import TRAVEL_TARGET, resolve_destination
-from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.travel.knowledge import entrance_key, record_shop_cell
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 from tests.test_strategist import WAIT_ANSWER, FakeLLM, fake_runner, make, round_trip
 
@@ -134,9 +134,9 @@ class NearerCandidateTest(unittest.TestCase):
     def test_a_frontier_with_no_path_is_let_go_after_miss_limit(self):
         from unittest import mock
 
-        from agentrealm_agent import pathing
-        from agentrealm_agent.navigation.planner import CostGridParams
-        from agentrealm_agent.navigation.stuck import Leg
+        from agentrealm_adk import pathing
+        from agentrealm_adk.navigation.planner import CostGridParams
+        from agentrealm_adk.navigation.stuck import Leg
 
         w, m = field(fog=True, at=(10, 4)), Memory()
         far, near = (19, 4), (1, 4)
@@ -171,9 +171,9 @@ class NearerCandidateTest(unittest.TestCase):
     def test_a_frontier_proven_walled_in_is_let_go_at_once(self):
         from unittest import mock
 
-        from agentrealm_agent import pathing
-        from agentrealm_agent.navigation.planner import CostGridParams
-        from agentrealm_agent.navigation.stuck import Leg
+        from agentrealm_adk import pathing
+        from agentrealm_adk.navigation.planner import CostGridParams
+        from agentrealm_adk.navigation.stuck import Leg
 
         w, m = field(fog=True, at=(10, 4)), Memory()
         far, near = (19, 4), (1, 4)
@@ -289,7 +289,7 @@ class NearerCandidateTest(unittest.TestCase):
         import threading
         from pathlib import Path
 
-        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_adk.config import CharacterConfig
         from agentrealm_agent.runner import Runner
 
         cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))

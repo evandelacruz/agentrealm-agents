@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.break_memory import (
+from agentrealm_adk import config
+from agentrealm_adk.break_memory import (
     BREAK_GOAL,
     attempt_failed,
     attempt_open,
@@ -24,21 +24,21 @@ from agentrealm_agent.break_memory import (
     pick_supply_for_capability,
     record_attempt,
 )
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import grid_params
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import grid_params
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.break_state import BreakState
 from agentrealm_agent.states.escape import EscapeState
 from agentrealm_agent.states.intents import arm, use_block
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 class BreakMemoryTest(unittest.TestCase):

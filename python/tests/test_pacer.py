@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
-from agentrealm_agent.client import ApiError, Client
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.pacer import BURST, Pacer, Pacers
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
+from agentrealm_adk.client import ApiError, Client
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.pacer import BURST, Pacer, Pacers
 
 CID = 7
 HZ = 10

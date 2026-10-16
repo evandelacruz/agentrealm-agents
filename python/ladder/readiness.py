@@ -29,15 +29,15 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from agentrealm_agent.discovery import seen_prices
-from agentrealm_agent.entrance_needs import lying_in_sight, meets, unmet_need
-from agentrealm_agent.equip import hunting_ceiling, weapon_rank
-from agentrealm_agent.healing import held_heal
-from agentrealm_agent.knowledge_maps import map_level_known
-from agentrealm_agent.level_order import CLEARED, entrance_rank, target_level
-from agentrealm_agent.sellers import sellers_of
-from agentrealm_agent.supplies import armor_defense, heal_of, heals, is_weapon, sold_codes, worn_slot
-from agentrealm_agent.survival import (
+from agentrealm_adk.discovery import seen_prices
+from agentrealm_adk.entrance_needs import lying_in_sight, meets, unmet_need
+from agentrealm_adk.equip import hunting_ceiling, weapon_rank
+from agentrealm_adk.healing import held_heal
+from agentrealm_adk.knowledge_maps import map_level_known
+from agentrealm_adk.level_order import CLEARED, entrance_rank, target_level
+from agentrealm_adk.sellers import sellers_of
+from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_weapon, sold_codes, worn_slot
+from agentrealm_adk.survival import (
     FIGHT_REACH_RADIUS,
     UNKILLED_HOSTILE_HEALTH,
     estimate_health,
@@ -46,11 +46,11 @@ from agentrealm_agent.survival import (
     ticks_to_kill_them,
     worn_defense,
 )
-from agentrealm_agent.travel.knowledge import iter_entrances, iter_shop_sales
-from agentrealm_agent.world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_sales
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
-    from agentrealm_agent.knowledge_base import KnowledgeBase
+    from agentrealm_adk.knowledge_base import KnowledgeBase
 
 # The value-to-risk rule: the share of health plus held heals a goal may be
 # expected to cost, by what the goal is worth. A valuable goal (a level, which

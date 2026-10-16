@@ -7,13 +7,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import Decision
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.shop import (
@@ -26,10 +26,10 @@ from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.plan import parse_directives_goals, validate_goal_op
-from agentrealm_agent.sellers import Seller, lapse_not_sold, refuse_unsold, sellers_of
-from agentrealm_agent.travel import record_shop_cell
-from agentrealm_agent.travel.knowledge import iter_not_sold, iter_shop_sales
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.sellers import Seller, lapse_not_sold, refuse_unsold, sellers_of
+from agentrealm_adk.travel import record_shop_cell
+from agentrealm_adk.travel.knowledge import iter_not_sold, iter_shop_sales
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def world(at=(1, 1)) -> WorldModel:

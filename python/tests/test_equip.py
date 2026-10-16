@@ -7,10 +7,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.equip import (
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.equip import (
     best_equip_upgrade,
     compare,
     damage_per_second,
@@ -20,16 +20,16 @@ from agentrealm_agent.equip import (
     sync_refusals,
     wear_slot,
 )
-from agentrealm_agent.item_table import FragmentMeta, InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_hunting_zone
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.item_table import FragmentMeta, InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_hunting_zone
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.survival import attack_interval_ticks, swing_damage
-from agentrealm_agent.threat import ThreatTable
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.survival import attack_interval_ticks, swing_damage
+from agentrealm_adk.threat import ThreatTable
+from agentrealm_adk.world import WorldModel
 
 
 def equip_plan(**op) -> Plan:

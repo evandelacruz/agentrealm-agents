@@ -26,19 +26,20 @@ stands outside every level.
 
 from __future__ import annotations
 
-from .. import targets as targets_mod
-from ..config import Policy
-from ..entrance_needs import meets, unmet_need, why_refused
-from ..loot import Pickup, loot_score
-from ..pack import TAKE
-from ..passage import went_through
-from ..knowledge_base import KnowledgeBase, knowledge_items
-from ..memory import Memory
-from ..navigation import cost_path, doors_goal_path, nearest_target
-from ..navigation import stuck as nav_stuck
-from ..pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
-from ..level_order import op_barred_level, target_level, way_out
-from ..world import DOORS, Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk import targets as targets_mod
+from agentrealm_adk.config import Policy
+from agentrealm_adk.entrance_needs import meets, unmet_need, why_refused
+from agentrealm_adk.loot import Pickup, loot_score
+from agentrealm_adk.pack import TAKE
+from agentrealm_adk.passage import went_through
+from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import cost_path, doors_goal_path, nearest_target
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import bounded_step, grid_params, guided_step, nav_search, next_step, plan_sets
+from agentrealm_adk.level_order import op_barred_level, target_level, way_out
+from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome, my_op, op_walk, top_op
 from .intents import set_position, take
 from .room import room_for

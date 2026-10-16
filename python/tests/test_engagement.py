@@ -12,18 +12,18 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import BREAK_EVEN, CHASE_PROBE_TICKS, fight_bar, fights, sync_engagement
-from agentrealm_agent.hostile_ground import Danger, danger
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.engagement import BREAK_EVEN, CHASE_PROBE_TICKS, fight_bar, fights, sync_engagement
+from agentrealm_adk.hostile_ground import Danger, danger
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.detour import Detour, detour_find
 from agentrealm_agent.states.fight import held_target
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.survival import should_retreat, win_ratio
-from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
+from agentrealm_adk.survival import should_retreat, win_ratio
+from agentrealm_adk.world import Entity, Sighting, WorldModel, chebyshev
 
 MAP = 1
 CODE = "fake_biter"

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import random
 
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 RADIUS = 100  # known ground is roughly the disc of this radius round START
 START = (400, 400)

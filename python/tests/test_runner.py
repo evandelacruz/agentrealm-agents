@@ -7,15 +7,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import Decision, Memory, choose_call, use_on
-from agentrealm_agent.client import ApiError, Client
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.executor import step_landing
+from agentrealm_adk.client import ApiError, Client
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.executor import step_landing
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states.intents import set_position, take
-from agentrealm_agent.threat import type_key_for_entity
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.threat import type_key_for_entity
+from agentrealm_adk.world import Entity, WorldModel
 
 
 class FakeClient:
@@ -211,8 +211,8 @@ class RunnerTest(unittest.TestCase):
     def test_say_to_an_npc_is_remembered_by_its_top_level_npc_id(self):
         # Say names an NPC by npc_id, not a target (API rules § Say); an
         # applied one is spoken, a rejected one counts against the item.
-        from agentrealm_agent.investigation import say_key, spoken_npc_ids
-        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_adk.investigation import say_key, spoken_npc_ids
+        from agentrealm_adk.knowledge_base import KnowledgeBase
         from agentrealm_agent.states.intents import say_to
 
         r = self.runner(FakeClient([]), Policy(goals=[]))

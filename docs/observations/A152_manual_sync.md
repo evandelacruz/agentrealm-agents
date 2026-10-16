@@ -8,7 +8,7 @@ Line numbers are on this PR's head. "M §11 X" is Manual §11, sub-heading X; "S
 
 | # | Topic | Where | The code | The Manual | Action |
 |---|---|---|---|---|---|
-| 1 | Walkable types | `python/agentrealm_agent/world.py:26` | `WALKABLE` grass, dirt, tile, fire, lava; doors warp; unknown types blocked | M §9.2: the same table; "Treat an unknown type as not walkable" | agrees |
+| 1 | Walkable types | `python/agentrealm_adk/world.py:26` | `WALKABLE` grass, dirt, tile, fire, lava; doors warp; unknown types blocked | M §9.2: the same table; "Treat an unknown type as not walkable" | agrees |
 | 2 | Water | `world.py:26-36`, `fording.py` | Water walkable only with a fording supply armed or worn; the raft is armed, sandals worn | M §11 Movement: a raft is armed, never worn (`Wear` is `not_wearable`); a worn fording supply leaves the armed slot free | agrees |
 | 3 | `?` cells | `world.py:37`, `apply_terrain` | A `?` inside the map is unknown; past the edge it is `VOID`; State map legend `"_": "no ground"` (`strategist.py:952`) | M §9.2: "`?` is clouds: never seen, or past the map's edge. Treat it as unknown, not as empty" | agrees (past the edge is never walkable either way) |
 | 4 | Minimap fields | `world.py` `apply_minimap`, `travel/knowledge.py` `sync_entrances` | Reads `map_id`, `map_width`, `map_height`, `level`, `entrances` | M §5.3 `GET minimap`: those fields; `level` only on a map that belongs to a level | agrees |

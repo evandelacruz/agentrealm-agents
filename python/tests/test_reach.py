@@ -9,15 +9,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import Memory, choose_call
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.reach import NEAR, in_reach_from, intent_reach
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.reach import NEAR, in_reach_from, intent_reach
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states.intents import arm, take, use_block, use_npc, use_self, withdraw
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def world() -> WorldModel:

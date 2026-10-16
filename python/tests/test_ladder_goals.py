@@ -7,13 +7,13 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.survival import expected_damage, ticks_to_kill_them
-from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell
-from agentrealm_agent.world import Entity, Sighting, WorldModel
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.survival import expected_damage, ticks_to_kill_them
+from agentrealm_adk.travel.knowledge import entrance_key, record_shop_cell
+from agentrealm_adk.world import Entity, Sighting, WorldModel
 from ladder import goals, readiness
 from ladder.goals import Blocks, find, walk
 from tests.test_starter_agent import FakeClient
@@ -414,7 +414,7 @@ class StatusTest(unittest.TestCase):
         client.self_ = lambda cid: {"lives": 1, "alive": True, "placed": True, "health": 7, "max_health": 10}
         client.world = lambda cid: {"code": "sandbox", "tick_rate_hz": 1, "level_count": 3}
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(config, "STATE_DIR", Path(tmp)), mock.patch(
-            "agentrealm_agent.knowledge_base.WORLDS_DIR", Path(tmp) / "worlds"
+            "agentrealm_adk.knowledge_base.WORLDS_DIR", Path(tmp) / "worlds"
         ):
             out = io.StringIO()
             with redirect_stdout(out):

@@ -13,10 +13,10 @@ character walks first is ``hostile_ground.is_safe_ish`` (``safe_explore_path``).
 
 from __future__ import annotations
 
-from ..config import Policy
-from ..hostile_ground import Danger, danger, gather_bar, zone_cells
-from ..survival import hostile_reach, is_hostile
-from ..world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.config import Policy
+from agentrealm_adk.hostile_ground import Danger, danger, gather_bar, zone_cells
+from agentrealm_adk.survival import hostile_reach, is_hostile
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 
 def gather_ground(w: WorldModel, pos: Pos, policy: Policy, d: Danger | None = None) -> bool:

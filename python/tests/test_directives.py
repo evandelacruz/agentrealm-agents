@@ -8,8 +8,8 @@ import unittest
 from pathlib import Path
 
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import (
     PARAM_DEFAULTS,
     DirectivesWatch,
     attack_forbidden,
@@ -17,7 +17,7 @@ from agentrealm_agent.directives import (
     load_directives,
     use_blocked_by_never_attack,
 )
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 
 class ParamTest(unittest.TestCase):
@@ -81,7 +81,7 @@ class ReloadTest(unittest.TestCase):
             self._write(p, 'never_attack = ["character"]\n', 1_000_000)
             self.assertTrue(watch.maybe_reload())
             self._write(p, 'never_attack = ["character"\n', 1_000_010)
-            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+            with self.assertLogs("agentrealm_adk.directives", "WARNING"):
                 self.assertFalse(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["character"])
             self.assertFalse(watch.maybe_reload())
@@ -97,7 +97,7 @@ class ReloadTest(unittest.TestCase):
             self.assertTrue(watch.maybe_reload())
             # Broken edit and its fix both land on the last good mtime.
             self._write(p, 'never_attack = ["character", "goblin"\n', 1_000_000)
-            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+            with self.assertLogs("agentrealm_adk.directives", "WARNING"):
                 self.assertFalse(watch.maybe_reload())
             self.assertEqual(watch.directives.never_attack, ["character"])
             self._write(p, 'never_attack = ["character", "goblin"]\n', 1_000_000)
@@ -120,7 +120,7 @@ class ReloadTest(unittest.TestCase):
             p = Path(tmp) / "wren.directives.toml"
             p.write_text("params = {\n")
             watch = DirectivesWatch(p)
-            with self.assertLogs("agentrealm_agent.directives", "WARNING"):
+            with self.assertLogs("agentrealm_adk.directives", "WARNING"):
                 watch.ensure_loaded()
             self.assertEqual(watch.directives, default_directives())
 

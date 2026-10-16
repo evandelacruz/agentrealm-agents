@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import dataclasses
 
-from ..directives import attack_forbidden
-from ..engagement import cannot_outrun, fights
-from ..hostile_ground import ground_by_hostile
-from ..memory import Memory
-from ..navigation import cost_path, no_way, oscillation
-from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
-from ..survival import (
+from agentrealm_adk.directives import attack_forbidden
+from agentrealm_adk.engagement import cannot_outrun, fights
+from agentrealm_adk.hostile_ground import ground_by_hostile
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import cost_path, no_way, oscillation
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
+from agentrealm_adk.survival import (
     LOSING_NAV,
     RETREAT_NAV,
     hostiles_reaching,
@@ -31,7 +31,8 @@ from ..survival import (
     should_retreat,
     town_cell,
 )
-from ..world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .boss import boss_fight_on
 from .fight import engage, in_weapon_reach

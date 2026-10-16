@@ -16,12 +16,12 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 
-from .config import Policy
-from .client import ApiError
-from .knowledge_base import KnowledgeBase
-from .memory import Memory
-from .park import ParkReport
-from .world import WorldModel
+from agentrealm_adk.config import Policy
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.park import ParkReport
+from agentrealm_adk.world import WorldModel
 
 
 class AcceptanceHooks:

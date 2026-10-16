@@ -9,11 +9,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import choose_call, decide
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.investigation import (
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.investigation import (
     MAX_REJECTIONS,
     SPEECH_RANGE,
     cell_was_read,
@@ -26,13 +26,13 @@ from agentrealm_agent.investigation import (
     sight_range,
     spoken_npc_ids,
 )
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.strategist import SIGNS_SHOWN, build_prompt
-from agentrealm_agent.scroll_investigation import (
+from agentrealm_adk.scroll_investigation import (
     probed_supply_codes,
     log_supply_codes_seen,
     mark_code_probed,
@@ -47,8 +47,8 @@ from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.intents import read_block, read_supply
 from agentrealm_agent.states.investigate import InvestigateState
-from agentrealm_agent.travel.knowledge import entrance_from_kb, sync_entrances
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.travel.knowledge import entrance_from_kb, sync_entrances
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:

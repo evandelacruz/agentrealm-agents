@@ -10,7 +10,7 @@ way a held item opens, else asks the planner and holds (``way``, A120).
 
 from __future__ import annotations
 
-from ..investigation import (
+from agentrealm_adk.investigation import (
     MAX_REJECTIONS,
     SPEECH_RANGE,
     cell_was_read,
@@ -20,11 +20,12 @@ from ..investigation import (
     say_key,
     spoken_npc_ids,
 )
-from ..navigation import cost_path, nearest_target
-from ..pathing import bounded_step, grid_params, nav_search, plan_sets
+from agentrealm_adk.navigation import cost_path, nearest_target
+from agentrealm_adk.pathing import bounded_step, grid_params, nav_search, plan_sets
+from agentrealm_adk.scroll_investigation import supply_was_read
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+
 from ..plan import GoalOp
-from ..scroll_investigation import supply_was_read
-from ..world import Entity, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .intents import read_block, read_supply, say_to, set_position
 from .way import clear_the_way, open_the_way

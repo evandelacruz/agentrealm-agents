@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "observations"
 

@@ -12,11 +12,11 @@ import json
 import unittest
 
 from agentrealm_agent.cells import STAYS_ON_MAP_OPS, leaves_map, refuse_bad_cells
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
 from agentrealm_agent.plan import OP_STATE, Plan
-from agentrealm_agent.stalled import RetryBasis, remember as remember_stalled
+from agentrealm_adk.stalled import RetryBasis, remember as remember_stalled
 from agentrealm_agent.strategist import build_prompt, door_lines, ground_lines, map_lines, ruler_lines
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 from tests.test_entrance_needs import needs_sandals
 from tests.test_strategist import WAIT_ANSWER, FakeLLM, fake_runner, make, round_trip
 

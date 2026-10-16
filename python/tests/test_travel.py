@@ -7,19 +7,19 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent import knowledge_base as kb_mod
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation.rejection import learn_step_rejection, navigation_avoid_costly
+from agentrealm_adk import config
+from agentrealm_adk import knowledge_base as kb_mod
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation.rejection import learn_step_rejection, navigation_avoid_costly
 from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.travel import (
+from agentrealm_adk.travel import (
     StrengthBracket,
     TravelOp,
     parse_travel_string,
@@ -28,8 +28,8 @@ from agentrealm_agent.travel import (
     resolve_travel,
     sync_town,
 )
-from agentrealm_agent.travel.knowledge import iter_shop_cells
-from agentrealm_agent.world import WorldModel, ZoneFact
+from agentrealm_adk.travel.knowledge import iter_shop_cells
+from agentrealm_adk.world import WorldModel, ZoneFact
 
 
 def grid(rows: list[str], at=(0, 0), map_id=1, perception=5) -> WorldModel:
@@ -387,7 +387,7 @@ class HuntingGroundSearchTest(unittest.TestCase):
     def test_break_on_the_search_walk_does_not_stall_the_op(self):
         """Review on #123: Break at stuck step 2 of the search walk (labelled
         ``explore_area``) must count as the Travel op's own walk."""
-        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_adk.navigation import stuck as nav_stuck
         from agentrealm_agent.plan import PLAN_STALL_SECONDS
         from agentrealm_agent.states.base import StateOutcome
         from agentrealm_agent.states.dispatch import _note_op_progress

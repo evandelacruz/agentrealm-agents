@@ -11,11 +11,11 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
-from agentrealm_agent import engagement
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.engagement import drink_turns_fight, sync_engagement
-from agentrealm_agent.healing import POTION_RULE, carried_heal, spend_potion
-from agentrealm_agent.item_table import InventorySupply
+from agentrealm_adk import engagement
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.engagement import drink_turns_fight, sync_engagement
+from agentrealm_adk.healing import POTION_RULE, carried_heal, spend_potion
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.retreat import _turn_on_losing

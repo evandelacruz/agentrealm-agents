@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import supplies
-from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_adk import supplies
+from agentrealm_adk.knowledge_base import KnowledgeBase
 from tests import REAL_FETCH
 
 SERVED = [

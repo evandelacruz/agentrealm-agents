@@ -4,23 +4,23 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent import survival
+from agentrealm_adk import survival
 
 from agentrealm_agent.brain import decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.survival import (
+from agentrealm_adk.survival import (
     effective_fight_margin,
     effective_retreat_hits,
     effective_risk,
     should_retreat,
 )
-from agentrealm_agent.pathing import FLEE_RUN_STEPS, flee_run, outruns
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.pathing import FLEE_RUN_STEPS, flee_run, outruns
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 
@@ -28,8 +28,8 @@ def loses(w, policy, params) -> bool:
     """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
     import dataclasses
 
-    from agentrealm_agent.engagement import would_fight
-    from agentrealm_agent.survival import combat_group
+    from agentrealm_adk.engagement import would_fight
+    from agentrealm_adk.survival import combat_group
 
     fight = dataclasses.replace(policy, on_hostile="fight")
     return bool(combat_group(w, fight)) and not would_fight(w, fight, params)
@@ -37,7 +37,7 @@ def loses(w, policy, params) -> bool:
 
 def retreats(w, policy, params) -> bool:
     """``should_retreat`` with the engagement's decision, as Retreat reads it."""
-    from agentrealm_agent.engagement import fights, sync_engagement
+    from agentrealm_adk.engagement import fights, sync_engagement
 
     m = Memory()
     sync_engagement(w, m, policy, params)
@@ -623,7 +623,7 @@ class SwingTest(unittest.TestCase):
     def test_every_weapon_has_a_damage_and_nothing_else_does(self):
         """Review on #172: one list of weapons, so none swings as the knife
         unseen. Both are the Supplies reference's (A54)."""
-        from agentrealm_agent import supplies
+        from agentrealm_adk import supplies
         for code in supplies._table:
             self.assertEqual(supplies.weapon_damage(code) is not None, supplies.is_weapon(code), code)
         self.assertAlmostEqual(survival.swing_damage("iron_sword"), 0.65 * (1 + 2 + 8) / 2)
@@ -674,7 +674,7 @@ class SwingTest(unittest.TestCase):
     def test_a_measured_hit_rate_moves_the_swing_off_the_roll(self):
         """Counted hits and misses (A85) move a type's chance off the
         published 65%, which counts as ``PRIOR_SWINGS`` swings."""
-        from agentrealm_agent.threat import PRIOR_SWINGS, ThreatTable
+        from agentrealm_adk.threat import PRIOR_SWINGS, ThreatTable
         t = ThreatTable()
         t.record(("npc", "gnawer"), 2)
         self.assertAlmostEqual(survival.hostile_swing_damage(2, t, ("npc", "gnawer")), 0.65 * 2)

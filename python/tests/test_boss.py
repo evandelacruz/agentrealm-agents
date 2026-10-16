@@ -4,10 +4,10 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import BossFight, Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import BossFight, Memory
 from agentrealm_agent.plan import Plan, goal_done, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.boss import (
@@ -19,7 +19,7 @@ from agentrealm_agent.states.boss import (
 )
 from agentrealm_agent.states.fight import fight_target
 from agentrealm_agent.states.flee import should_flee
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 
 
 def grid(rows: list[str], at=(0, 0), map_id=8) -> WorldModel:

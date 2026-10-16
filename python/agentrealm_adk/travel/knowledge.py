@@ -11,6 +11,16 @@ from ..world import Pos
 SHOPS = "shops"
 NOT_SOLD = "not_sold"
 TOWN = "town"
+SOLD_OUT = "sold_out"
+
+# Shop stock returns on its home block this long after it is bought (Manual
+# §11 Regrowth, drops, and returns, A159): a shop cell seen without its item is
+# sold out until then, not forgotten.
+RESTOCK_SECONDS = 120
+# A shop cell seen without its item, never hidden by another supply, for this
+# long since it was first seen so has lost the sale: stock that returns would
+# have shown by now (A159).
+SALE_LAPSE_SECONDS = 600
 
 
 def _cell_key(p: Pos) -> str:
@@ -124,7 +134,9 @@ def record_shop_cell(
 ) -> None:
     """A shop cell, and what it was last seen selling there (A131): ``sells``
     maps the item seen for sale on the cell to its gem price. A cell holds one
-    supply, so a new sighting replaces what it sold before."""
+    supply, so a new sighting replaces what it sold before, sold out or not
+    (A159). A priced supply our own ``Drop`` put down is no shop's: the
+    callers leave it out (``WorldModel.is_our_drop``, A158)."""
     if kb is None:
         return
     with kb.lock:
@@ -134,12 +146,22 @@ def record_shop_cell(
             row = shops[_cell_key(pos)] = {}
         if code:
             row["sells"] = {code: price}
+            row.pop(SOLD_OUT, None)
             _lapse_locked(kb, {code})
 
 
-def forget_sale(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str) -> None:
-    """The shop cell was seen without ``code`` for sale: it sells it no more (A131).
-    A cell saved before A131 (no ``sells``) is then checked: it sells nothing known."""
+def note_sold_out(
+    kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str, tick: int, tick_hz: int, *, hidden: bool = False
+) -> None:
+    """The shop cell was seen at ``tick`` without ``code`` for sale (A159).
+
+    Its stock returns ``RESTOCK_SECONDS`` after it is bought, so the cell is
+    sold out until then (``back``, a tick), not forgotten. ``since`` is the
+    tick it was first seen so; once that absence runs to
+    ``SALE_LAPSE_SECONDS`` the sale lapses and the cell sells it no more.
+    ``hidden``: another supply lies on the cell, which hides the stock, so
+    the absence starts again. A cell saved before A131 (no ``sells``) is
+    checked: it sells nothing known."""
     if kb is None:
         return
     with kb.lock:
@@ -147,7 +169,48 @@ def forget_sale(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str) -> N
         if not isinstance(row, dict):
             return
         sells = row.get("sells")
-        row["sells"] = {c: p for c, p in sells.items() if c != code} if isinstance(sells, dict) else {}
+        if not isinstance(sells, dict):
+            row["sells"] = {}
+            return
+        if code not in sells:
+            return
+        out = row.setdefault(SOLD_OUT, {})
+        prior = out.get(code)
+        since = prior.get("since") if isinstance(prior, dict) and not hidden else None
+        since = since if isinstance(since, int) and since <= tick else tick
+        if tick - since >= SALE_LAPSE_SECONDS * tick_hz:
+            del sells[code]
+            out.pop(code, None)
+        else:
+            out[code] = {"since": since, "back": tick + RESTOCK_SECONDS * tick_hz}
+        if not out:
+            del row[SOLD_OUT]
+
+
+def iter_sold_out(kb: KnowledgeBase | None) -> dict[tuple[int, Pos, str], int]:
+    """Each shop cell's sold-out item: (map, cell, code) -> the tick its stock is back (A159)."""
+    if kb is None:
+        return {}
+    out: dict[tuple[int, Pos, str], int] = {}
+    with kb.lock:
+        for mid, entry in kb.maps.items():
+            shops = entry.get(SHOPS) if isinstance(entry, dict) else None
+            if not isinstance(shops, dict):
+                continue
+            for key, row in shops.items():
+                rows = row.get(SOLD_OUT) if isinstance(row, dict) else None
+                if not isinstance(rows, dict):
+                    continue
+                try:
+                    map_id = int(mid)
+                    x, y = (int(p) for p in key.split(",", 1))
+                except ValueError:
+                    continue
+                for code, fact in rows.items():
+                    back = fact.get("back") if isinstance(fact, dict) else None
+                    if isinstance(back, int):
+                        out[(map_id, (x, y), code)] = back
+    return out
 
 
 def note_not_sold(kb: KnowledgeBase | None, map_id: int, pos: Pos, code: str, tick: int) -> None:

@@ -26,9 +26,17 @@ from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext, StateOutcome
 from agentrealm_agent.brain import walkable_prefix
 from agentrealm_agent.plan import parse_directives_goals, validate_goal_op
-from agentrealm_adk.sellers import Seller, lapse_not_sold, refuse_unsold, sellers_of
+from agentrealm_adk.sellers import Seller, codes_with_sellers, lapse_not_sold, refuse_unsold, sellers_line, sellers_of
 from agentrealm_adk.travel import record_shop_cell
-from agentrealm_adk.travel.knowledge import iter_not_sold, iter_shop_sales
+from agentrealm_adk.travel.knowledge import (
+    RESTOCK_SECONDS,
+    SALE_LAPSE_SECONDS,
+    iter_not_sold,
+    iter_shop_sales,
+    iter_shop_cells,
+    iter_sold_out,
+    note_sold_out,
+)
 from agentrealm_adk.world import Entity, WorldModel
 
 
@@ -291,7 +299,7 @@ class ShopOutOfSightTest(unittest.TestCase):
         with self.assertLogs("agentrealm_agent.plan", "WARNING") as logs:
             dispatch(w, c)
         self.assertIsNone(plan.current())
-        self.assertIn("no small_potion for sale at any known seller", "".join(logs.output))
+        self.assertIn("small_potion sold out at every known seller until tick", "".join(logs.output))
 
     def test_dropped_when_it_costs_more_than_the_gems_held(self):
         w = big_world()
@@ -507,9 +515,9 @@ class ShopRefusalCapTest(unittest.TestCase):
 
 
 class StaleSellerTest(unittest.TestCase):
-    """A shop reached without the item sells it no more, so the buy never
+    """A shop reached without the item is sold out for now, so the buy never
     walks back and forth between stale shops; with every seller reached it is
-    dropped with why (A131)."""
+    dropped with why (A131, A159)."""
 
     def test_two_stale_shops_are_each_reached_once_then_the_buy_is_dropped(self):
         w = big_world(size=60)
@@ -523,14 +531,94 @@ class StaleSellerTest(unittest.TestCase):
         turned = next(i for i, p in enumerate(stepped) if p[1] > 0)
         self.assertTrue(all(p[1] > 0 for p in stepped[turned:]), "never back toward the first stale shop")
         self.assertIsNone(plan.current())
-        self.assertIn("no torch for sale at any known seller (2 reached without it)", "".join(logs.output))
-        self.assertEqual(iter_shop_sales(c.knowledge), [], "both stale sales are forgotten")
+        self.assertIn("torch sold out at every known seller until tick", "".join(logs.output))
+        self.assertEqual(len(iter_shop_sales(c.knowledge)), 2, "both sales are kept, sold out (A159)")
+        self.assertEqual(len(iter_sold_out(c.knowledge)), 2)
 
     def test_a_new_sighting_replaces_what_the_cell_sold(self):
         kb = KnowledgeBase.empty("sandbox")
         record_shop_cell(kb, 1, (3, 3), "torch", 2)
         record_shop_cell(kb, 1, (3, 3), "rope", 4)
         self.assertEqual(iter_shop_sales(kb), [(1, (3, 3), "rope", 4)])
+
+
+HZ = 10  # ticks a second in these tests
+
+
+class ShopStockReturnsTest(unittest.TestCase):
+    """Shop stock returns on its home block two minutes after it is bought,
+    hidden while another supply lies there (Manual §11 Regrowth, drops, and
+    returns, A159): a shop cell seen without the item is sold out for that
+    time, not forgotten, and the sale lapses only on a longer absence."""
+
+    def kb(self) -> KnowledgeBase:
+        kb = KnowledgeBase.empty("sandbox")
+        record_shop_cell(kb, 1, (30, 0), "torch", 2)
+        return kb
+
+    def test_seen_without_it_the_cell_is_sold_out_not_forgotten(self):
+        kb, w = self.kb(), big_world()
+        w.tick = 100
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        self.assertEqual(iter_shop_sales(kb), [(1, (30, 0), "torch", 2)])
+        [s] = sellers_of("torch", w, kb)
+        self.assertEqual((s.by, s.back, s.in_stock), ("shop", 100 + RESTOCK_SECONDS * HZ, False))
+
+    def test_the_stock_is_back_after_the_restock_time(self):
+        kb, w = self.kb(), big_world()
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        w.tick = 100 + RESTOCK_SECONDS * HZ
+        [s] = sellers_of("torch", w, kb)
+        self.assertTrue(s.in_stock)
+
+    def test_the_sale_lapses_only_on_a_longer_absence(self):
+        kb = self.kb()
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        note_sold_out(kb, 1, (30, 0), "torch", 100 + (SALE_LAPSE_SECONDS * HZ) // 2, HZ)
+        self.assertEqual(len(iter_shop_sales(kb)), 1, "half the lapse: still its seller")
+        note_sold_out(kb, 1, (30, 0), "torch", 100 + SALE_LAPSE_SECONDS * HZ, HZ)
+        self.assertEqual(iter_shop_sales(kb), [], "absent the whole lapse: the sale is forgotten")
+        self.assertEqual(iter_sold_out(kb), {})
+
+    def test_stock_hidden_under_another_supply_is_no_absence(self):
+        kb = self.kb()
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        note_sold_out(kb, 1, (30, 0), "torch", 100 + SALE_LAPSE_SECONDS * HZ, HZ, hidden=True)
+        self.assertEqual(len(iter_shop_sales(kb)), 1, "hidden, the absence starts again")
+
+    def test_seen_selling_it_again_clears_the_sold_out(self):
+        kb = self.kb()
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        record_shop_cell(kb, 1, (30, 0), "torch", 2)
+        self.assertEqual(iter_sold_out(kb), {})
+
+    def test_a_buy_with_only_sold_out_sellers_is_refused_with_when(self):
+        kb, w = self.kb(), big_world()
+        w.tick = 100
+        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
+        kept, refused = refuse_unsold([{"op": "buy", "code": "torch"}], w, kb)
+        self.assertEqual(kept, [])
+        self.assertIn(f"sold out until tick {100 + RESTOCK_SECONDS * HZ}", refused[0])
+
+    def test_shop_walks_past_a_sold_out_seller_to_one_in_stock(self):
+        w = big_world()
+        w.tick = 100
+        plan = Plan([{"op": "buy", "code": "torch"}], dict(PARAM_DEFAULTS))
+        c = ctx(w, plan=plan)
+        record_shop_cell(c.knowledge, 1, (12, 0), "torch", 2)
+        record_shop_cell(c.knowledge, 1, (0, 30), "torch", 2)
+        note_sold_out(c.knowledge, 1, (12, 0), "torch", 100, HZ)
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Shop")
+        step = out.intents[0]
+        self.assertGreater(step["y"], 0, "toward the shop in stock, not the sold-out one")
+
+    def test_a_sold_out_seller_is_still_a_known_seller(self):
+        # State no_seller_known never lists an item whose shop is only sold out.
+        kb, w = self.kb(), big_world()
+        note_sold_out(kb, 1, (30, 0), "torch", 0, HZ)
+        self.assertEqual(codes_with_sellers(w, kb, ["torch"]), {"torch"})
+        self.assertIn('"sold_out_until_tick"', sellers_line(w, kb))
 
 
 class PreSellerShopCellTest(unittest.TestCase):
@@ -668,6 +756,23 @@ class RunnerLearnsWhatAShopSellsTest(unittest.TestCase):
             {"id": 2, "x": 6, "y": 5, "supply_subtype_code": "torch"},  # lying free: no shop
         ]})
         self.assertEqual(iter_shop_sales(kb), [(3, (4, 5), "raft", 30)])
+
+    def test_a_priced_supply_we_dropped_is_no_shop(self):
+        # A price belongs to the supply (A158): our own drop lies priced, but no shop sells it there.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        kb = KnowledgeBase.empty("sandbox")
+        cfg = CharacterConfig("T", "sandbox", Policy(kind="scripted", goals=[]), Path("t.toml"))
+        r = Runner(cfg, None, 1, threading.Event(), out=lambda _: None, knowledge=kb)
+        self.addCleanup(r.trace.close)
+        r.world.map_id = 3
+        r.mem.pending_intents, r.mem.pending_next_index = [{"verb": "Drop", "supply_id": 9}], 0
+        self.assertFalse(r.on_result({"tick": 5, "index": 0, "outcome": "applied"}, 0))
+        r._learn_shops_from_entities({"supplies": [{"id": 9, "x": 4, "y": 5, "supply_subtype_code": "bronze_sword", "gem_price": 15}]})
+        self.assertEqual(iter_shop_cells(kb), [])
 
 
 class RunnerShopResultTest(unittest.TestCase):

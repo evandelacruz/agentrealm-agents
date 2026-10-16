@@ -488,12 +488,13 @@ class LadderRunner:
             settle_entry(kb, w, m)
 
     def learn_shops(self) -> None:
-        """Every supply in sight with a price is a shelf: the cell is where it is sold (A131)."""
+        """Every supply in sight with a price is a shelf: the cell is where it is
+        sold (A131), unless our own ``Drop`` put it there (A158)."""
         w = self.world
         if self.knowledge is None or w.map_id is None:
             return
         for e in w.entities:
-            if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0:
+            if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0 and not w.is_our_drop(e.id):
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
 
 

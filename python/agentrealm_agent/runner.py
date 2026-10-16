@@ -553,7 +553,8 @@ class Runner:
         """A cell holding a supply with a ``gem_price`` is where it can be
         bought: a priced supply "spends those gems when picked up" (manual
         §11, https://agentrealm.gg/docs/manual#11-game-rules). ``travel:shop``
-        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131)."""
+        heads for one (A27); the cell keeps what it sells, for a ``buy`` (A131).
+        A priced supply our own ``Drop`` put down is no shop's (A158)."""
         if self.knowledge is None or self.world.map_id is None:
             return
         for s in payload.get("supplies") or []:
@@ -565,9 +566,10 @@ class Runner:
             try:
                 price = int(price)
                 pos = (int(s["x"]), int(s["y"]))
+                sid = int(s["id"]) if s.get("id") is not None else None
             except (KeyError, TypeError, ValueError):
                 continue
-            if price <= 0:
+            if price <= 0 or self.world.is_our_drop(sid):
                 continue
             code = s.get("supply_subtype_code")
             record_shop_cell(self.knowledge, self.world.map_id, pos, code if isinstance(code, str) else None, price)
@@ -1149,6 +1151,8 @@ class Runner:
                         self.gem_cuts.note_no_effect(w, block, tile, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
+            if intent and intent.get("verb") == "Drop":
+                w.note_our_drop(intent.get("supply_id"))
             if intent and intent.get("verb") in ("Say", "Broadcast"):
                 m.last_speech_tick = int(result.get("tick", w.tick))
             if intent and intent.get("verb") == "Take":

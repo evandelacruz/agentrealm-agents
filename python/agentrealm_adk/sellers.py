@@ -4,7 +4,11 @@ A ``buy`` walks only toward a seller known to sell its item, never to a shop
 that does not. ``sellers_of`` is the one seller test. A seller is known by:
 
 - ``shop``: a shop cell seen selling the item (``travel.knowledge.iter_shop_sales``),
-  with its gem price. The cell itself is where to go.
+  with its gem price. The cell itself is where to go. One seen since without
+  it is sold out until its stock is back (``back``, A159: stock returns two
+  minutes after it is bought, ``note_sold_out``): still its seller, but not
+  walked to and no buy's seller until then; the sale lapses only on a longer
+  absence.
 - ``clue``: a sign, scroll or NPC line with a phrase that names the item and
   a gem price ("Raft, thirty gems"), at the cell the clue was found
   (``clues``). The seller is somewhere round it: Shop walks there and searches.
@@ -18,11 +22,12 @@ selling it.
 
 - ``unchecked``: a shop cell saved before A131, with no record of what it
   sells, for an item a price was seen for. It is taken only after every
-  other seller, and checked off once seen (``forget_sale``).
+  other seller, and checked off once seen (``note_sold_out``).
 
 A price seen with no place is no seller. Of several, the cheapest walk is
-taken. With none known the buy is refused when a reply puts it on the stack
-(``refuse_unsold``) and dropped by Shop, never sent on a walk. State
+taken. With none known, or only shops sold out, the buy is refused when a
+reply puts it on the stack (``refuse_unsold``) and dropped by Shop, never
+sent on a walk. State
 ``no_seller_known`` (A110) and ``sellers`` read the same test.
 """
 
@@ -36,7 +41,7 @@ from typing import Any
 
 from .healing import supply_matches
 from .knowledge_base import KnowledgeBase, knowledge_items
-from .travel.knowledge import iter_not_sold, iter_shop_sales, iter_unchecked_shop_cells
+from .travel.knowledge import iter_not_sold, iter_shop_sales, iter_sold_out, iter_unchecked_shop_cells
 from .travel.knowledge import lapse_not_sold as _lapse
 from .world import Pos, WorldModel, chebyshev
 
@@ -61,6 +66,12 @@ class Seller:
     by: str  # "shop", "clue", "plan" or "unchecked"
     exact: bool
     price: int | None = None
+    back: int | None = None  # a sold-out shop cell: the tick its stock is back (A159)
+
+    @property
+    def in_stock(self) -> bool:
+        """Not known sold out: a buy may walk to it (A159)."""
+        return self.back is None
 
 
 @dataclass
@@ -72,11 +83,12 @@ class _Known:
     unchecked: list[tuple[int, Pos]]
     priced: dict[str, int]
     not_sold: dict[tuple[int, Pos, str], int]
+    sold_out: dict[tuple[int, Pos, str], int]
 
 
 def _known(kb: KnowledgeBase | None) -> _Known:
     if kb is None:
-        return _Known([], [], [], {}, {})
+        return _Known([], [], [], {}, {}, {})
     with kb.lock:
         clues = list(kb.clues)
     priced = {
@@ -84,7 +96,7 @@ def _known(kb: KnowledgeBase | None) -> _Known:
         for code, row in knowledge_items(kb).items()
         if isinstance(row, dict) and isinstance(row.get("gem_price"), int) and row["gem_price"] > 0
     }
-    return _Known(iter_shop_sales(kb), clues, iter_unchecked_shop_cells(kb), priced, iter_not_sold(kb))
+    return _Known(iter_shop_sales(kb), clues, iter_unchecked_shop_cells(kb), priced, iter_not_sold(kb), iter_sold_out(kb))
 
 
 def _names(code: str, text: str) -> bool:
@@ -149,12 +161,22 @@ def _sellers(code: str, w: WorldModel, known: _Known, op: dict[str, Any] | None 
     found: list[Seller] = []
     if (named := _op_seller(code, op, known)) is not None:
         found.append(named)
-    found += [Seller(mid, pos, "shop", True, price) for mid, pos, sold, price in known.sales if supply_matches(code, sold)]
+    found += [
+        Seller(mid, pos, "shop", True, price, _back(known, mid, pos, sold, w))
+        for mid, pos, sold, price in known.sales
+        if supply_matches(code, sold)
+    ]
     found += _clue_sellers(code, known)
     price = next((p for c, p in known.priced.items() if supply_matches(code, c)), None)
     if price is not None:
         found += [Seller(mid, pos, "unchecked", True) for mid, pos in known.unchecked]
     return sorted(dict.fromkeys(found), key=lambda s: walk_order(s, w))
+
+
+def _back(known: _Known, map_id: int, pos: Pos, code: str, w: WorldModel) -> int | None:
+    """The tick a shop cell's sold-out stock of ``code`` is back, while it is not yet (A159)."""
+    back = known.sold_out.get((map_id, pos, code))
+    return back if back is not None and w.tick < back else None
 
 
 def sellers_of(code: str, w: WorldModel, kb: KnowledgeBase | None, op: dict[str, Any] | None = None) -> list[Seller]:
@@ -171,9 +193,10 @@ def walk_estimate(s: Seller, w: WorldModel) -> int | None:
 
 def walk_order(s: Seller, w: WorldModel) -> tuple:
     """Cheapest walk first: this map before another, then fewer steps; a
-    shop not known to sell the item only after every one that is."""
+    shop not known to sell the item only after every one that is, and a
+    sold-out one last (A159)."""
     steps = walk_estimate(s, w)
-    return (s.by == "unchecked", steps is None, steps or 0, s.map_id, s.pos, s.by)
+    return (not s.in_stock, s.by == "unchecked", steps is None, steps or 0, s.map_id, s.pos, s.by)
 
 
 def for_sale_in_sight(code: str, w: WorldModel) -> bool:
@@ -181,8 +204,16 @@ def for_sale_in_sight(code: str, w: WorldModel) -> bool:
 
 
 def seller_known(code: str, w: WorldModel, kb: KnowledgeBase | None, op: dict[str, Any] | None = None) -> bool:
-    """A buy of ``code`` has somewhere to go: a seller known, or the item for sale in sight."""
-    return for_sale_in_sight(code, w) or bool(sellers_of(code, w, kb, op))
+    """A buy of ``code`` has somewhere to go: a seller known and not sold out, or the item for sale in sight."""
+    return for_sale_in_sight(code, w) or any(s.in_stock for s in sellers_of(code, w, kb, op))
+
+
+def sold_out_until(code: str, w: WorldModel, kb: KnowledgeBase | None, op: dict[str, Any] | None = None) -> int | None:
+    """When every known seller of ``code`` is a sold-out shop: the first tick one is back (A159)."""
+    found = sellers_of(code, w, kb, op)
+    if not found or any(s.in_stock for s in found):
+        return None
+    return min(s.back for s in found if s.back is not None)
 
 
 def refuse_unsold(
@@ -192,6 +223,13 @@ def refuse_unsold(
     kept, refused = [], []
     for g in goals:
         if g.get("op") == "buy" and not seller_known(g["code"], w, kb, g):
+            back = sold_out_until(g["code"], w, kb, g)
+            if back is not None:
+                refused.append(
+                    f"{json.dumps(g, sort_keys=True)} left out: every known seller of {g['code']} is sold out "
+                    f"until tick {back} (shop stock returns two minutes after it is bought); buy it then"
+                )
+                continue
             refused.append(
                 f"{json.dumps(g, sort_keys=True)} left out: no seller of {g['code']} is known (no shop seen selling it, "
                 "no clue naming it with a gem price); find one first, or give x, y and map_id for the place a clue says sells it"
@@ -243,6 +281,8 @@ def _row(s: Seller, w: WorldModel) -> dict[str, Any]:
     row["steps"] = steps if steps is not None else "other_map"
     if s.price is not None:
         row["price"] = s.price
+    if s.back is not None:
+        row["sold_out_until_tick"] = s.back
     if not s.exact:
         row["search_radius"] = SELLER_SEARCH_RADIUS
     return row

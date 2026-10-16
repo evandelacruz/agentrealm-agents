@@ -9,11 +9,10 @@ gems, which take no slot; Recover withdraws only what fits). The rule:
   pickup, never carried: Manual §11 Food and potions, A155) is taken.
 - A supply the plan reserves is never dropped (:func:`reserved_supplies`):
   one held supply for each op on the stack that will use it.
-- Nothing is dropped where a dropped supply becomes shop stock: on a known
-  shop cell, where a priced supply was seen (``travel.knowledge.iter_shop_cells``),
-  or on one in sight now. A supply dropped there came back for sale
-  (docs/observations); the Manual does not say so. A pickup that needs a drop
-  there steps off first (``MOVE``).
+- A price belongs to the supply (Manual §11, A158): a priced subtype costs
+  its ``gem_price`` wherever a copy lies, our own drop included, so a drop of
+  one forfeits its price on any cell, a shop cell no different. The drop
+  says so (``forfeit``), and the choices name each priced one.
 - Which held supply to give up is always the planner's call: no code ranks
   a carried item as useless (a tool unused so far still smashes, burns or
   fights). A ``buy`` or ``fetch_item`` op names it with ``drop``; one that
@@ -35,27 +34,26 @@ from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
 from .supplies import eaten_on_pickup, kept_on_break
-from .travel.knowledge import iter_shop_cells
-from .world import NEIGHBOURS, Pos, WorldModel, chebyshev
+from .supplies import row as supply_row
+from .world import WorldModel
 
-RoomKind = Literal["take", "drop", "move", "ask"]
+RoomKind = Literal["take", "drop", "ask"]
 TAKE: RoomKind = "take"  # it fits: Take it
 DROP: RoomKind = "drop"  # Drop ``Room.drop`` here, then Take it
-MOVE: RoomKind = "move"  # ``Room.drop`` is due, but not on this cell: step off it first
 ASK: RoomKind = "ask"  # which supply to drop is the planner's call
 
 
 @dataclass(frozen=True)
 class Room:
     """What making room for one pickup comes to; ``why`` says it for the log
-    and the planner. ``drop`` is set exactly when ``kind`` is DROP or MOVE."""
+    and the planner. ``drop`` is set exactly when ``kind`` is DROP."""
 
     kind: RoomKind
     drop: InventorySupply | None = None
     why: str = ""
 
     def __post_init__(self) -> None:
-        assert (self.drop is not None) == (self.kind in (DROP, MOVE)), self
+        assert (self.drop is not None) == (self.kind == DROP), self
 
 
 def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: KnowledgeBase | None) -> list[InventorySupply]:
@@ -102,14 +100,6 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
     return out
 
 
-def drop_makes_stock(w: WorldModel, knowledge: KnowledgeBase | None, pos: Pos | None = None) -> bool:
-    """A supply dropped at ``pos`` (here by default) would become shop stock."""
-    pos = pos if pos is not None else w.pos
-    if pos is None:
-        return False
-    return pos in w.for_sale() or (w.map_id, pos) in set(iter_shop_cells(knowledge))
-
-
 def make_room(
     w: WorldModel,
     p: Pickup,
@@ -129,33 +119,29 @@ def make_room(
     free = [s for s in droppable_supplies(w) if s.id not in reserved]
     full = f"pack full ({carry_slots_used(w)}/{w.carry_capacity})"
     if not named:
-        return Room(ASK, why=f"{full}: name what to drop for {p.code} with drop; {_choices(free)}")
+        return Room(ASK, why=f"{full}: name what to drop for {p.code} with drop; {_choices(free, items)}")
     shed = next((s for s in free if s.code == named), None)
     if shed is None:
-        return Room(ASK, why=f"{full}: drop={named} is not held, cannot be dropped, or the plan reserves it; {_choices(free)}")
-    if drop_makes_stock(w, knowledge):
-        return Room(MOVE, shed, f"{full}: not dropping {shed.code} on a shop cell")
-    return Room(DROP, shed, f"drop {shed.code or shed.id} for {p.code}")
+        return Room(ASK, why=f"{full}: drop={named} is not held, cannot be dropped, or the plan reserves it; {_choices(free, items)}")
+    cost = forfeit(shed.code, items)
+    return Room(DROP, shed, f"drop {shed.code or shed.id} for {p.code}" + (f" ({cost})" if cost else ""))
 
 
-def _choices(free: list[InventorySupply]) -> str:
+def forfeit(code: str | None, items: dict[str, Any]) -> str:
+    """What dropping ``code`` gives up (Manual §11 A price belongs to the
+    supply, A158): a priced subtype costs its price again to pick back up,
+    wherever it lies. Empty for a subtype no world prices."""
+    row = items.get(code) if code else None
+    price = row.get("gem_price") if isinstance(row, dict) else None
+    if isinstance(price, int) and price > 0:
+        return f"forfeits its {price}-gem price"
+    sup = supply_row(code)
+    return "forfeits its price" if sup is not None and sup.sold else ""
+
+
+def _choices(free: list[InventorySupply], items: dict[str, Any]) -> str:
     codes = sorted({s.code for s in free if s.code})
-    return f"droppable: {', '.join(codes)}" if codes else "nothing held can be dropped"
+    if not codes:
+        return "nothing held can be dropped"
+    return "droppable: " + ", ".join(f"{c} ({cost})" if (cost := forfeit(c, items)) else c for c in codes)
 
-
-def drop_spot(w: WorldModel, knowledge: KnowledgeBase | None, near: Pos) -> Pos | None:
-    """A neighbouring cell still in reach of ``near`` where a drop stays ours:
-    walkable, free, and not a shop cell."""
-    here = w.pos
-    if here is None:
-        return None
-    blocked = w.occupied() | w.for_sale()
-    cells = [
-        n
-        for dx, dy in NEIGHBOURS
-        if (n := (here[0] + dx, here[1] + dy)) not in blocked
-        and w.walkable(n)
-        and chebyshev(n, near) <= 1
-        and not drop_makes_stock(w, knowledge, n)
-    ]
-    return min(cells) if cells else None

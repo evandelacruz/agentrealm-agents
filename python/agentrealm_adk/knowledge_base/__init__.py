@@ -121,7 +121,7 @@ class KnowledgeBase:
         known = {"schema_version", "world_code", *SECTION_KEYS}
         kb.extra = {k: v for k, v in raw.items() if k not in known}
         _migrate_entrance_keys(kb.entrances)
-        _drop_retired_keys(kb.extra)
+        _drop_retired_keys(kb.extra, kb.items)
         return kb
 
     @classmethod
@@ -154,11 +154,24 @@ def _migrate_entrance_keys(entrances: dict[str, Any]) -> None:
 # measured safe-zone regen (A130: the game has none, health rises only from
 # potions and food).
 RETIRED_KEYS = {"survival": ("safe_zone_regen", "safe_zone_regen_rates")}
+# Item-table keys older agents saved on each item row, dropped at load: the
+# heals learned in play (A24). Heals are the Supplies reference's, and food
+# is eaten on pickup, never carried (A155).
+RETIRED_ITEM_KEYS = ("heal_amount", "heal_on_pickup")
 
 
-def _drop_retired_keys(extra: dict[str, Any]) -> None:
+def _drop_retired_keys(extra: dict[str, Any], items: dict[str, Any]) -> None:
     """Drop ``RETIRED_KEYS`` from the saved sections outside the schema, and
-    a section they leave empty, once at load."""
+    a section they leave empty, and ``RETIRED_ITEM_KEYS`` from each item row,
+    and a row they leave empty, once at load."""
+    for code in list(items):
+        entry = items[code]
+        if not isinstance(entry, dict):
+            continue
+        for key in RETIRED_ITEM_KEYS:
+            entry.pop(key, None)
+        if not entry:
+            del items[code]
     for section, keys in RETIRED_KEYS.items():
         entry = extra.get(section)
         if not isinstance(entry, dict):

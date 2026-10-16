@@ -236,7 +236,7 @@ class RetreatTest(unittest.TestCase):
         self.assertEqual(dispatch(w, c).state, "Retreat")
         w.entities = []  # out of combat, still hurt
         self.assertEqual(dispatch(w, c).state, "Travel")
-        w.held_supplies = [InventorySupply(4, "apple")]
+        w.entities = [Entity("supply", 4, (2, 0), "apple")]  # food lying beside it (food is never carried, A155)
         self.assertEqual(dispatch(w, c).state, "Heal")
 
     def test_done_once_on_the_safe_tile(self):

@@ -55,11 +55,12 @@ class HealKeepsTheReserveTest(unittest.TestCase):
         asks = [s for s in c.memory.strategist_signals if s["trigger"] == "heal_supplies"]
         self.assertEqual([(a["health"], a["potions"]) for a in asks], [(7, 1)])
 
-    def test_carried_food_is_eaten_whatever_the_health(self):
+    def test_carried_food_is_never_used(self):
+        # Food is eaten on pickup, never carried (A155): a berry in the pack is no heal.
         w, c = in_town(9)
         w.held_supplies = [POTION, BERRY]
-        out = dispatch(w, c)
-        self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": BERRY.id})
+        self.assertIsNone(carried_heal(w, c.memory, c.policy, c.params))
+        self.assertNotIn("Use", verbs(dispatch(w, c)))
 
     def test_no_potion_offered_above_the_line(self):
         w, c = in_town(6)

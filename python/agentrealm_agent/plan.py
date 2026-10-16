@@ -606,6 +606,7 @@ HEAD_PROGRESS = (
     "used_id",
     "fight_npc",
     "sellers_searched",
+    "eaten",
 )
 
 
@@ -634,6 +635,7 @@ class Plan:
     used_id: int | None = None  # supply UseItem sent a Use on yourself for, for the head `use_item` op (A108)
     fight_npc: int | None = None  # id of the head `fight` op's NPC, pinned when first in view since it became the head op (A114)
     sellers_searched: frozenset[tuple[int, Pos]] | None = None  # (map id, cell) of each seller the head `buy` op reached without its item for sale (A131)
+    eaten: bool | None = None  # a Take of the head `fetch_item` op's food went through: eaten on pickup, never held (A155)
     tick_hz: int = DEFAULT_TICK_RATE_HZ  # world tick rate; converts `wait` seconds to ticks
     directive_end: int = 0  # goals[index:directive_end] are directives ops, which stay above the planner's
     map_id: int | None = None  # the map ``advance`` last settled the stack on: stalled records are read for it (A111)
@@ -655,6 +657,7 @@ class Plan:
             self.used_id,
             self.fight_npc,
             self.sellers_searched,
+            self.eaten,
             self.directive_end,
         )
 
@@ -675,6 +678,7 @@ class Plan:
             self.used_id,
             self.fight_npc,
             self.sellers_searched,
+            self.eaten,
             self.directive_end,
         ) = saved
         self.goals, self.params, self.floor_params = list(goals), dict(params), dict(floor_params)
@@ -682,6 +686,14 @@ class Plan:
     def current(self) -> GoalOp | None:
         """The op at the top of the stack, or None when it is empty."""
         return self.goals[self.index] if self.index < len(self.goals) else None
+
+    def note_taken(self, code: str | None) -> None:
+        """A ``Take`` of ``code`` went through. Food is eaten the moment it is
+        taken and never held (Manual §11 Food and potions), so for a head
+        ``fetch_item`` of it that Take is the op done (A155)."""
+        op = self.current()
+        if op is not None and op["op"] == "fetch_item" and eaten_on_pickup(code) and supply_matches(op["code"], code or ""):
+            self.eaten = True
 
     def ops_left(self) -> list[GoalOp]:
         """Every op still on the stack, top first: what the plan will yet use (A102)."""
@@ -997,7 +1009,8 @@ def goal_done(op: GoalOp, world: WorldModel, plan: Plan) -> bool:
             return True
         return plan.held_before is not None and count_held(world, code) > plan.held_before
     if name == "fetch_item":
-        return any(supply_matches(op["code"], s.code) for s in world.held_supplies)
+        # Food eaten on pickup is never held: its Take is the fetch (A155).
+        return plan.eaten is True or any(supply_matches(op["code"], s.code) for s in world.held_supplies)
     if name == "gather_gems":
         return world.gems is not None and world.gems >= op["count"]
     # Their executors finish the rest: Travel on arrival (A27), Boss on the

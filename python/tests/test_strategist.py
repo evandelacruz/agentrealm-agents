@@ -944,7 +944,10 @@ class PlannerViewTest(unittest.TestCase):
         self.w.entities = [Entity("supply", 9, (12, 10), "apple"), Entity("supply", 8, (11, 10), "apple", gem_price=3)]
         self.assertEqual(health()["eat"], {"code": "apple", "heals": 2, "at": "7:12,10", "walk_seconds": 1}, "free food only")
         self.w.held_supplies = [InventorySupply(1, "berry")]
-        self.assertEqual(health()["health_short"], 2, "a held heal counts toward the bar (A132)")
+        self.assertEqual(health()["health_short"], 3, "food in the pack is no held heal: food is never carried (A155)")
+        self.w.held_supplies = [InventorySupply(1, "small_potion")]
+        self.assertNotIn("health_at_bar", self.readiness()["stage_2"].get("to_close", {}), "a held potion counts toward the bar (A132)")
+        self.w.held_supplies = []
         self.assertNotIn("drink", health())
         self.kb.extra["survival"] = {"safe_zone_regen": "yes", "safe_zone_regen_rates": [0.01]}
         apply_zone(self.w, 7, 10, 20, {"safe": True})
@@ -983,11 +986,12 @@ class PlannerViewTest(unittest.TestCase):
         self.assertNotIn("health_at_bar", stage_2.get("to_close", {}), "met: nothing to close")
 
     def test_readiness_line_shows_health_with_held_heals(self):
-        # A132: stowed potions and held food count too, and the line shows the sum.
+        # A132: stowed potions count too, and the line shows the sum; food is
+        # never carried, so an apple in the pack counts nothing (A155).
         self.w.health, self.w.max_health = 3, 10
         self.w.held_supplies = [InventorySupply(1, "apple")]
         self.w.chest_supplies = [InventorySupply(2, "small_potion")]
-        heals = supply_row("apple").heal + supply_row("small_potion").heal
+        heals = supply_row("small_potion").heal
         line = next(l for l in state_of(self.w, Plan([], dict(PARAM_DEFAULTS)), self.kb).splitlines() if l.startswith("readiness="))
         self.assertIn(f'"health_with_held_heals": {3 + heals}', line)
 
@@ -995,8 +999,8 @@ class PlannerViewTest(unittest.TestCase):
         # A132: the potion bar and the health bar trade through held heals.
         prompt = system_prompt()
         self.assertIn("A potion is for an actual health need: health at the survival floor (low_health), or a fight ahead that needs the health", prompt)
-        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions and food held", prompt)
-        self.assertIn("health_at_bar counts held heals: it is met when health plus the heal of the potions and food held reaches the bar", prompt)
+        self.assertIn("Never drink one only to meet a readiness bar: health_at_bar already counts the potions held", prompt)
+        self.assertIn("health_at_bar counts held heals: it is met when health plus the heal of the potions held reaches the bar", prompt)
         self.assertIn("the potion bar and the health bar trade against each other through held heals", prompt)
         self.assertIn("drinking to meet one bar breaks the other", prompt)
 

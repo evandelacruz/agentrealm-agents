@@ -4,6 +4,10 @@ A reflex: it acts on what is in reach now, whatever the plan says, and
 never walks. Walking to a supply further away is **Loot**'s, for a
 ``fetch_item`` op.
 
+Food is eaten the moment it is taken, even at full health, so Pickup leaves
+it lying until the character is hurt by at least its heal
+(``healing.worth_eating``, A155).
+
 With a full pack it never drops: what to give up is the planner's call
 (``pack.make_room``, A102), so a pickup that does not fit is skipped. A
 ``Take`` the server refused is sent again only when the executor's refusal
@@ -13,11 +17,13 @@ table allows it (``supply_refusals.can_try``, A80).
 from __future__ import annotations
 
 from agentrealm_adk.executor.supply_refusals import can_try
+from agentrealm_adk.healing import worth_eating
 from agentrealm_adk.knowledge_base import knowledge_items
 from agentrealm_adk.loot import Pickup, pickups
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.pack import TAKE
 from agentrealm_adk.reach import NEAR
+from agentrealm_adk.supplies import is_food
 from agentrealm_adk.world import WorldModel, chebyshev
 
 from .base import PlayContext, State, StateOutcome
@@ -34,7 +40,11 @@ def pickup_outcome(w: WorldModel, ctx: PlayContext, *, state: str) -> StateOutco
     if here is None:
         return None
     items = knowledge_items(ctx.knowledge)
-    found = [p for p in pickups(w, items) if chebyshev(p.pos, here) <= NEAR]
+    found = [
+        p
+        for p in pickups(w, items)
+        if chebyshev(p.pos, here) <= NEAR and (not is_food(p.code) or worth_eating(w, p.code))
+    ]
     found.sort(key=lambda p: (-p.score, chebyshev(p.pos, here), p.supply_id))
     for p in found:
         if p.chest_id is None and not can_try(ctx.memory, w, "take", p.supply_id, p.pos):

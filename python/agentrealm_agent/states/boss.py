@@ -60,9 +60,11 @@ def current_fight_boss(plan: Plan | None) -> GoalOp | None:
     return None
 
 
-def boss_fight_on(w: WorldModel, m: Memory) -> bool:
-    """A boss is engaged, or the counted clock runs: Retreat and Flee stand down."""
-    return m.boss is not None or boss_clock.running(m, w)
+def boss_fight_on(w: WorldModel, ctx: PlayContext) -> bool:
+    """The counted clock runs with time left: Retreat and Flee stand down,
+    and only then (A163). A fight seen with no clock assumes one (``sync_boss``)."""
+    left = boss_clock.ticks_left(ctx.memory, w, ctx.knowledge, ctx.tick_hz)
+    return left is not None and left > 0
 
 
 def boss_defeated(w: WorldModel, fight: BossFight) -> bool:
@@ -103,6 +105,7 @@ def sync_boss(w: WorldModel, m: Memory, plan: Plan | None) -> None:
         if boss is None:
             return
         m.boss = BossFight(op, boss.id, w.tick)
+        boss_clock.assume(m, w)  # no step through the op's door seen: the shortest limit, from now
     if boss_defeated(w, m.boss):
         assert plan is not None
         plan.finish_current(f"boss {m.boss.boss_id} defeated", memory=m)
@@ -148,30 +151,36 @@ def at_boss_door(w: WorldModel, door: Pos) -> bool:
 
 
 def exit_steps(w: WorldModel, ctx: PlayContext, target: Pos) -> int | None:
-    """Steps of the walk to the way out, None with no step toward it open:
-    priced once per position and target, not every decision (``BossClock.route``)."""
+    """Steps of the walk to the way out, None with no step toward it open.
+    An open walk is kept on its inputs (position, target, blocked and
+    occupied cells, the map's tiles, fording) and reused only while the clock is far from the limit
+    (twice the leave margin past the walk); near it, or with any input
+    changed, the walk is priced again. No step open is never kept."""
     c = ctx.memory.boss_clock
     if c is None or w.pos is None or w.map_id is None:
         return None
-    key = (w.pos, target)
-    if c.route is not None and c.route[0] == key:
-        return c.route[1]
     m = ctx.memory
     blocked, _, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    key = (w.pos, target, frozenset(blocked), frozenset(w.occupied()), w.view.tiles.revision, w.fords)
+    if c.route is not None and c.route[0] == key and not clock_nearly_out(w, ctx, c.route[1], margins=2):
+        return c.route[1]
     params = grid_params(ctx.policy, blocked, set(), allow_goal_door=True, m=m)
     path = cost_path(w, target, params, nav=nav_search(m, w, EXIT_GOAL, target)) or []
-    c.route = (key, len(path) if next_step(w, blocked, path) is not None else None)
-    return c.route[1]
+    if next_step(w, blocked, path) is None:
+        c.route = None
+        return None
+    c.route = (key, len(path))
+    return len(path)
 
 
-def clock_nearly_out(w: WorldModel, ctx: PlayContext, steps: int) -> bool:
+def clock_nearly_out(w: WorldModel, ctx: PlayContext, steps: int, *, margins: int = 1) -> bool:
     """Less of the counted clock is left than the walk of ``steps`` to the
-    way out and ``LEAVE_MARGIN_SECONDS`` (A163)."""
+    way out and ``margins`` times ``LEAVE_MARGIN_SECONDS`` (A163)."""
     left = boss_clock.ticks_left(ctx.memory, w, ctx.knowledge, ctx.tick_hz)
     if left is None:
         return False
     step = ticks_per_step(tick_rate_hz=ctx.tick_hz, movement_speed_milli=max(1, w.movement_speed))
-    return left <= steps * step + LEAVE_MARGIN_SECONDS * ctx.tick_hz
+    return left <= steps * step + margins * LEAVE_MARGIN_SECONDS * ctx.tick_hz
 
 
 def leave_room(
@@ -220,7 +229,7 @@ class BossState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return boss_fight_on(world, ctx.memory) or current_fight_boss(ctx.plan) is not None
+        return boss_fight_on(world, ctx) or ctx.memory.boss is not None or current_fight_boss(ctx.plan) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)

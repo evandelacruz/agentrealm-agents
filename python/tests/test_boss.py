@@ -170,7 +170,11 @@ class DefeatTest(unittest.TestCase):
         w.entities = []
         sync_boss(w, m, plan)
         self.assertEqual(plan.current()["op"], "fight_boss")
-        self.assertIsNone(m.boss)  # no clock running: disengaged, not finished
+        self.assertIsNotNone(m.boss, "the assumed clock runs: still the fight, not finished")
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
+        sync_boss(w, m, plan)
+        self.assertEqual(plan.current()["op"], "fight_boss")
+        self.assertIsNone(m.boss)  # off the room's map, no clock: disengaged, not finished
 
     def test_boss_out_of_view_with_clock_stays_engaged(self):
         w = grid(["..."], at=(1, 0), map_id=9)
@@ -408,7 +412,7 @@ class BossClockTest(unittest.TestCase):
         plan.drop_current("test")
         sync_boss(w, m, plan)
         self.assertIsNone(m.boss_clock)
-        self.assertFalse(boss_fight_on(w, m))
+        self.assertFalse(boss_fight_on(w, ctx(w, m, plan)))
 
     def test_a_defeat_stops_the_clock(self):
         w, m, plan = self.stepped_through()
@@ -435,6 +439,41 @@ class BossClockTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertIn("leave before the limit", out.reason)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (4, 2), "round the boss, toward the landing")
+
+    def test_a_fight_with_no_door_step_seen_assumes_the_shortest_limit(self):
+        """Review on #262: after a restart, or in by another door, Retreat and
+        Flee stand down only while a counted clock says there is time."""
+        w = grid(["D....", "#####"], at=(2, 0), map_id=9)
+        w.health = 1
+        w.entities = [boss(pos=(3, 0))]
+        m, plan = Memory(), boss_plan(5, 5)
+        c = ctx(w, m, plan, on_hostile="fight")
+        sync_boss(w, m, plan)
+        self.assertTrue(m.boss_clock.assumed)
+        self.assertEqual(boss_clock.ticks_left(m, w, None, 10), boss_clock.MIN_LIMIT_SECONDS * 10)
+        kb = KnowledgeBase.empty("olympuff")
+        w.map_levels[9] = 2
+        kb.levels["2"] = {boss_clock.LIMIT: 60}
+        self.assertEqual(boss_clock.ticks_left(m, w, kb, 10), 600, "a lower kept limit holds")
+        self.assertTrue(boss_fight_on(w, c))
+        out = dispatch(w, c)
+        self.assertIn("retreat out", out.reason, "out by the room's door it has seen")
+        w.tick += boss_clock.MIN_LIMIT_SECONDS * 10
+        self.assertFalse(boss_fight_on(w, c), "no time left: Retreat and Flee no longer stand down")
+
+    def test_the_walk_out_is_priced_again_when_its_inputs_change(self):
+        """Review on #262: the boss on the exit step, then off it, then a longer way."""
+        w = grid(["#######", "#D....#", "#.....#", "#.....#", "#######"], at=(3, 1), map_id=9)
+        m = in_room(w, Memory(), landing=(2, 1))
+        c = ctx(w, m, boss_plan(5, 5))
+        column = [boss(pos=(2, 1)), Entity("npc", 51, (2, 2), "rat"), Entity("npc", 52, (2, 3), "rat")]
+        w.entities = column
+        self.assertIsNone(exit_steps(w, c, (1, 1)), "every way toward it taken")
+        self.assertIsNone(m.boss_clock.route, "no open step is never kept")
+        w.entities = [boss(pos=(4, 1))]
+        self.assertEqual(exit_steps(w, c, (1, 1)), 2, "the same cell, the way opened")
+        w.view.tiles[(2, 1)] = w.view.tiles[(2, 2)] = "wall"
+        self.assertEqual(exit_steps(w, c, (1, 1)), 4, "the same cell, the way round is longer")
 
     def test_the_walk_out_is_priced_by_its_path_once_per_position(self):
         """Review on #262: round a wall the walk is longer than the straight line."""

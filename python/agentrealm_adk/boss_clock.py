@@ -26,6 +26,9 @@ from .world import DOORS, Pos, WorldModel, chebyshev
 
 # The limit when the level sets none (Manual §11 Bosses and levels).
 DEFAULT_LIMIT_SECONDS = 300
+# The shortest limit a level sets in Olympuff: what a clock with no door
+# step seen assumes (Manual §11 Bosses and levels).
+MIN_LIMIT_SECONDS = 90
 # The longest limit a level sets in Olympuff: a death later than this from
 # the door step is no limit's (Manual §11 Bosses and levels).
 MAX_LIMIT_SECONDS = 600
@@ -55,6 +58,16 @@ def start(m: Memory, w: WorldModel, door: Pos) -> bool:
     return True
 
 
+def assume(m: Memory, w: WorldModel) -> bool:
+    """A boss fight on with no clock (a restart, or the room entered by
+    another door than the op's): the clock is assumed to have started now,
+    against the shortest limit (``MIN_LIMIT_SECONDS``, or a lower one kept)."""
+    if m.boss_clock is not None or w.map_id is None:
+        return False
+    m.boss_clock = BossClock(w.tick, w.map_id, None, assumed=True)
+    return True
+
+
 def running(m: Memory, w: WorldModel) -> bool:
     """The clock runs: alive, and still on the boss room's map."""
     c = m.boss_clock
@@ -66,7 +79,10 @@ def ticks_left(m: Memory, w: WorldModel, kb: KnowledgeBase | None, tick_hz: int)
     c = m.boss_clock
     if c is None or not running(m, w):
         return None
-    limit = level_limit_seconds(kb, w.map_levels.get(c.room_map)) * tick_hz
+    limit = level_limit_seconds(kb, w.map_levels.get(c.room_map))
+    if c.assumed:
+        limit = min(limit, MIN_LIMIT_SECONDS)
+    limit *= tick_hz
     return max(0, c.door_tick + limit - w.tick)
 
 
@@ -97,7 +113,7 @@ def note_death(
     kept, else None."""
     c = m.boss_clock
     died = next((ev for ev in events if ev.get("kind") == "Died"), None)
-    if c is None or died is None or kb is None or health_before is None or health_before <= 0:
+    if c is None or c.assumed or died is None or kb is None or health_before is None or health_before <= 0:
         return None
     level = w.map_levels.get(c.room_map)
     if not level or map_before != c.room_map:

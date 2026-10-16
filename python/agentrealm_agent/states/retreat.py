@@ -68,7 +68,7 @@ class RetreatState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        if boss_fight_on(world, ctx.memory):
+        if boss_fight_on(world, ctx):
             return False  # Boss retreats out or commits (A38)
         if on_safe_tile(world):
             return False
@@ -77,7 +77,7 @@ class RetreatState(State):
         return should_retreat(world, ctx.policy, ctx.params, fights(ctx.memory))
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
-        if boss_fight_on(world, ctx.memory):
+        if boss_fight_on(world, ctx):
             return True
         return on_safe_tile(world) or not should_retreat(
             world, ctx.policy, ctx.params, fights(ctx.memory)

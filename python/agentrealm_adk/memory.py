@@ -45,8 +45,12 @@ class BossClock:
     room_map: int  # the boss room's map: the clock runs while the character is on it
     landing: Pos | None  # where the boss door's warp landed: the exit door is the one by it
     doors: set[Pos] = field(default_factory=set)  # the room's doors seen since, kept out of view (a dark room)
-    # The walk to the way out last priced: (position, target) and its steps, None with no open step.
-    route: tuple[tuple[Pos | None, Pos], int | None] | None = None
+    # The walk to the way out last priced: its inputs (position, target, blocked and
+    # occupied cells, tiles revision, fording) and its steps. Only an open walk is kept.
+    route: tuple[tuple, int] | None = None
+    # No step through the op's door was seen (a restart, another door in): counted
+    # from when the fight was first seen, against the shortest limit (``boss_clock.assume``).
+    assumed: bool = False
 
 
 @dataclass

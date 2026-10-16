@@ -29,13 +29,14 @@ grows on the next hit that lands. Counts add to the file's: other characters
 of the world share it, so a save adds only what this run counted
 (``ThreatTable.saved_hits``).
 A sighting is saved for every NPC of such a type: the cell it was last seen
-on, and whether it stood still there (blocked, Manual §11 Hostiles). A loaded
-sighting is forgotten by the same rules as one seen this run
-(``WorldModel._note_sightings``): once its cell is in sight with it gone, a
-moving one after ``SIGHTING_TICKS`` unseen, and on an ``NPCDied``. Forgotten,
-it is removed from the file at exit. Rows an older agent wrote with a post
-(``home``, ``post``, ``reach``, ``strength``) load as the cell last seen,
-still when they kept a post. The damage a hostile has taken is not saved:
+on, and whether it was blocked there (``Sighting.still``, Manual §11
+Hostiles). A loaded sighting is forgotten by the same rules as one seen this
+run (``WorldModel._note_sightings``): once its cell is in sight with it gone,
+after ``SIGHTING_TICKS`` unseen (``BLOCKED_SIGHTING_TICKS`` for a blocked
+one), and on an ``NPCDied``. Forgotten, it is removed from the file at exit.
+Rows an older agent wrote with a post (``home``, ``post``, ``reach``,
+``strength``) load as the cell last seen, not blocked: a post was never
+found blocked. The damage a hostile has taken is not saved:
 a death out of sight is never seen (``WorldModel.npc_damage``).
 """
 
@@ -153,5 +154,5 @@ def _sighting(key: str, row: Any) -> Sighting | None:
     code = row.get("code")
     if not isinstance(code, str) or not code:
         return None
-    still = row.get("still") is True or row.get("post") is True  # an older agent's post: it stood still there
+    still = row.get("still") is True  # an older agent's post was never found blocked
     return Sighting(Entity("npc", npc_id, pos, code), map_id, tick, still, in_view=False)

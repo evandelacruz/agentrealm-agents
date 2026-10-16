@@ -58,15 +58,20 @@ def terrain_cells(t: dict) -> dict:
 Pos = tuple[int, int]
 
 
-# A hostile that stands on one cell this long in view is blocked (Manual
-# §11 Hostiles: a chaser stands still when no step closes in on the
-# nearest character): the same stillness Greet takes for a helper
-# (``investigation.HELPER_STILL_TICKS``).
+# A hostile that stands on one cell this long in view, not next to us, with
+# no step that would close in on us, is blocked (Manual §11 Hostiles: a
+# chaser stands still when no step closes in on the nearest character): the
+# same stillness Greet takes for a helper (``investigation.HELPER_STILL_TICKS``).
+# One next to us that stands still is swinging at us, not blocked.
 STILL_TICKS = 50
 # A hostile out of view that was moving is remembered where it was last
 # seen for this long (60 s at 10 ticks/s), on any map: it goes for the
 # nearest character, so that cell soon says little.
 SIGHTING_TICKS = 600
+# A blocked one stays where the ground stops it while the ground and the
+# nearest character stay put, but either may change unseen, so it is
+# remembered there out of view for at most this long (5 min at 10 ticks/s).
+BLOCKED_SIGHTING_TICKS = 3000
 
 
 @dataclass(frozen=True)
@@ -104,13 +109,15 @@ class Sighting:
     A hostile has no post (Manual §11 Hostiles): it goes for the nearest
     living character on its map, with no sight or distance limit. A chaser
     steps greedily toward that character and stands still where no step
-    closes in, so one seen standing still for ``STILL_TICKS`` (``still``) is
-    blocked by the ground between, not guarding: it stays where it stands
-    until the ground or the nearest character changes, so it is remembered
-    there until that cell is in sight with it gone. One that was moving is
-    remembered where it was last seen for ``SIGHTING_TICKS``. Whether it is
-    a threat is asked at use (``survival.is_hostile``), so a type found
-    hostile later counts.
+    closes in. ``still`` means blocked, not merely standing still: it stood
+    on its cell for ``STILL_TICKS`` in view, not next to us (one next to us
+    is swinging at us), and no step would bring it closer to us
+    (``WorldModel.blocked``). The mark is cleared the next time it is seen
+    otherwise (moving, next to us, or with a step open). A blocked one is
+    remembered out of view where it stood until that cell is in sight with
+    it gone, for at most ``BLOCKED_SIGHTING_TICKS``; one that was moving
+    for ``SIGHTING_TICKS``. Whether it is a threat is asked at use
+    (``survival.is_hostile``), so a type found hostile later counts.
     """
 
     entity: Entity  # as last seen
@@ -134,6 +141,24 @@ NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != 
 
 def chebyshev(a: Pos, b: Pos) -> int:
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+
+def chaser_step(at: Pos, target: Pos, ground: Callable[[Pos], bool]) -> Pos:
+    """Where a chaser on ``at`` stands after one step toward ``target``
+    (Manual §11 Hostiles): the neighbouring block that brings it closest,
+    nearest by Chebyshev distance then straight-line, never onto ``target``
+    itself, and ``at`` when no step on ``ground`` brings it closer. It finds
+    no path, so a wall or water between stops it."""
+
+    def gap(p: Pos) -> tuple[int, int]:
+        return chebyshev(p, target), (p[0] - target[0]) ** 2 + (p[1] - target[1]) ** 2
+
+    best, best_gap = at, gap(at)
+    for dx, dy in NEIGHBOURS:
+        n = (at[0] + dx, at[1] + dy)
+        if n != target and ground(n) and gap(n) < best_gap:
+            best, best_gap = n, gap(n)
+    return best
 
 
 @dataclass
@@ -719,11 +744,10 @@ class WorldModel:
 
     def _note_sightings(self, tick: int) -> None:
         """Keep ``sightings``: refresh the NPCs and characters in view, each
-        ``still`` while it has stood on its cell ``STILL_TICKS``, and forget
-        one out of view once the cell it was last seen on is in sight with it
-        gone, or, one that was moving, once it has been unseen for
-        ``SIGHTING_TICKS`` on any map. A still one is blocked there, so time
-        alone does not move it (``Sighting``)."""
+        ``still`` while it is ``blocked``, and forget one out of view once the
+        cell it was last seen on is in sight with it gone, or once it has
+        been unseen for ``SIGHTING_TICKS`` (a blocked one
+        ``BLOCKED_SIGHTING_TICKS``) on any map (``Sighting``)."""
         in_view = set()
         for e in self.entities:
             if e.kind not in ("npc", "character"):
@@ -734,15 +758,27 @@ class WorldModel:
             if s is None or s.map_id != self.map_id:
                 s = self.sightings[key] = Sighting(e, self.map_id, tick)
             s.entity, s.tick, s.in_view = e, tick, True
-            s.still = e.kind == "npc" and self.npc_still_ticks(e) >= STILL_TICKS
+            s.still = self.blocked(e)
         for key, s in list(self.sightings.items()):
             if key in in_view:
                 continue
             s.in_view = False
             here = self.pos if s.map_id == self.map_id else None
             gone = here is not None and chebyshev(s.entity.pos, here) < self.perception
-            if gone or (not s.still and tick - s.tick > SIGHTING_TICKS):
+            if gone or tick - s.tick > (BLOCKED_SIGHTING_TICKS if s.still else SIGHTING_TICKS):
                 del self.sightings[key]
+
+    def blocked(self, e: Entity) -> bool:
+        """``e`` is a hostile the ground stops (Manual §11 Hostiles): an NPC
+        that has stood on its cell ``STILL_TICKS`` in view, not next to us
+        (standing there it is swinging at us), and with no step on the
+        ground a hostile walks that would bring it closer to us
+        (``chaser_step``). Merely standing still is not being blocked."""
+        if e.kind != "npc" or self.npc_still_ticks(e) < STILL_TICKS or self.pos is None:
+            return False
+        if chebyshev(e.pos, self.pos) <= 1:
+            return False
+        return chaser_step(e.pos, self.pos, self.chaser_ground()) == e.pos
 
     def npc_still_ticks(self, e: Entity) -> int:
         """How long ``e`` has stood on its cell while in view; 0 when it just moved or was never noted."""

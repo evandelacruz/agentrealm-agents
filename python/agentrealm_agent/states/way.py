@@ -242,8 +242,13 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     def ashore(p: Pos) -> bool:
         return land(p) and not on_water(w, m, p)
 
-    # Cheap tests first, then one search per landing, nearest first, until one is reached.
-    for cell in sorted((p for p in near if ashore(p) and p != e.pos), key=lambda p: (chebyshev(p, w.pos), p)):
+    landings = [p for p in near if ashore(p) and p != e.pos]
+    # The meeting is a cell within its range on land, so with no such cell the
+    # engagement would fight from, no landing passes: skip the searches.
+    if not any(would_fight(w, policy, ctx.params, also=e, m=m, at=p) for p in landings):
+        return None
+    # Then one search per landing, nearest first, until one is reached.
+    for cell in sorted(landings, key=lambda p: (chebyshev(p, w.pos), p)):
         avoid = plan_avoid | others | (near - {cell})
         path = cost_path(w, cell, grid_params(policy, avoid, plan_costly))
         meet = _meeting(w, policy, e, path)

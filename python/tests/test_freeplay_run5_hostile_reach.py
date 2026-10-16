@@ -80,15 +80,19 @@ def gather(w: WorldModel, m: Memory, op: dict, **kw):
 
 
 class SightingsTest(unittest.TestCase):
-    def test_a_guard_that_stands_still_is_remembered_there_out_of_view(self):
+    def test_a_blocked_guard_is_remembered_there_out_of_view(self):
         w = field()
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx, dy) != (0, 0):
+                    w.view.tiles[(POST[0] + dx, POST[1] + dy)] = "wall"  # walled in: no step closes in
         still_seen_then_left(w)
         s = w.sightings[("npc", 9)]
         self.assertTrue(s.still)
         self.assertEqual(s.entity.pos, POST)
         self.assertIn((POST, policy().hostile_range + 1), known_reach(w, policy()))
-        see(w, [], STILL_TICKS + 10 * SIGHTING_TICKS)
-        self.assertIn((POST, policy().hostile_range + 1), known_reach(w, policy()), "blocked: time does not move it")
+        see(w, [], STILL_TICKS + 2 * SIGHTING_TICKS)
+        self.assertIn((POST, policy().hostile_range + 1), known_reach(w, policy()), "blocked: held past a moving one's time")
 
     def test_its_cell_in_sight_and_empty_forgets_it(self):
         """Free-play run 9 (A85): looking is the evidence it has gone."""

@@ -12,8 +12,8 @@ A hostile in view reaches ``policy.hostile_range`` round where it stands
 (``survival.hostile_reach``). One remembered out of view
 (``WorldModel.sightings``) holds its ``gather_bar`` round the cell it was
 last seen on (``known_reach``, free-play run 5): for ``SIGHTING_TICKS`` when
-it was moving, and until that cell is seen empty when it stood still there
-(blocked, ``Sighting``). ``ground_by_hostile`` puts both together per hostile.
+it was moving, and for ``BLOCKED_SIGHTING_TICKS`` when it was blocked there
+(``Sighting.still``), never once that cell is seen empty. ``ground_by_hostile`` puts both together per hostile.
 
 Safety is judged on the exact block (Manual §11 Combat): no hit, damaging
 block or trap hurts on a safe-zone block, so a known safe block is no
@@ -32,11 +32,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Collection, Sequence
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .survival import hostile_reach, is_attacker, is_hostile, recently_attacked
-from .world import NEIGHBOURS, SIGHTING_TICKS, Entity, Pos, Sighting, WorldModel, chebyshev
+from .world import BLOCKED_SIGHTING_TICKS, SIGHTING_TICKS, Entity, Pos, Sighting, WorldModel, chaser_step, chebyshev
 from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
@@ -147,10 +147,10 @@ def held_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, list[tupl
 
 def _last_seen_holds(w: WorldModel, s: Sighting) -> bool:
     """The cell ``s`` was last seen on still holds ground: that cell is not
-    in sight with it gone, and it stood still there (blocked: time alone
-    does not move it) or was seen there within ``SIGHTING_TICKS``."""
+    in sight with it gone, and it was seen there within ``SIGHTING_TICKS``,
+    or ``BLOCKED_SIGHTING_TICKS`` when it was blocked there."""
     in_sight = w.pos is not None and chebyshev(s.entity.pos, w.pos) < w.perception
-    return not in_sight and (s.still or w.tick - s.tick <= SIGHTING_TICKS)
+    return not in_sight and w.tick - s.tick <= (BLOCKED_SIGHTING_TICKS if s.still else SIGHTING_TICKS)
 
 
 def known_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int]]:
@@ -171,23 +171,6 @@ def reach_cells(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[P
     view and ``d.held``, known safe blocks left out (``off_safe``). A walk
     prices them ``costly``."""
     return off_safe(w, hostile_reach(w, policy) | zone_cells((d or danger(w, policy)).held))
-
-
-def chaser_step(at: Pos, target: Pos, ground: Callable[[Pos], bool]) -> Pos:
-    """Where a chaser on ``at`` stands after one step toward ``target``
-    (Manual §11 Hostiles): the neighbouring block that brings it closest,
-    nearest by Chebyshev distance then straight-line, never onto ``target``
-    itself, and ``at`` when no step on ``ground`` brings it closer. It finds
-    no path, so a wall or water between stops it."""
-    def gap(p: Pos) -> tuple[int, int]:
-        return chebyshev(p, target), (p[0] - target[0]) ** 2 + (p[1] - target[1]) ** 2
-
-    best, best_gap = at, gap(at)
-    for dx, dy in NEIGHBOURS:
-        n = (at[0] + dx, at[1] + dy)
-        if n != target and ground(n) and gap(n) < best_gap:
-            best, best_gap = n, gap(n)
-    return best
 
 
 def chase(w: WorldModel, start: Pos, path: Sequence[Pos]) -> list[Pos]:

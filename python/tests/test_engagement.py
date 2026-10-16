@@ -23,7 +23,7 @@ from agentrealm_agent.states.detour import Detour, detour_find
 from agentrealm_agent.states.fight import held_target
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_adk.survival import should_retreat, win_ratio
-from agentrealm_adk.world import SIGHTING_TICKS, STILL_TICKS, Entity, Sighting, WorldModel, chebyshev
+from agentrealm_adk.world import BLOCKED_SIGHTING_TICKS, SIGHTING_TICKS, STILL_TICKS, Entity, Sighting, WorldModel, chebyshev
 
 MAP = 1
 CODE = "fake_biter"
@@ -282,6 +282,14 @@ class CannotOutrunTest(unittest.TestCase):
         self.assertEqual(out.reason, "not outrunning npc 7: fight npc 7")
 
 
+def wall_in(w: WorldModel, cell) -> None:
+    """Walls on every cell round ``cell``: a hostile there has no step to take."""
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if (dx, dy) != (0, 0):
+                w.view.tiles[(cell[0] + dx, cell[1] + dy)] = "wall"
+
+
 def last_seen_still(w: WorldModel, npc: Entity) -> None:
     """``npc`` was seen just now standing still where it is (blocked), and is out of view."""
     w.sightings[(npc.kind, npc.id)] = Sighting(npc, MAP, w.tick, still=True, in_view=False)
@@ -319,15 +327,28 @@ class RememberedWhereLastSeenTest(unittest.TestCase):
     def policy(self) -> Policy:
         return ctx(on_hostile="flee").policy
 
-    def test_a_still_hostile_is_remembered_until_its_cell_is_seen_empty(self):
+    def test_a_blocked_hostile_is_remembered_until_its_cell_is_seen_empty(self):
+        wall_in(self.w, self.LAST)
         self.seen(STILL_TICKS)
-        self.assertTrue(self.w.sightings[("npc", 7)].still, "it stood still: blocked")
-        self.w.tick += 10 * SIGHTING_TICKS
+        self.assertTrue(self.w.sightings[("npc", 7)].still, "walled in, no step closes in: blocked")
+        self.w.tick += 2 * SIGHTING_TICKS
         self.w._set_entities([], self.w.tick)
-        self.assertTrue(self.held(), "time alone does not move a blocked hostile")
+        self.assertTrue(self.held(), "past a moving one's time, a blocked one is still held")
         self.w.pos = (25, 10)  # its cell in sight, nobody on it
         self.w._set_entities([], self.w.tick)
         self.assertNotIn(("npc", 7), self.w.sightings)
+
+    def test_a_blocked_hostile_is_let_go_after_blocked_sighting_ticks(self):
+        wall_in(self.w, self.LAST)
+        self.seen(STILL_TICKS)
+        self.w.tick += BLOCKED_SIGHTING_TICKS + 1
+        self.w._set_entities([], self.w.tick)
+        self.assertNotIn(("npc", 7), self.w.sightings, "the ground or the nearest character may have changed unseen")
+
+    def test_one_standing_still_in_the_open_is_not_blocked(self):
+        """A step would close in on us: it is not blocked, whatever it is doing."""
+        self.seen(STILL_TICKS)
+        self.assertFalse(self.w.sightings[("npc", 7)].still)
 
     def test_a_moving_hostile_is_remembered_for_sighting_ticks(self):
         self.seen(1)

@@ -100,9 +100,14 @@ class RememberedHostilesTest(unittest.TestCase):
         """Its grass is barred: Gather goes for unexplored ground instead."""
         self.assertEqual(self.gather_at(LAST_SEEN + 10).gather_target[0], "frontier")
 
-    def test_a_still_hostile_nobody_looked_for_holds_its_cell_over_a_long_break(self):
-        """Blocked where it stood: time away does not move it."""
-        self.assertEqual(self.gather_at(LAST_SEEN + LONG_BREAK).gather_target[0], "frontier")
+    def test_a_blocked_hostile_holds_its_cell_past_a_moving_ones_time(self):
+        self.assertEqual(self.gather_at(LAST_SEEN + 2 * SIGHTING_TICKS).gather_target[0], "frontier")
+
+    def test_over_a_long_break_a_blocked_hostile_is_let_go(self):
+        """The ground or the nearest character may have changed unseen: at
+        most ``BLOCKED_SIGHTING_TICKS``."""
+        m = self.gather_at(LAST_SEEN + LONG_BREAK)
+        self.assertEqual(m.gather_target[0], "grass")
 
     def test_a_moving_hostile_lets_its_cell_go_after_sighting_ticks(self):
         m = self.gather_at(LAST_SEEN + SIGHTING_TICKS + 1, still=False)
@@ -117,7 +122,7 @@ class RememberedHostilesTest(unittest.TestCase):
         self.assertEqual(w.sightings, {})
         self.assertEqual(hostiles_within(w, policy(), CELL, 1), [])
 
-    def test_an_older_agents_post_loads_as_still_where_it_was_last_seen(self):
+    def test_an_older_agents_post_loads_where_it_was_last_seen_not_blocked(self):
         kb = KnowledgeBase.empty("fake-world")
         kb.npc_types[CODE] = {"hostile": True}
         kb.extra[SIGHTINGS_KEY] = {"9": {
@@ -127,7 +132,7 @@ class RememberedHostilesTest(unittest.TestCase):
         w = field(at=(2, 30))
         load_hostiles(kb, w)
         s = w.sightings[("npc", 9)]
-        self.assertEqual((s.entity.pos, s.still), ((17, 2), True))
+        self.assertEqual((s.entity.pos, s.still), ((17, 2), False), "a post was never found blocked")
         self.assertEqual([c for c, _ in known_reach(w, policy())], [(17, 2)])
 
     def test_what_is_saved_is_where_it_was_last_seen_and_whether_it_stood_still(self):
@@ -136,6 +141,10 @@ class RememberedHostilesTest(unittest.TestCase):
         w = field(at=(2, 30))
         load_hostiles(kb, w)
         guard = Entity("npc", 9, CELL, CODE)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if (dx, dy) != (0, 0):
+                    w.view.tiles[(CELL[0] + dx, CELL[1] + dy)] = "wall"  # walled in: blocked
         for t in range(0, 60):
             see(w, [guard], t)
         see(w, [], 61)

@@ -25,7 +25,7 @@ from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation.planner import COSTLY_STEP, KNOWN_WALKABLE, CostGridParams, _Grid
 from agentrealm_adk.pathing import covers_pass, plan_sets
 from agentrealm_adk.survival import UNKILLED_HOSTILE_HEALTH, health_left, ticks_to_kill_them, win_ratio
-from agentrealm_adk.world import STILL_TICKS, Entity, WorldModel
+from agentrealm_adk.world import BLOCKED_SIGHTING_TICKS, SIGHTING_TICKS, STILL_TICKS, Entity, WorldModel
 from agentrealm_adk.zone_discovery import apply_zone
 
 MAP = 7
@@ -78,17 +78,40 @@ class ChaseTest(unittest.TestCase):
 
 
 class StillIsBlockedTest(unittest.TestCase):
-    def test_one_that_stands_still_is_blocked_and_one_that_moves_is_not(self):
-        w = world(["." * 9] * 5, at=(1, 2))
-        e = gnawer((6, 2))
+    """``still`` means blocked, not merely standing still: stood still
+    ``STILL_TICKS``, not next to us, and no step would close in on us."""
+
+    def stood(self, rows: list[str], at: tuple[int, int], e: Entity) -> WorldModel:
+        w = world(rows, at=at)
         for t in range(STILL_TICKS + 1):
             w.tick = t
             w._set_entities([e], t)
+        return w
+
+    def test_behind_a_wall_it_is_blocked_and_once_it_moves_it_is_not(self):
+        w = self.stood(["#####", "###..", "#.#..", "###..", "#####"], (4, 2), gnawer((1, 2)))
         self.assertTrue(w.sightings[("npc", 9)].still)
-        moved = gnawer((5, 2))
         w.tick += 1
-        w._set_entities([moved], w.tick)
+        w._set_entities([gnawer((3, 1))], w.tick)
         self.assertFalse(w.sightings[("npc", 9)].still, "it stepped: not blocked")
+
+    def test_standing_still_in_the_open_is_not_blocked(self):
+        w = self.stood(["." * 9] * 5, (1, 2), gnawer((6, 2)))
+        self.assertFalse(w.sightings[("npc", 9)].still, "a step would close in")
+
+    def test_standing_still_next_to_us_is_swinging_not_blocked(self):
+        w = self.stood(["###", "#..", "###"], (2, 1), gnawer((1, 1)))
+        self.assertFalse(w.sightings[("npc", 9)].still)
+
+    def test_a_blocked_one_out_of_view_is_let_go_after_blocked_sighting_ticks(self):
+        w = self.stood(["#####", "###..", "#.#..", "###..", "#####"], (4, 2), gnawer((1, 2)))
+        w.perception = 2  # its cell out of sight
+        w.tick += SIGHTING_TICKS + 1
+        w._set_entities([], w.tick)
+        self.assertIn(("npc", 9), w.sightings, "past a moving one's time")
+        w.tick += BLOCKED_SIGHTING_TICKS
+        w._set_entities([], w.tick)
+        self.assertNotIn(("npc", 9), w.sightings)
 
 
 class ChaserApproachIsPricedTest(unittest.TestCase):

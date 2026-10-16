@@ -19,8 +19,7 @@ Stored in the knowledge base as::
     "npc_types": {"<npc type code>": {"hostile": true, "max_hit": 2,
                                       "hits": 5, "misses": 3}, ...}
     "hostile_sightings": {"<npc id>": {"code", "map_id", "x", "y", "tick",
-                                       "home": [x, y], "post", "reach",
-                                       "strength", "noted", "spells"}, ...}
+                                       "still"}, ...}
 
 A type is saved once it has shown it is hostile (``survival.known_hostile``),
 with the largest hit it dealt us (``max_hit``, gross of the armor we wore,
@@ -29,14 +28,16 @@ as the threat table files it) and its swings at us that hit and missed. A
 grows on the next hit that lands. Counts add to the file's: other characters
 of the world share it, so a save adds only what this run counted
 (``ThreatTable.saved_hits``).
-A sighting is saved for every NPC of such a type: its post and reach, or the
-cell it was last seen on, and how strong a post still is (``strength`` as of
-tick ``noted``, ``spells`` seen). A loaded sighting is forgotten by the same
-rules as one seen this run (``WorldModel._note_sightings``): a post fades
-only while in sight and empty, never on time between runs, one keeping no post goes
-once its cell is in sight with it gone or after ``SIGHTING_TICKS`` unseen,
-and an ``NPCDied`` forgets either. Forgotten, it is removed from the file at
-exit.
+A sighting is saved for every NPC of such a type: the cell it was last seen
+on, and whether it was blocked there (``Sighting.still``, Manual §11
+Hostiles). A loaded sighting is forgotten by the same rules as one seen this
+run (``WorldModel._note_sightings``): once its cell is in sight with it gone,
+after ``SIGHTING_TICKS`` unseen (``BLOCKED_SIGHTING_TICKS`` for a blocked
+one), and on an ``NPCDied``. Forgotten, it is removed from the file at exit.
+Rows an older agent wrote with a post (``home``, ``post``, ``reach``,
+``strength``) load as the cell last seen, not blocked: a post was never
+found blocked. The damage a hostile has taken is not saved:
+a death out of sight is never seen (``WorldModel.npc_damage``).
 """
 
 from __future__ import annotations
@@ -137,19 +138,7 @@ def _count(v: Any) -> int | None:
 
 def _row(s: Sighting) -> dict[str, Any]:
     e = s.entity
-    return {
-        "code": e.code,
-        "map_id": s.map_id,
-        "x": e.pos[0],
-        "y": e.pos[1],
-        "tick": s.tick,
-        "home": [s.home[0], s.home[1]],
-        "post": s.post,
-        "reach": s.reach,
-        "strength": round(s.strength, 4),
-        "noted": s.noted,
-        "spells": s.spells,
-    }
+    return {"code": e.code, "map_id": s.map_id, "x": e.pos[0], "y": e.pos[1], "tick": s.tick, "still": s.still}
 
 
 def _sighting(key: str, row: Any) -> Sighting | None:
@@ -158,18 +147,12 @@ def _sighting(key: str, row: Any) -> Sighting | None:
     try:
         npc_id = int(key)
         pos = (int(row["x"]), int(row["y"]))
-        home = (int(row["home"][0]), int(row["home"][1]))
         map_id = int(row["map_id"])
         tick = int(row["tick"])
-        reach = int(row.get("reach", 0))
-        strength = min(1.0, max(0.0, float(row.get("strength", 1.0))))
-        noted = int(row.get("noted", tick))
-        spells = max(1, int(row.get("spells", 1)))
     except (KeyError, IndexError, TypeError, ValueError):
         return None
     code = row.get("code")
     if not isinstance(code, str) or not code:
         return None
-    entity = Entity("npc", npc_id, pos, code)
-    post = row.get("post") is True
-    return Sighting(entity, map_id, tick, home, post, reach, strength, noted, spells, in_view=False)
+    still = row.get("still") is True  # an older agent's post was never found blocked
+    return Sighting(Entity("npc", npc_id, pos, code), map_id, tick, still, in_view=False)

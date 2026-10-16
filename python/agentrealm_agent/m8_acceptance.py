@@ -354,4 +354,4 @@ def _below_every_bar(w: WorldModel, policy: Policy, params: dict[str, float | in
     group = combat_group(w, policy)
     if not group:
         return False
-    return win_ratio(estimate_health(w), group, w.threat, w.armed_code, worn_defense(w)) <= fight_bar(w, policy, params, outrun_failed=True)
+    return win_ratio(estimate_health(w), group, w.threat, w.armed_code, worn_defense(w), w.npc_damage) <= fight_bar(w, policy, params, outrun_failed=True)

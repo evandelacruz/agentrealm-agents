@@ -33,11 +33,11 @@ from agentrealm_agent.states.detour import detour_find
 from agentrealm_adk.hostile_ground import known_reach
 from agentrealm_agent.states.gather_safe import gather_ground
 from agentrealm_adk.survival import hostiles_in_range, known_hostile
-from agentrealm_adk.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
+from agentrealm_adk.world import SIGHTING_TICKS, STILL_TICKS, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"
-POST = (20, 10)
+STOOD = (20, 10)  # where the gnasher stood still
 
 
 def policy(**kw) -> Policy:
@@ -54,7 +54,7 @@ def field(at=(2, 10), size=40, perception=6) -> WorldModel:
     return w
 
 
-def gnasher(at=POST, npc_id=9) -> Entity:
+def gnasher(at=STOOD, npc_id=9) -> Entity:
     return Entity("npc", npc_id, at, CODE)
 
 
@@ -74,13 +74,13 @@ def hit_by(w: WorldModel, npc_id: int, tick: int) -> None:
 
 
 def run_five() -> WorldModel:
-    """A run that met the gnasher at its post, was hit by it, and walked off."""
+    """A run that met the gnasher standing still, was hit by it, and walked off."""
     w = field(at=(15, 10))
     see(w, [gnasher()], 0)
-    see(w, [gnasher()], POST_STILL_TICKS)
-    hit_by(w, 9, POST_STILL_TICKS + 1)
+    see(w, [gnasher()], STILL_TICKS)
+    hit_by(w, 9, STILL_TICKS + 1)
     w.pos = (2, 10)
-    see(w, [], POST_STILL_TICKS + 2)
+    see(w, [], STILL_TICKS + 2)
     return w
 
 
@@ -112,17 +112,16 @@ class HostilityKeptAcrossRunsTest(unittest.TestCase):
         see(w, [gnasher((18, 11), npc_id=12)], 10_000)
         self.assertTrue(known_hostile(w, w.entities[0]))
 
-    def test_its_post_and_reach_hold_ground_out_of_view(self):
-        w = field()  # the post is far out of view
+    def test_where_it_stood_still_holds_ground_out_of_view(self):
+        w = field()  # its cell is far out of view
         load_hostiles(self.saved(), w)
-        reach = max(policy().hostile_range, 5) + 1  # hit from (15, 10), 5 off its post
-        self.assertIn((POST, reach), known_reach(w, policy()))
+        self.assertIn((STOOD, policy().hostile_range + 1), known_reach(w, policy()))
         self.assertFalse(gather_ground(w, (21, 11), policy()))
 
-    def test_detour_skips_a_pile_beside_the_remembered_post(self):
+    def test_detour_skips_a_pile_beside_it(self):
         w = field(at=(17, 10))
         load_hostiles(self.saved(), w)
-        see(w, [gnasher(), Entity("supply", 50, (21, 11), "gem")], 10_000)  # back on its post
+        see(w, [gnasher(), Entity("supply", 50, (21, 11), "gem")], 10_000)  # seen there again
         m = Memory(path=[(16, 10), (15, 10), (14, 10)], goal="explore")
         ctx = PlayContext(m, policy(), random.Random(0), plan=Plan([], dict(PARAM_DEFAULTS)))
         self.assertIsNone(detour_find(w, ctx))
@@ -146,7 +145,7 @@ class LoadedSightingsTest(unittest.TestCase):
     def kb(self, **row) -> KnowledgeBase:
         kb = KnowledgeBase.empty("fake-world")
         kb.npc_types[CODE] = {"hostile": True}
-        base = {"code": CODE, "map_id": MAP, "x": 20, "y": 10, "tick": 1000, "home": [20, 10], "post": False, "reach": 0}
+        base = {"code": CODE, "map_id": MAP, "x": 20, "y": 10, "tick": 1000, "still": False}
         kb.extra[SIGHTINGS_KEY] = {"9": {**base, **row}}
         return kb
 
@@ -158,18 +157,17 @@ class LoadedSightingsTest(unittest.TestCase):
         see(w, [], 1000 + SIGHTING_TICKS + 1)
         self.assertEqual(known_reach(w, policy()), [])
 
-    def test_a_post_found_empty_is_forgotten_and_removed_from_the_file(self):
-        kb = self.kb(post=True)
+    def test_a_still_one_found_gone_is_forgotten_and_removed_from_the_file(self):
+        kb = self.kb(still=True)
         w = field(at=(17, 10))
         loaded = load_hostiles(kb, w)
-        for t in range(5000, 5000 + 4 * EMPTY_POST_HALF_LIFE_TICKS):
-            see(w, [], t)  # the post is in sight, with nobody on it
+        see(w, [], 5000)  # its cell is in sight, with nobody on it
         self.assertEqual(w.sightings, {})
         save_hostiles(kb, w, loaded)
         self.assertNotIn(SIGHTINGS_KEY, kb.extra)
 
     def test_a_dead_npc_is_removed_from_the_file(self):
-        kb = self.kb(post=True)
+        kb = self.kb(still=True)
         w = field()
         loaded = load_hostiles(kb, w)
         w.learn_threat([{"kind": "NPCDied", "npc_id": 9, "npc_type": CODE}], [])
@@ -177,14 +175,14 @@ class LoadedSightingsTest(unittest.TestCase):
         self.assertNotIn(SIGHTINGS_KEY, kb.extra)
 
     def test_rows_this_run_never_loaded_are_left_alone(self):
-        kb = self.kb(post=True)
+        kb = self.kb(still=True)
         w = field()
         save_hostiles(kb, w, set())
         self.assertIn("9", kb.extra[SIGHTINGS_KEY])
 
-    def test_a_post_on_another_map_holds_nothing_here(self):
+    def test_a_sighting_on_another_map_holds_nothing_here(self):
         w = field()
-        load_hostiles(self.kb(post=True, map_id=MAP + 1), w)
+        load_hostiles(self.kb(still=True, map_id=MAP + 1), w)
         self.assertEqual(known_reach(w, policy()), [])
 
     def test_a_broken_row_is_skipped(self):

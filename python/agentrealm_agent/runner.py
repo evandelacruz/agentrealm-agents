@@ -206,7 +206,7 @@ class Runner:
         self._removed_code: str | None = None  # A18: lone worn subtype taken off by the last Remove
         self._removed_map: int | None = None  # A18: map the character was on when it was taken off
         self.world = WorldModel(character_id)
-        # Hostile types and posts earlier runs learned; saved back at exit.
+        # Hostile types and where earlier runs last saw hostiles; saved back at exit.
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
         load_death_chests(knowledge, self.world)  # chests earlier deaths left (A122)

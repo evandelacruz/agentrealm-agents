@@ -33,7 +33,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import Asked, Strategist, StrategistConfig
-from agentrealm_adk.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
+from agentrealm_adk.world import STILL_TICKS, Entity, WorldModel, chebyshev
 from agentrealm_adk.zone_discovery import apply_zone
 from tests.test_strategist import SOLD_HERE, shop_selling
 
@@ -120,11 +120,11 @@ class RefugeTest(unittest.TestCase):
         w.pos = (6, 12)
         w.tick = 0
         w._set_entities([guard], 0)
-        w.tick = POST_STILL_TICKS
-        w._set_entities([guard], POST_STILL_TICKS)
+        w.tick = STILL_TICKS
+        w._set_entities([guard], STILL_TICKS)
         w.pos = w.terrain_center = (9, 10)
-        w.tick = POST_STILL_TICKS + 1
-        w._set_entities([], w.tick)  # its post holds the one safe tile, out of view
+        w.tick = STILL_TICKS + 1
+        w._set_entities([], w.tick)  # where it stood still holds the one safe tile, out of view
         out = retreat_step(w, c, "Park")
         self.assertEqual((out.intents, out.reason), (None, "no refuge outside hostile ground"))
 
@@ -168,18 +168,18 @@ class RefugeTest(unittest.TestCase):
         self.assertIn("Flee", states)
         self.assertIn("Retreat", states)
 
-    def test_a_remembered_post_rules_a_safe_tile_out_of_the_refuge_pick(self):
+    def test_a_remembered_hostile_rules_a_safe_tile_out_of_the_refuge_pick(self):
         w, c = world(at=(9, 10), health=4), ctx(on_hostile="fight")
         w.perception = 4
         guard = gristle(at=(4, 10))
         w.pos = (6, 12)
         w.tick = 0
         w._set_entities([guard], 0)
-        w.tick = POST_STILL_TICKS
-        w._set_entities([guard], POST_STILL_TICKS)
+        w.tick = STILL_TICKS
+        w._set_entities([guard], STILL_TICKS)
         w.pos = w.terrain_center = (9, 10)
-        w.tick = POST_STILL_TICKS + 1
-        w._set_entities([], w.tick)  # out of view now; its post is remembered
+        w.tick = STILL_TICKS + 1
+        w._set_entities([], w.tick)  # out of view now; where it stood still is remembered
         reach = ground_by_hostile(w, c.policy)
         self.assertIn(NEAR_SAFE, reach[("npc", 7)])
         params = grid_params(c.policy, set(), set())

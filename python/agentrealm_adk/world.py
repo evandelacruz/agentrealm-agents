@@ -58,29 +58,20 @@ def terrain_cells(t: dict) -> dict:
 Pos = tuple[int, int]
 
 
-# An NPC that stands on one cell this long in view keeps a post there: the
+# A hostile that stands on one cell this long in view, not next to us, with
+# no step that would close in on us, is blocked (Manual §11 Hostiles: a
+# chaser stands still when no step closes in on the nearest character): the
 # same stillness Greet takes for a helper (``investigation.HELPER_STILL_TICKS``).
-POST_STILL_TICKS = 50
-# A hostile out of view that keeps no post is remembered where it was last
-# seen for this long (60 s at 10 ticks/s), on any map.
+# One next to us that stands still is swinging at us, not blocked.
+STILL_TICKS = 50
+# A hostile out of view that was moving is remembered where it was last
+# seen for this long (60 s at 10 ticks/s), on any map: it goes for the
+# nearest character, so that cell soon says little.
 SIGHTING_TICKS = 600
-# A remembered post fades on evidence, never on time away: hostiles roam and
-# respawn (A85), but only looking at the post shows its guard gone.
-# Its ``Sighting.strength`` is 1 while the guard is in view. While the post is
-# in sight with nobody on it, it halves every ``EMPTY_POST_HALF_LIFE_TICKS``
-# looked at (1 s), times the spells the guard was seen on its post, up to
-# ``POST_MAX_SPELLS``: a post seen again and again takes longer to give up on.
-# One look counts at most ``EMPTY_POST_HALF_LIFE_TICKS``, since the time
-# between looks shows nothing. Out of sight, on this map or another, between
-# sessions however long, it keeps its strength. A spell counts when the guard
-# is back on its post after ``SIGHTING_TICKS`` out of view, so a guard at the
-# edge of sight flickering in and out adds none. It holds ground while at
-# least ``POST_HOLD_STRENGTH``, only prices it below that, and is forgotten
-# below ``POST_FORGET_STRENGTH``.
-POST_MAX_SPELLS = 4
-EMPTY_POST_HALF_LIFE_TICKS = 10
-POST_HOLD_STRENGTH = 0.5
-POST_FORGET_STRENGTH = 0.1
+# A blocked one stays where the ground stops it while the ground and the
+# nearest character stay put, but either may change unseen, so it is
+# remembered there out of view for at most this long (5 min at 10 ticks/s).
+BLOCKED_SIGHTING_TICKS = 3000
 
 
 @dataclass(frozen=True)
@@ -115,40 +106,25 @@ class DeathChest:
 class Sighting:
     """An NPC or character seen this run, kept after it leaves view (free-play run 5).
 
-    ``home`` is its post, the cell an NPC stood on for ``POST_STILL_TICKS``
-    (``post`` True), else the cell it was first seen on, which holds no
-    ground: a roamer keeps to no cell. ``reach`` is the furthest from its
-    post it has hit us from or come into a fight with us: a guard that leaves
-    its post for us shows how far it guards. Whether it is a threat is asked at use
+    A hostile has no post (Manual §11 Hostiles): it goes for the nearest
+    living character on its map, with no sight or distance limit. A chaser
+    steps greedily toward that character and stands still where no step
+    closes in. ``still`` means blocked, not merely standing still: it stood
+    on its cell for ``STILL_TICKS`` in view, not next to us (one next to us
+    is swinging at us), and no step would bring it closer to us
+    (``WorldModel.blocked``). The mark is cleared the next time it is seen
+    otherwise (moving, next to us, or with a step open). A blocked one is
+    remembered out of view where it stood until that cell is in sight with
+    it gone, for at most ``BLOCKED_SIGHTING_TICKS``; one that was moving
+    for ``SIGHTING_TICKS``. Whether it is a threat is asked at use
     (``survival.is_hostile``), so a type found hostile later counts.
-
-    A post fades while it is in sight with its guard gone (``strength``, as
-    of tick ``noted``; ``fade_post``). ``spells`` counts the times its guard
-    was seen back on its post after a while away.
     """
 
     entity: Entity  # as last seen
     map_id: int | None
     tick: int  # last seen
-    home: Pos
-    post: bool = False
-    reach: int = 0
-    strength: float = 1.0
-    noted: int = 0  # the tick ``strength`` is as of
-    spells: int = 1
+    still: bool = False
     in_view: bool = True
-
-    def fade_post(self, tick: int, empty: bool) -> None:
-        """Bring ``strength`` up to ``tick`` with its guard out of view. Only
-        ``empty`` (its post in sight with nobody on it) is evidence: halved every
-        ``EMPTY_POST_HALF_LIFE_TICKS`` times ``spells`` (up to ``POST_MAX_SPELLS``),
-        counting at most ``EMPTY_POST_HALF_LIFE_TICKS`` for this look. Not in
-        sight, it keeps its strength however long it has been."""
-        if empty:
-            looked = min(max(0, tick - self.noted), EMPTY_POST_HALF_LIFE_TICKS)
-            half_life = EMPTY_POST_HALF_LIFE_TICKS * min(max(1, self.spells), POST_MAX_SPELLS)
-            self.strength *= 0.5 ** (looked / half_life)
-        self.noted = tick
 
 
 @dataclass(frozen=True)
@@ -165,6 +141,24 @@ NEIGHBOURS = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != 
 
 def chebyshev(a: Pos, b: Pos) -> int:
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+
+def chaser_step(at: Pos, target: Pos, ground: Callable[[Pos], bool]) -> Pos:
+    """Where a chaser on ``at`` stands after one step toward ``target``
+    (Manual §11 Hostiles): the neighbouring block that brings it closest,
+    nearest by Chebyshev distance then straight-line, never onto ``target``
+    itself, and ``at`` when no step on ``ground`` brings it closer. It finds
+    no path, so a wall or water between stops it."""
+
+    def gap(p: Pos) -> tuple[int, int]:
+        return chebyshev(p, target), (p[0] - target[0]) ** 2 + (p[1] - target[1]) ** 2
+
+    best, best_gap = at, gap(at)
+    for dx, dy in NEIGHBOURS:
+        n = (at[0] + dx, at[1] + dy)
+        if n != target and ground(n) and gap(n) < best_gap:
+            best, best_gap = n, gap(n)
+    return best
 
 
 @dataclass
@@ -389,10 +383,15 @@ class WorldModel:
     # earlier one (``knowledge_base.hostiles``). Townsfolk and helpers never land here,
     # so Flee and Retreat never answer them (A9, A23).
     hostile_types: set[TypeKey] = field(default_factory=set)
-    # (kind, id) -> where each NPC and character was seen, its post and the
-    # reach it hit us from, kept out of view (``Sighting``, free-play run 5);
+    # (kind, id) -> where each NPC and character was last seen, and whether
+    # it stood still there, kept out of view (``Sighting``, free-play run 5);
     # hostile NPCs' sightings are kept for later runs (``knowledge_base.hostiles``).
     sightings: dict[tuple[str, int], Sighting] = field(default_factory=dict)
+    # NPC id -> the damage it has taken, from every ``NPCDamaged`` seen,
+    # anyone's swing (Manual §11 Hostiles: a hostile never heals while it
+    # lives). Dropped on its ``NPCDied``: it returns at full health. This run
+    # only, since a death out of sight is never seen (``survival.health_left``).
+    npc_damage: dict[int, int] = field(default_factory=dict)
     # Where each entity stood before its latest move, and the tick that move
     # was seen: ``survival.approaching`` reads it (A9).
     entity_moves: dict[tuple[str, int], tuple[Pos, int]] = field(default_factory=dict)
@@ -465,6 +464,19 @@ class WorldModel:
         hostile from, water only while a fording supply is worn, since one in
         the hand leaves no weapon there (A146)."""
         return self.walkable_test(map_id=map_id, now=now, swing=swing)(p)
+
+    def chaser_ground(self) -> Callable[[Pos], bool]:
+        """The cells a hostile may step on, as a test of one cell
+        (``hostile_ground.chase``): walkable ground, never water, since a
+        hostile carries no fording supply, and unseen ground, which may be
+        walkable (Manual §11 Hostiles)."""
+        tiles = self.view.tiles
+
+        def ground(p: Pos) -> bool:
+            block = tiles.get(p)
+            return block is None or walkable_block(block)
+
+        return ground
 
     def walkable_test(
         self, *, map_id: int | None = None, now: bool = False, swing: bool = False
@@ -731,14 +743,11 @@ class WorldModel:
         self.npc_still = still
 
     def _note_sightings(self, tick: int) -> None:
-        """Keep ``sightings``: refresh the NPCs and characters in view, note a
-        post once one has stood still ``POST_STILL_TICKS``, and forget one
-        that keeps no post once the cell it was last seen on is in sight with
-        it gone, or it has been unseen for ``SIGHTING_TICKS`` on any map. A
-        post fades only while it is in sight with nobody on it
-        (``Sighting.fade_post``), and is forgotten once faded below
-        ``POST_FORGET_STRENGTH``; out of sight, or on a map left behind, it
-        keeps its strength."""
+        """Keep ``sightings``: refresh the NPCs and characters in view, each
+        ``still`` while it is ``blocked``, and forget one out of view once the
+        cell it was last seen on is in sight with it gone, or once it has
+        been unseen for ``SIGHTING_TICKS`` (a blocked one
+        ``BLOCKED_SIGHTING_TICKS``) on any map (``Sighting``)."""
         in_view = set()
         for e in self.entities:
             if e.kind not in ("npc", "character"):
@@ -747,25 +756,29 @@ class WorldModel:
             in_view.add(key)
             s = self.sightings.get(key)
             if s is None or s.map_id != self.map_id:
-                s = self.sightings[key] = Sighting(e, self.map_id, tick, e.pos, noted=tick)
-            elif s.post and not s.in_view and e.pos == s.home and tick - s.tick >= SIGHTING_TICKS:
-                s.spells += 1  # back on its post after a while away: one more spell
-            s.entity, s.tick, s.strength, s.noted, s.in_view = e, tick, 1.0, tick, True
-            if not s.post and e.kind == "npc" and self.npc_still_ticks(e) >= POST_STILL_TICKS:
-                s.home, s.post = e.pos, True
+                s = self.sightings[key] = Sighting(e, self.map_id, tick)
+            s.entity, s.tick, s.in_view = e, tick, True
+            s.still = self.blocked(e)
         for key, s in list(self.sightings.items()):
             if key in in_view:
                 continue
             s.in_view = False
-            cell = s.home if s.post else s.entity.pos
             here = self.pos if s.map_id == self.map_id else None
-            gone = here is not None and chebyshev(cell, here) < self.perception
-            if s.post:
-                s.fade_post(tick, gone)
-                if s.strength < POST_FORGET_STRENGTH:
-                    del self.sightings[key]
-            elif gone or tick - s.tick > SIGHTING_TICKS:
+            gone = here is not None and chebyshev(s.entity.pos, here) < self.perception
+            if gone or tick - s.tick > (BLOCKED_SIGHTING_TICKS if s.still else SIGHTING_TICKS):
                 del self.sightings[key]
+
+    def blocked(self, e: Entity) -> bool:
+        """``e`` is a hostile the ground stops (Manual §11 Hostiles): an NPC
+        that has stood on its cell ``STILL_TICKS`` in view, not next to us
+        (standing there it is swinging at us), and with no step on the
+        ground a hostile walks that would bring it closer to us
+        (``chaser_step``). Merely standing still is not being blocked."""
+        if e.kind != "npc" or self.npc_still_ticks(e) < STILL_TICKS or self.pos is None:
+            return False
+        if chebyshev(e.pos, self.pos) <= 1:
+            return False
+        return chaser_step(e.pos, self.pos, self.chaser_ground()) == e.pos
 
     def npc_still_ticks(self, e: Entity) -> int:
         """How long ``e`` has stood on its cell while in view; 0 when it just moved or was never noted."""
@@ -1021,35 +1034,24 @@ class WorldModel:
             key = hostile_type_from_event(ev, self.entities, earlier)
             if key is not None:
                 self.hostile_types.add(key)
-            self._learn_reach(ev)
+            self._learn_npc_damage(ev)
 
-    def _learn_reach(self, ev: dict) -> None:
-        """A hit stretches its hitter's ``Sighting.reach`` to where we stand
-        from its post, so ground that far from its post is known to be in its
-        reach; a hitter with no post learns none (its first-seen cell is no
-        ground it keeps). An ``NPCDied`` forgets that NPC (free-play run 5)."""
-        if ev.get("kind") == "NPCDied":
-            self.sightings.pop(("npc", _opt_int(ev.get("npc_id"))), None)
+    def _learn_npc_damage(self, ev: dict) -> None:
+        """An ``NPCDamaged`` adds its amount to that NPC's ``npc_damage``,
+        whoever swung: a hostile never heals while it lives. An ``NPCDied``
+        forgets the NPC's sighting and damage: it returns at full health
+        (free-play run 5, Manual §11 Hostiles)."""
+        kind = ev.get("kind")
+        npc_id = _opt_int(ev.get("npc_id"))
+        if npc_id is None:
             return
-        source = hitter(ev)
-        if source is None and ev.get("kind") == "Attacked" and ev.get("actor_kind") in ("npc", "character"):
-            source = (ev["actor_kind"], ev.get("actor_id"))
-        if source is not None:
-            self._stretch_reach((source[0], _opt_int(source[1])))
-
-    def note_came_for_us(self, e: Entity) -> None:
-        """``e`` joined a fight with us here: when it has left its post to
-        do so, like a hit, it stretches its post's reach to where we stand
-        (``engagement.sync_engagement``). A guard still on its post came out
-        for nobody, so it learns no reach."""
-        s = self.sightings.get((e.kind, e.id))
-        if s is not None and e.pos != s.home:
-            self._stretch_reach((e.kind, e.id))
-
-    def _stretch_reach(self, key: tuple[str, int | None]) -> None:
-        s = self.sightings.get(key)
-        if s is not None and s.post and self.pos is not None and s.map_id == self.map_id:
-            s.reach = max(s.reach, chebyshev(self.pos, s.home))
+        if kind == "NPCDied":
+            self.sightings.pop(("npc", npc_id), None)
+            self.npc_damage.pop(npc_id, None)
+        elif kind == "NPCDamaged":
+            amount = damage_amount(ev)
+            if amount is not None and amount > 0:
+                self.npc_damage[npc_id] = self.npc_damage.get(npc_id, 0) + amount
 
     def apply_observation(self, obs: dict | None) -> None:
         """Folds a tick observation into the model (Manual §7.2).

@@ -4,7 +4,8 @@ A reflex that extends **Pickup**: Pickup takes what is in reach; Detour
 walks to a valuable that comes into view off the path being walked, and
 Pickup takes it once it is in reach. No planner call.
 
-A valuable is a free gem, a life (a code the item table learned, A47), or
+A valuable is a free gem, a life (a supply of class ``life`` in the
+Supplies reference, ``heart``, A156), or
 food the character is hurt by at least the heal of (A155). Every one in view is priced by the steps going by it adds
 to the walk: the walking distance from where the character stands to the
 find, then on to the best cell of the route still ahead (the queued steps,
@@ -130,12 +131,12 @@ def valuable(w: WorldModel, e: Entity, items: dict, ctx: PlayContext) -> bool:
     at least the heal of (``healing.worth_eating``, A155)."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
-    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or worth_eating(w, e.code)):
+    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code) or worth_eating(w, e.code)):
         return False
     return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind == TAKE
 
 
-def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int:
+def allowance(w: WorldModel, e: Entity, finds: list[Entity]) -> int:
     """The most steps going by ``e`` may add to the walk: the best of what it is.
 
     ``finds`` are the valuables in view; the gem piles among them next to a
@@ -144,7 +145,7 @@ def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int
     if e.code in GEM_SUPPLY_CODES:
         piles = sum(1 for f in finds if f.code in GEM_SUPPLY_CODES and chebyshev(f.pos, e.pos) <= 1)
         steps = GEM_PILE_STEPS + GEM_CLUSTER_STEPS * (min(piles, GEM_CLUSTER_MAX) - 1)
-    if is_life_supply(e.code, items):
+    if is_life_supply(e.code):
         steps = max(steps, LIFE_STEPS)
     if worth_eating(w, e.code):
         steps = max(steps, FOOD_STEPS)
@@ -219,7 +220,7 @@ def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) ->
         if not risk_allowed(w, ctx, e.pos, known):
             continue
         price = known.price(e.pos)
-        extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds, items) - price, ctx.policy.avoid_blocks)
+        extra = extra_steps(w, here, e.pos, route, allowance(w, e, finds) - price, ctx.policy.avoid_blocks)
         if extra is None:
             continue
         extra += price

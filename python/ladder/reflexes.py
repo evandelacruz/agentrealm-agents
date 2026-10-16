@@ -36,7 +36,7 @@ from dataclasses import dataclass, replace
 
 from agentrealm_adk.executor import arm_then_use, use_cooldown_ticks, wait
 from agentrealm_adk.executor.movement import build_paced_walk_queue
-from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.executor.supply_refusals import in_hand
 from agentrealm_adk.pathing import flee_run, flee_step, plan_sets, retreat_safe_goal
 from agentrealm_adk.reach import weapon_reach
 from agentrealm_adk.supplies import heal_of, heals
@@ -168,9 +168,7 @@ def heal_now(ctx: Ctx) -> list[dict] | None:
     """Drink or eat the carried heal that wastes least, armed first when it is not in hand."""
     w = ctx.world
     space = room(w, w.health or 0)
-    carried = [s for s in w.held_supplies if heals(s.code)]
-    if w.armed_id is not None and heals(w.armed_code) and all(s.id != w.armed_id for s in carried):
-        carried.append(InventorySupply(w.armed_id, w.armed_code or ""))
+    carried = [s for s in in_hand(w) if heals(s.code)]  # held and armed: each supply in one place (A154)
     if not carried or space <= 0:
         return None
     pick = min(carried, key=lambda s: (abs(space - heal_of(s.code)), s.id))

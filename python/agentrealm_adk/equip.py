@@ -82,6 +82,7 @@ ARMED = "armed"
 # The jobs a weapon is armed for (A99): fighting (Equip) and cutting grass (Gather).
 FIGHT = "fight"
 CUT = "cut"
+CHOP = "chop"  # felling a tree (Manual §16 How to make money)
 WEAR_SLOTS = ("head", "body", "legs", "feet", "accessory")
 NOT_WEARABLE = "not_wearable"
 
@@ -248,9 +249,9 @@ def damage_per_second(code: str | None) -> float:
 
 def does_job(code: str | None, job: str, kb: KnowledgeBase | None = None) -> bool:
     """``code`` can do ``job``: a weapon (Supplies class) fights; a supply
-    whose sourced capabilities include ``cut`` cuts."""
-    if job == CUT:
-        return bool(code) and CUT in capabilities_for_code(code or "", kb)
+    whose sourced capabilities include ``cut`` cuts, and ``chop`` chops."""
+    if job in (CUT, CHOP):
+        return bool(code) and job in capabilities_for_code(code or "", kb)
     return is_weapon(code)
 
 
@@ -262,11 +263,11 @@ def weapon_to_arm(
     refused: Collection[tuple[str | None, str]] = (),
 ) -> InventorySupply | None:
     """The one weapon-to-arm rule (A99): of the held and armed supplies that
-    do ``job``, the one to have armed. For cutting, one a cut does not use up
+    do ``job``, the one to have armed. For cutting or chopping, one the work does not use up
     comes first; then :func:`weapon_rank` (within ``ceiling`` first, then
     damage), so a cutter is also the best weapon to be caught with. The armed
-    one wins a tie, so the arm never flips. An armed result has id -1 when
-    it is not also held. None when nothing carried does the job (for
+    one wins a tie, so the arm never flips. An armed result has id -1
+    (``break_memory.held_supplies``: already armed, no ``Arm``). None when nothing carried does the job (for
     fighting, nothing beats bare hands with no weapon armed); a refused
     ``Arm`` is skipped until the loadout changes, and a compose fragment is
     never armed."""
@@ -280,7 +281,7 @@ def weapon_to_arm(
         if s.fragment is not None or not does_job(s.code, job, kb) or (not armed and (s.code, ARMED) in refused):
             continue
         rank = weapon_rank(s.code, w, ceiling)
-        key = ((kept_on_break(s.code), rank) if job == CUT else rank, armed, -s.id)
+        key = ((kept_on_break(s.code), rank) if job in (CUT, CHOP) else rank, armed, -s.id)
         if best is None or key > best[0]:
             best = (key, s)
     return best[1] if best is not None else None

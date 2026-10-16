@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from agentrealm_adk.break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
-from agentrealm_adk.gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
+from agentrealm_adk.gem_yield import CUT_BLOCKS, FELL_BLOCKS, GemYieldTracker, take_raises_gems
 from agentrealm_adk.navigation.rejection import learn_step_rejection, on_block_changed
 from agentrealm_adk.navigation.stuck import active as nav_active
 from agentrealm_adk.navigation.stuck import lapsed as lapsed_give_ups
@@ -39,10 +39,9 @@ from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from agentrealm_adk.level_order import note_door_step, settle_entry
 from agentrealm_adk import boss_clock
-from agentrealm_adk.equip import note_equip_result, sync_refusals
+from agentrealm_adk.equip import CHOP, CUT, note_equip_result, sync_refusals
 from agentrealm_adk.loot import (
     learn_chest_upgrade,
-    learn_life_code,
     learn_loot_rejection,
     load_carried_chest,
     save_carried_chest,
@@ -198,7 +197,7 @@ class Runner:
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
-        self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
+        self._applied_take_codes: list[str | None] = []  # codes of this response's applied Takes (a cut's gems, A88)
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
         self._supply_refused: list[SupplyRefused] = []  # A80: refused heal intents, filed at the next decision
         self._applied_self_use: AppliedSelfUse | None = None  # A76: an applied Use on yourself, checked at the next decision
@@ -725,7 +724,6 @@ class Runner:
             m.queue_sent_tick = w.tick
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
-        lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         self._forget_replaced_self_use(intents)
         earlier = w.entities
@@ -736,7 +734,6 @@ class Runner:
         if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
             self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))
-        self._learn_life_code(lives_before)
         ceremony = r.get("level_clear_ceremony")
         w.note_level_clear(ceremony)
         if ceremony and self.acceptance is not None:
@@ -1147,8 +1144,10 @@ class Runner:
                     # Nothing was cut, so nothing to file: Gather just moves on (A63).
                     # A Break probe that misses is a capability miss (GAME_NOTES:
                     # which item works is per block), not ground that does not cut,
-                    # and so is a cut made with an item that does not cut (a potion).
-                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge):
+                    # and so is a cut made with an item that does not cut (a potion),
+                    # or a tree felled with one that does not chop.
+                    capability = CHOP if tile in FELL_BLOCKS else CUT
+                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge, capability):
                         self.gem_cuts.note_no_effect(w, block, tile, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
@@ -1195,16 +1194,6 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
-
-    def _learn_life_code(self, lives_before: int) -> None:
-        """After the observation, file a life's ground code if one Take raised lives (A47)."""
-        code = learn_life_code(self.knowledge, self._applied_take_codes, lives_before, self.world.lives)
-        if code is not None:
-            self.log(
-                "loot",
-                f"learned life ground code {code!r} (promote to LIFE_SUPPLY_CODES once confirmed)",
-                {"life_supply_code": code, "lives_before": lives_before, "lives": self.world.lives},
-            )
 
     def _forget_replaced_self_use(self, intents: list[dict] | None) -> None:
         """A sent queue with no self-``Use`` replaced the self-``Use``'s queue, if any:

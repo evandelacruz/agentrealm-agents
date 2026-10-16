@@ -39,14 +39,12 @@ if TYPE_CHECKING:
 
 def potion_count(w: WorldModel) -> int:
     """Held, stowed and armed potions (Boss preconditions, Shop reserve, A21,
-    A38). The armed one counts too: ``held`` never lists the armed supply
-    (Manual §11 Where your supplies are), so a drink that moved a potion into
-    the slot and drank nothing is not a potion gone (A76)."""
+    A38). Each supply is in exactly one place (Manual §11 Where your supplies
+    are, A154), so the armed potion counts once beside the held ones: a drink
+    that moved a potion into the slot and drank nothing is not a potion gone."""
     n = sum(1 for h in w.held_supplies if is_potion(h.code))
     n += sum(1 for s in w.chest_supplies if is_potion(s.code))
-    if w.armed_id is not None and is_potion(w.armed_code) and all(h.id != w.armed_id for h in w.held_supplies):
-        n += 1
-    return n
+    return n + (1 if is_potion(w.armed_code) else 0)
 
 
 def held_heal(w: WorldModel) -> int:

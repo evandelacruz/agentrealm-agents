@@ -150,6 +150,7 @@ def ford_queue(
     armed, armed_id = w.armed_code, w.armed_id
     worn = dict(w.worn_codes)
     held = {h.id: h.code for h in w.held_supplies}
+    worn_ids = {sid: slot for slot, sid in w.worn_ids.items()}
     out: list[dict] = []
     crosses = False  # the queue moves onto water
     for intent in intents:
@@ -163,10 +164,10 @@ def ford_queue(
                     return out, f"no fording supply to arm before the water at {landing[0]},{landing[1]}"
                 for change in put_on:
                     out.append(change)
-                    armed, armed_id, worn = _loadout_after(change, held, armed, armed_id, worn)
+                    armed, armed_id, worn = _loadout_after(change, held, armed, armed_id, worn, worn_ids)
             pos = landing
         elif verb in LOADOUT_VERBS:
-            after = _loadout_after(intent, held, armed, armed_id, worn)
+            after = _loadout_after(intent, held, armed, armed_id, worn, worn_ids)
             if on_water(w, m, pos) and afloat(armed, list(worn.values())) and not afloat(after[0], list(after[2].values())):
                 return out, f"{verb} would strand us on the water at {pos[0]},{pos[1]}"
             armed, armed_id, worn = after
@@ -218,20 +219,37 @@ def _arm(held: dict[int, str], armed: str | None, armed_id: int | None, sid: int
 
 
 def _loadout_after(
-    intent: dict, held: dict[int, str], armed: str | None, armed_id: int | None, worn: dict[str, str]
+    intent: dict,
+    held: dict[int, str],
+    armed: str | None,
+    armed_id: int | None,
+    worn: dict[str, str],
+    worn_ids: dict[int, str],
 ) -> tuple[str | None, int | None, dict[str, str]]:
-    """Armed code and id and worn slots once ``intent`` (a loadout verb) runs."""
+    """Armed code and id and worn slots once ``intent`` (a loadout verb) runs.
+    ``held`` and ``worn_ids`` (supply id -> worn slot) are updated in place.
+    A ``Drop`` takes the supply from wherever it is, held, armed or worn
+    (Manual §11 Where your supplies are, A154)."""
     verb, sid = intent.get("verb"), intent.get("supply_id")
     worn = dict(worn)
     if verb == "Arm" and sid is not None:
         armed, armed_id = _arm(held, armed, armed_id, sid)
     elif verb == "Wear" and sid in held:
         code = held.pop(sid)
-        worn[worn_slot(code) or f"slot of {sid}"] = code
+        slot = worn_slot(code) or f"slot of {sid}"
+        worn[slot] = code
+        worn_ids[sid] = slot
     elif verb == "Remove":
-        worn.pop(intent.get("slot", ""), None)
+        slot = intent.get("slot", "")
+        code = worn.pop(slot, None)
+        for wid in [wid for wid, s in worn_ids.items() if s == slot]:
+            del worn_ids[wid]
+            if code:
+                held[wid] = code  # a removed supply goes back to the hand
     elif verb == "Drop":
         if sid is not None and sid == armed_id:
             armed, armed_id = None, None
+        if sid in worn_ids:
+            worn.pop(worn_ids.pop(sid), None)
         held.pop(sid, None)
     return armed, armed_id, worn

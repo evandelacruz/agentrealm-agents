@@ -1266,13 +1266,18 @@ class Runner:
 
     def _note_applied_self_use(self, index: int, result: dict) -> None:
         """Keep the applied self-``Use`` (``Memory.self_use``: a potion, food or a
-        chest) for ``file_supply_refusals`` to see whether it went through (A76)."""
+        chest) for ``file_supply_refusals`` to see whether it went through (A76).
+        A chest's ``applied`` raises the pack's carry slots at once (A108, A157)."""
         w, m = self.world, self.mem
         sid = m.self_use
         assert sid is not None
         queue = self._held_intents()
         code = next((h.code for h in w.held_supplies if h.id == sid), None) or code_in_hand(w, queue, index)
         armed_first = any(i.get("verb") == "Arm" and i.get("supply_id") == sid for i in queue[:index])
+        if result.get("outcome") == "applied":
+            # A chest's Use is applied only when it made the chest bigger, and
+            # applied_no_effect when not (A157, Manual §11 How big your chest is).
+            learn_chest_upgrade(w, code)
         self._applied_self_use = AppliedSelfUse(
             sid, code, int(result.get("tick", w.tick)), armed_first, effect_measure(w, code)
         )
@@ -1281,8 +1286,7 @@ class Runner:
         """An applied ``Use`` on yourself that left its supply carried and its
         effect unshown did nothing: file why (``supply_refusals.noop_cause``)
         and what is sent next, so the same ``Use`` is not resent until
-        something relevant changes (A76). One of a chest that went through
-        raises the pack's carry slots (A108).
+        something relevant changes (A76).
 
         Read at the next decision, from the observation after the ``Use`` and
         our own ``SupplyUsed``, never in the held-queue probe.
@@ -1292,7 +1296,6 @@ class Runner:
         if d is None:
             return
         if (cause := noop_cause(w, d)) is None:
-            learn_chest_upgrade(w, d.code)  # a chest used up raised the pack (A108)
             return
         action = noop_action(cause, armed_first=d.armed_first)
         note_refusal(

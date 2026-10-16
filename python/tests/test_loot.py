@@ -486,7 +486,9 @@ class RunnerLootLearningTest(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.kb = KnowledgeBase("sandbox")
 
-    def run_tick(self, queue: list[dict], results: list[dict], *, lives_after: int, events=None) -> Runner:
+    def run_tick(
+        self, queue: list[dict], results: list[dict], *, lives_after: int, events=None, self_use: int | None = None
+    ) -> Runner:
         """Send ``queue`` as q1 and fold one response with ``results`` and the new lives."""
         response = {
             "tick": 11,
@@ -505,7 +507,9 @@ class RunnerLootLearningTest(unittest.TestCase):
             Entity("supply", 8, (0, 0), "berry"),
             Entity("supply", 9, (2, 0), "middle_chest", gem_price=50),
         ]
-        r.mem = Memory(need_self=False, need_position=False)
+        if self_use is not None:
+            r.world.held_supplies = [InventorySupply(self_use, "middle_chest")]
+        r.mem = Memory(need_self=False, need_position=False, self_use=self_use)
 
         def send(_d):
             r.mem.pending_intents, r.mem.pending_queue, r.mem.pending_next_index = queue, None, 0
@@ -562,13 +566,34 @@ class RunnerLootLearningTest(unittest.TestCase):
         )
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
-    def test_a_middle_chest_used_up_raises_capacity_until_respawn(self):
-        r = self.run_tick([{"verb": "Wait"}], [], lives_after=10)
+    CHEST_USE = [{"verb": "Arm", "supply_id": 9}, {"verb": "Use", "supply_id": 9, "target": {"kind": "self"}}]
+
+    def chest_use(self, outcome: str) -> Runner:
+        r = self.run_tick(
+            self.CHEST_USE,
+            [
+                {"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"},
+                {"queue_id": "q1", "index": 1, "tick": 12, "outcome": outcome},
+            ],
+            lives_after=10,
+            self_use=9,
+        )
+        return r
+
+    def test_an_applied_chest_use_raises_capacity_until_a_death(self):
+        # Manual §11 How big your chest is: applied when it made the chest bigger (A157).
+        r = self.chest_use("applied")
+        self.assertEqual((r.world.carried_chest, r.world.carry_capacity), ("middle_chest", 30))
+        r.world.apply_events([{"tick": 20, "events": [{"kind": "Died", "map_id": 1, "x": 2, "y": 3}]}])
+        self.assertIsNone(r.world.carried_chest)
+        self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
+
+    def test_a_chest_use_applied_no_effect_raises_nothing(self):
+        # It did not make the chest bigger, whatever the pack shows next (A157).
+        r = self.chest_use("applied_no_effect")
         r.world.held_supplies = []
-        r._applied_self_use = AppliedSelfUse(9, "middle_chest", 11, True, None)
         r.file_noop_use()
-        self.assertEqual(r.world.carry_capacity, 30)
-        r.world.apply_events([{"tick": 20, "events": [{"kind": "Respawned", "map_id": 1, "x": 2, "y": 3}]}])
+        self.assertIsNone(r.world.carried_chest)
         self.assertEqual(r.world.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
     def test_a_chest_use_that_left_it_carried_raises_nothing(self):

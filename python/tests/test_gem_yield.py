@@ -13,7 +13,16 @@ from agentrealm_agent.brain import Decision
 from agentrealm_adk.config import CharacterConfig
 from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
-from agentrealm_adk.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, RATE_MIN_SECONDS, GemYieldTracker, record_cut
+from agentrealm_adk.gem_yield import (
+    BARREN_MIN_CUTS,
+    GEM_WINDOW_TICKS,
+    PRIOR_CUTS,
+    RATE_MIN_SECONDS,
+    GemYieldTracker,
+    fell_totals,
+    fell_yield,
+    record_cut,
+)
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.memory import Memory
@@ -255,6 +264,21 @@ class NoEffectCutTest(unittest.TestCase):
         r.on_result({"outcome": "applied_no_effect", "tick": 100}, 2)
         self.assertEqual(r.gem_cuts.no_effect_cuts, 0)
 
+    def test_a_tree_felled_with_an_item_that_does_not_chop_marks_nothing(self):
+        """A161: the knife cuts but does not chop, so its no-effect Use on a
+        tree says nothing about the tree; a sword's does, and holds it out."""
+        r = self.runner()
+        r.world.view.tiles[(1, 1)] = "tree"
+        r.world.armed_code = "pocket_knife"
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual((r.gem_cuts.no_effect, r.gem_cuts.no_effect_cuts), ([], 0))
+        r.world.armed_code = "bronze_sword"
+        r.mem.pending = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 1}}
+        r.on_result({"outcome": "applied_no_effect", "tick": 100}, 0)
+        self.assertEqual(r.gem_cuts.no_effect_cuts, 1)
+        self.assertEqual(gem_yield.exhausted_cells(r.knowledge, MAP, 101, r.gem_cuts), {(1, 1)})
+
     def test_a_cut_with_an_item_not_known_to_cut_or_not_still_counts(self):
         # Only a known miss is ruled out: an unsourced code may cut.
         r = self.runner()
@@ -366,6 +390,43 @@ class NoEffectCutTest(unittest.TestCase):
         self.assertEqual(t.gather_rate(9000, 10), (0.4, 5.0))
         t.note_gathering(9000, True)
         self.assertIsNone(t.gather_rate(9010, 10), "a new gather measures afresh")
+
+
+class FellYieldTest(unittest.TestCase):
+    """A161: felled trees are measured like grass cuts, per map, and a tree's
+    yield is never below grass's on the same ground (Manual §16)."""
+
+    def test_a_fell_is_counted_in_the_maps_fells_not_the_grass_regions(self):
+        k = kb()
+        record_cut(k, MAP, (1, 1), "tree", 10, True)
+        record_cut(k, MAP, (2, 1), "tree", 11, False)
+        self.assertEqual(fell_totals(k, MAP), (2, 1))
+        self.assertEqual(gem_yield.regions(k, MAP), {}, "grass totals are grass only")
+        self.assertEqual(gem_yield.exhausted_cells(k, MAP, 12), {(1, 1), (2, 1)})
+        self.assertEqual(fell_totals(k, MAP + 1), (0, 0))
+
+    def test_the_yield_follows_the_fells_and_never_drops_below_grass(self):
+        self.assertEqual(fell_yield(0.2), 0.2, "no fell yet: grass's")
+        self.assertEqual(fell_yield(0.2, (20, 0)), 0.2, "unlucky fells never price a tree below grass")
+        rich = fell_yield(0.2, (20, 16))
+        self.assertAlmostEqual(rich, (16 + 0.2 * PRIOR_CUTS) / (20 + PRIOR_CUTS))
+        self.assertGreater(rich, 0.2)
+
+    def test_the_tracker_counts_and_files_a_fell_like_a_cut(self):
+        w = world()
+        w.view.tiles[(1, 1)] = "tree"
+        t = GemYieldTracker()
+        t.note_cut(w, (1, 1), "tree", 100)
+        self.assertEqual((t.cuts, t.last_cut_tick), (1, 100))
+        w.entities = [Entity("supply", 50, (1, 1), "gem")]
+        w.tick = 102
+        k = kb()
+        t.update(w, k)
+        w.tick = 100 + GEM_WINDOW_TICKS + 1
+        t.update(w, k)
+        self.assertEqual(fell_totals(k, MAP), (1, 1))
+        t.note_no_effect(w, (2, 2), "tree", 110)
+        self.assertEqual(t.no_effect_cuts, 1)
 
 
 class RunnerGatherRateTest(unittest.TestCase):

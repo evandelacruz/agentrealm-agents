@@ -4,6 +4,8 @@ import random
 import tempfile
 import threading
 import unittest
+
+from agentrealm_adk.equip import CHOP
 from pathlib import Path
 from unittest import mock
 
@@ -65,6 +67,12 @@ class BreakMemoryTest(unittest.TestCase):
             self.assertTrue(cannot_cut(code), code)
         for code in ("pocket_knife", "bronze_sword", "fake_cleaver", None):
             self.assertFalse(cannot_cut(code), code)
+
+    def test_cannot_cut_takes_the_capability_a_tree_needs(self):
+        self.assertTrue(cannot_cut("pocket_knife", capability=CHOP), "the knife cuts but does not chop")
+        self.assertTrue(cannot_cut("bronze_mallet", capability=CHOP))
+        for code in ("bronze_sword", "fake_cleaver", None):
+            self.assertFalse(cannot_cut(code, capability=CHOP), code)
 
     def test_capability_learned_from_an_opened_break(self):
         kb = KnowledgeBase.empty("sandbox")
@@ -421,7 +429,8 @@ class RunnerBreakResultTest(unittest.TestCase):
         self.assertEqual(self.kb.items, {"iron_axe": {"capabilities": ["chop"]}})
         # The block grows back and a later try fails: the item keeps what it proved.
         record_attempt(self.kb, map_id=7, pos=(2, 0), capability="chop", result="applied_no_effect")
-        self.assertEqual(pick_supply_for_capability(w, "chop", self.kb), InventorySupply(6, "iron_axe"))
+        # The armed axe wins over the held one of its code (id -1: no Arm needed, A154).
+        self.assertEqual(pick_supply_for_capability(w, "chop", self.kb), InventorySupply(-1, "iron_axe"))
         self.assertIsNone(pick_supply_for_capability(w, "cut", self.kb))
 
     def test_failed_break_files_no_capability(self):

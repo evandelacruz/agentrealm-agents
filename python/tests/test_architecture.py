@@ -49,9 +49,11 @@ def field_world(width: int = 21, height: int = 9, at=(2, 4), fog: bool = True) -
 
 def tempt(w: WorldModel) -> None:
     """Everything a state used to start on its own: a worthwhile pickup off the
-    route (Loot), a readable sign (Investigate), and an NPC never spoken to (Say)."""
+    route (Loot), a readable sign (Investigate), and an NPC never spoken to (Say).
+    The pickup is gear, which no reflex walks to; a heart is a life Detour goes
+    for on sight (A156)."""
     w.entities = [
-        Entity("supply", 31, (4, 7), "heart"),
+        Entity("supply", 31, (4, 7), "bronze_sword"),
         Entity("npc", 41, (12, 1), "villager"),
     ]
     w.view.readable[(3, 1)] = True
@@ -237,7 +239,7 @@ class A58PacingPairsTest(unittest.TestCase):
     def test_no_two_states_take_turns_on_a_walk(self):
         w = field_world(width=31)
         tempt(w)
-        w.entities.append(Entity("supply", 32, (9, 1), "heart"))
+        w.entities.append(Entity("supply", 32, (9, 1), "iron_helm"))
         outs = play(w, travel(28, 4), decisions=40)
         arrived = [o.at for o in outs].index((28, 4))
         moved = movers(outs[: arrived + 1])

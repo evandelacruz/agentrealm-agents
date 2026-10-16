@@ -134,7 +134,8 @@ class RefuseTest(unittest.TestCase):
 class LeaveTest(unittest.TestCase):
     def test_inside_a_higher_level_he_leaves_the_way_he_came(self):
         w = grid(["D....", "....."], at=(1, 1), map_id=8)
-        w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 1, "y": 1})
         kb = kb_with(1, (5, 5))
         record_warp(kb, 1, (5, 5), "framed_door", 8, (1, 1))
         record_entrance_level(kb, 1, (5, 5), 2)
@@ -160,7 +161,8 @@ class LeaveTest(unittest.TestCase):
 
     def test_leave_is_done_once_outside(self):
         w = grid(["....."], at=(1, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 1, "y": 0})
         plan = Plan([{"op": "explore_area", "x": 0, "y": 0, "radius": 3}], dict(PARAM_DEFAULTS))
         dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
         self.assertEqual(plan.current(), {"op": "leave_level"})
@@ -173,7 +175,8 @@ class LeaveTest(unittest.TestCase):
 
     def test_a_leave_on_the_stack_is_not_pushed_again(self):
         w = grid(["....."], at=(1, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 1, "y": 0})
         plan = Plan([{"op": "wait", "seconds": 5, "why": "t"}, dict(LEAVE_OP)], dict(PARAM_DEFAULTS))
         sync_leave(plan, w, Memory())
         self.assertEqual([op["op"] for op in plan.ops_left()], ["wait", "leave_level"], "demoted below: it stays there")
@@ -181,7 +184,8 @@ class LeaveTest(unittest.TestCase):
     def test_a_stalled_leave_waits_for_a_reason_to_retry(self):
         # A104: a leave_level that stalled is moved or dropped like any op, and not pushed back.
         w = grid(["....."], at=(1, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 1, "y": 0, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 1, "y": 0})
         m = Memory()
         remember(m.stalled_ops, dict(LEAVE_OP), "no progress", 0, RetryBasis(frozenset(), 0, 0), 8)
         plan = Plan([{"op": "wait", "seconds": 5, "why": "t"}], dict(PARAM_DEFAULTS))
@@ -190,7 +194,8 @@ class LeaveTest(unittest.TestCase):
 
     def test_the_target_level_is_not_left(self):
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         w.levels_cleared = [1]
         plan = Plan([{"op": "enter_level", "x": 0, "y": 0}], dict(PARAM_DEFAULTS))
         out = dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox"), plan))
@@ -202,7 +207,8 @@ class LeaveTest(unittest.TestCase):
 class WayOutTest(unittest.TestCase):
     def level_map(self) -> WorldModel:
         w = grid(["D...D", ".....", "D...."], at=(2, 1), map_id=8)
-        w.apply_position({"map_id": 8, "x": 2, "y": 1, "level": 2})
+        w.apply_minimap({"maps": [{"map_id": 8, "level": 2}]})
+        w.apply_position({"map_id": 8, "x": 2, "y": 1})
         return w
 
     def test_a_door_known_to_lead_out_comes_first(self):

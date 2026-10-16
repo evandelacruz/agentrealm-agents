@@ -11,7 +11,11 @@ from agentrealm_adk import config
 from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
 from agentrealm_adk.equip import (
+    CHOP,
+    CUT,
     best_equip_upgrade,
+    does_job,
+    weapon_to_arm,
     compare,
     damage_per_second,
     hunting_ceiling,
@@ -60,6 +64,23 @@ def rats(amount: int = 5) -> ThreatTable:
     t = ThreatTable()
     t.record(("npc", "rat"), amount)
     return t
+
+
+class ChopJobTest(unittest.TestCase):
+    """A161: chopping is a job like cutting, by the item's capabilities."""
+
+    def test_a_sword_chops_and_the_knife_does_not(self):
+        self.assertTrue(does_job("bronze_sword", CHOP))
+        self.assertFalse(does_job("pocket_knife", CHOP))
+        self.assertTrue(does_job("pocket_knife", CUT))
+        self.assertFalse(does_job(None, CHOP))
+
+    def test_the_one_weapon_rule_picks_the_chopper(self):
+        w = WorldModel(character_id=1, map_id=7, pos=(0, 0))
+        w.armed_code = "pocket_knife"
+        self.assertIsNone(weapon_to_arm(w, None, CHOP, None), "the knife does not chop")
+        w.held_supplies = [InventorySupply(5, "bronze_sword"), InventorySupply(6, "bronze_mallet")]
+        self.assertEqual(weapon_to_arm(w, None, CHOP, None).code, "bronze_sword")
 
 
 class SlotTest(unittest.TestCase):

@@ -30,7 +30,7 @@ from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.world import Pos, WorldModel
 
-from .ask import Planner, answer, lift_changed, watch_lines
+from .ask import ALREADY_MET, Planner, already_met, answer, lift_changed, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 
 # The ops whose x, y is the cell she goes to; any other op's x, y names a region.
@@ -113,6 +113,7 @@ class LadderRunner(starter_agent.StarterRunner):
         w = self.world
         for key in lift_changed(self.blocks, w, self.knowledge):
             self.log("planner", f"{key}: block lifted, what it waited on came")
+            self.asked_for = None  # the next walk asks afresh
         if self.op is not None and op_cell(self.op, w) == w.pos:
             self.done.append(self.op)  # there: the op is carried out
             self.op = None
@@ -139,6 +140,16 @@ class LadderRunner(starter_agent.StarterRunner):
                 self.planner.last_error = ""
             op = turn.op()
             return None if op in self.done else op
+        if already_met(reply, turn.reading.world):
+            # No wait: a plain block to its expiry, and one more ask that says so.
+            answer(goal, reply, self.blocks, turn.reading)
+            self.log("planner", f"{goal.title}: cannot until {reply.until}, already true; asking once more")
+            again = self.planner.ask(goal, turn.reading, note=ALREADY_MET.format(until=reply.until))
+            if again is None or already_met(again, turn.reading.world):
+                return None
+            if again.op is not None:
+                self.blocks.lift(goal.key)
+            reply = again  # an op, or a cannot that waits on something not yet true
         op = answer(goal, reply, self.blocks, turn.reading)
         if op is None:
             b = self.blocks[goal.key]

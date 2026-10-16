@@ -18,7 +18,9 @@ names what would let it be worked, and only a line that changes when the
 situation does (``UNTIL_LINES``, read by ``watch_lines``): what is carried,
 the levels cleared, the items a seller is known for, the next entrance's
 unmet need; ``gems N``, lifted once N gems are held; or ``ticks N``, a
-shorter expiry. Where she stands, her health and the readiness text change
+shorter expiry. An ``until`` already met when the ``cannot`` comes (``gems
+N`` with N held, ``already_met``) is no wait: the block holds to its expiry
+and the caller asks once more, saying so. Where she stands, her health and the readiness text change
 every step or hit, so they are never watched. Anything else is dropped, and
 the block holds to its expiry (``lift_changed``).
 
@@ -109,7 +111,7 @@ def question_prefix(reference_sections: str = "") -> str:
     return "\n\n".join(p for p in parts if p) + "\n"
 
 
-def question(node: Node, rd: Reading, reference_sections: str = "") -> list[dict[str, Any]]:
+def question(node: Node, rd: Reading, reference_sections: str = "", note: str = "") -> list[dict[str, Any]]:
     """The messages for the one question about ``node``: the game reference,
     the measured facts and the contract (cached), then the node."""
     own = node.op(node, rd)
@@ -117,6 +119,8 @@ def question(node: Node, rd: Reading, reference_sections: str = "") -> list[dict
     lines += [f"- {k}: {v}" for k, v in node_state(node, rd).items()]
     lines.append(f"ops: {', '.join(node.ops)}")
     lines.append(f"the tree's op: {json.dumps(own, sort_keys=True) if own else 'none'}")
+    if note:
+        lines.append(f"note: {note}")
     return [
         {"role": "system", "content": question_prefix(reference_sections), "cache": True},
         {"role": "user", "content": "\n".join(lines)},
@@ -165,6 +169,16 @@ def _count(text: str) -> int | None:
     return n if n > 0 else None
 
 
+def already_met(reply: Reply, w: WorldModel) -> bool:
+    """A ``cannot`` waiting on what is true already: ``gems N`` with N held."""
+    name, _, arg = reply.until.partition(" ")
+    n = _count(arg)
+    return reply.op is None and name == GEMS and n is not None and (w.gems or 0) >= n
+
+
+ALREADY_MET = "your last answer was cannot until {until}, which is already true; answer again"
+
+
 def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading) -> GoalOp | None:
     """Carry a reply out on the tree: an op is returned to run; a ``cannot``
     blocks the node with its reason and what it waits on (``UNTIL_LINES``,
@@ -175,7 +189,7 @@ def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading) -> GoalOp | No
     now, ticks, named, was = rd.world.tick, BLOCK_TICKS, "", ""
     if name in UNTIL_LINES and not arg:
         named, was = name, watch_lines(rd.world, rd.kb)[name]
-    elif name == GEMS and _count(arg) is not None:
+    elif name == GEMS and _count(arg) is not None and not already_met(reply, rd.world):
         named, was = GEMS, arg
     elif name == TICKS and _count(arg) is not None:
         ticks = min(BLOCK_TICKS, _count(arg))
@@ -261,10 +275,10 @@ class Planner:
             self._tokens = self.tokens_per_min or default_tokens_per_min(question_prefix(self.reference_sections))
         return not self.backoff.waiting(now) and not self.budget.limit_reached(now, self.calls_per_min, self._tokens)
 
-    def ask(self, node: Node, rd: Reading) -> Reply | None:
+    def ask(self, node: Node, rd: Reading, note: str = "") -> Reply | None:
         if self.client is None or not self.ready():
             return None
-        messages = question(node, rd, self.reference_sections)
+        messages = question(node, rd, self.reference_sections, note)
         now = self.clock()
         self.calls += 1
         self.budget.charge(now, messages)

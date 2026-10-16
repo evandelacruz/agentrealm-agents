@@ -121,8 +121,8 @@ class Node:
 class Block:
     reason: str
     until: int  # the tick it lapses
-    named: str = ""  # the part of the node's state its reason named (``ask.node_state``)
-    was: str = ""  # what that part read when the block was marked
+    named: str = ""  # what it waits on: an ``ask.watch_lines`` key or ``gems``; "" holds to the expiry
+    was: str = ""  # what that line read when the block was marked, or the gem count awaited
 
 
 class Blocks(dict[str, Block]):

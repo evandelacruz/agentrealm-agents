@@ -166,6 +166,12 @@ class BlockTest(unittest.TestCase):
                 self.assertEqual(lift_changed(blocks, w, kb), [])  # held to its expiry
                 self.assertIn("requires", blocks)
 
+    def test_a_gems_wait_already_met_is_no_wait(self):
+        w, kb, blocks = self.block("gems 40")  # 40 held already
+        self.assertEqual((blocks["requires"].named, blocks["requires"].until), ("", w.tick + goals.BLOCK_TICKS))
+        self.assertEqual(lift_changed(blocks, w, kb), [])
+        self.assertIn("requires", blocks)
+
     def test_a_block_on_ticks_is_a_shorter_expiry(self):
         w, kb, blocks = self.block("ticks 50")
         self.assertEqual(blocks["requires"].until, w.tick + 50)
@@ -293,6 +299,40 @@ class PlayTest(unittest.TestCase):
         self.assertEqual(len(fake.messages), 1)
         p.clock.now = p.backoff.retry_at
         self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
+
+    def test_a_cannot_already_met_is_asked_once_more_with_a_note(self):
+        w, kb = short_of_a_raft()  # 40 gems held
+        p, fake = planner('{"cannot": "short", "until": "gems 30"}', '{"op": {"op": "buy", "code": "raft"}}')
+        r = self.runner(p, w, kb)
+        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertIn("note: your last answer was cannot until gems 30, which is already true", fake.messages[1][1]["content"])
+        self.assertEqual(r.blocks, {})
+        for _ in range(3):
+            r.goal_op()
+        self.assertEqual(len(fake.messages), 2)  # no loop
+
+    def test_a_second_cannot_already_met_leaves_a_plain_block(self):
+        w, kb = short_of_a_raft()
+        p, fake = planner(*['{"cannot": "short", "until": "gems 30"}'] * 2, *['{"cannot": "hold on"}'] * 3)
+        r = self.runner(p, w, kb)
+        r.goal_op()
+        self.assertEqual((r.blocks["requires"].named, r.blocks["requires"].until), ("", w.tick + goals.BLOCK_TICKS))
+        for _ in range(3):
+            r.goal_op()
+        about = [m[1]["content"].splitlines()[0] for m in fake.messages]
+        self.assertEqual(about.count("goal: hold what it requires"), 2)  # once, then once more: no loop
+        self.assertEqual(len(about), len(set(about)) + 1)  # each goal the walk moves on to asked once
+
+    def test_after_a_block_lifts_the_goal_is_asked_again(self):
+        w, kb = short_of_a_raft()
+        p, fake = planner('{"cannot": "short", "until": "gems 60"}', '{"cannot": "hold on"}',
+                          '{"op": {"op": "buy", "code": "raft"}}')
+        r = self.runner(p, w, kb)
+        r.goal_op()  # requires blocked until 60 gems
+        r.goal_op()  # stay alive asked, blocked
+        w.gems = 60  # requires lifts; its watched lines are as they were
+        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertIn("goal: hold what it requires", fake.messages[2][1]["content"])
 
     def test_with_no_answer_the_trees_op_runs(self):
         w, kb = short_of_a_raft()

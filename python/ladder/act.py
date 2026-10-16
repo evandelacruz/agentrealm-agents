@@ -328,8 +328,8 @@ def fetch_item(op: GoalOp, ctx: Ctx) -> Act:
 
 def buy(op: GoalOp, ctx: Ctx) -> Act:
     """Take the item off a shelf in sight, else walk to the nearest seller
-    known for it (``sellers.sellers_of``, A131); over once it is hers or no
-    seller is left to try."""
+    known for it and not sold out (``sellers.sellers_of``, A131, A159); over
+    once it is hers or no seller is left to try."""
     w, code = ctx.world, op.get("code", "")
     if gained(ctx, code):
         return Act(None, f"bought {code}", over=True)
@@ -341,7 +341,7 @@ def buy(op: GoalOp, ctx: Ctx) -> Act:
     if w.pos is not None:
         # A seller reached with no shelf of it in sight does not sell it now.
         ctx.started.searched |= {(s.map_id, s.pos) for s in sellers if s.map_id == w.map_id and chebyshev(w.pos, s.pos) <= NEAR}
-    left = [s for s in sellers if (s.map_id, s.pos) not in ctx.started.searched]
+    left = [s for s in sellers if s.in_stock and (s.map_id, s.pos) not in ctx.started.searched]
     if not left:
         return Act(None, f"no seller of {code} left to try", over=True)
     seller = min(left, key=lambda s: walk_order(s, w))

@@ -410,6 +410,11 @@ class WorldModel:
     # though a served ``death_chest`` still names one. Kept across runs, the
     # latest ``death_chests.GONE_KEPT`` (A122).
     death_chests_gone: list[int] = field(default_factory=list)
+    # Supply ids our own applied ``Drop`` put on the ground (A158). Such a
+    # supply is priced wherever it lies (Manual §11 A price belongs to the
+    # supply), so its cell is no shop: ``is_our_drop``. Kept across runs
+    # per character (``travel.knowledge.load_our_drops``, ``save_our_drops``).
+    our_drops: set[int] = field(default_factory=set)
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.
     chest_contents: dict[int, list[InventorySupply]] = field(default_factory=dict)
@@ -1080,6 +1085,15 @@ class WorldModel:
         lives are counters and take none)."""
         n = len(self.held_supplies) + len(self.chest_supplies) + len(self.worn_codes)
         return n + (1 if self.armed_code else 0)
+
+    def note_our_drop(self, supply_id: int | None) -> None:
+        """Our ``Drop`` of ``supply_id`` applied: it lies on the ground as ours (A158)."""
+        if supply_id is not None:
+            self.our_drops.add(int(supply_id))
+
+    def is_our_drop(self, supply_id: int | None) -> bool:
+        """``supply_id`` is one our own ``Drop`` put down: a price on it makes its cell no shop (A158)."""
+        return supply_id is not None and supply_id in self.our_drops
 
     def reset_carried_chest(self) -> None:
         """A death drops the carried chest and the respawn brings a new, empty

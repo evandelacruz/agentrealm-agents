@@ -61,7 +61,7 @@ from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
 from agentrealm_adk.survival import recently_attacked
 from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.trace import Trace, tick_detail
-from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
@@ -117,6 +117,7 @@ class LadderRunner:
         self.tick_hz, self.horizon = DEFAULT_TICK_RATE_HZ, QUEUE_HORIZON_INTENTS
         self.trace = Trace(cfg.trace_path(cid), cfg.profile, out)
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
+        load_our_drops(knowledge, self.world)  # supplies this character dropped: no shop's (A158)
         self.root: Node = tree()
         self.blocks = Blocks()
         self.turn: Turn | None = None  # the last walk of the tree
@@ -170,6 +171,7 @@ class LadderRunner:
             if self.knowledge is not None:
                 sync_world_maps(self.knowledge, w)
                 save_hostiles(self.knowledge, w, self._loaded_hostiles)
+                save_our_drops(self.knowledge, w)
             self.trace.close()
 
     def on_error(self, call: str, e: ApiError) -> bool:
@@ -488,12 +490,13 @@ class LadderRunner:
             settle_entry(kb, w, m)
 
     def learn_shops(self) -> None:
-        """Every supply in sight with a price is a shelf: the cell is where it is sold (A131)."""
+        """Every supply in sight with a price is a shelf: the cell is where it is
+        sold (A131), unless our own ``Drop`` put it there (A158)."""
         w = self.world
         if self.knowledge is None or w.map_id is None:
             return
         for e in w.entities:
-            if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0:
+            if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0 and not w.is_our_drop(e.id):
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
 
 

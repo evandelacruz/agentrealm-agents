@@ -5,7 +5,7 @@ walks to a valuable that comes into view off the path being walked, and
 Pickup takes it once it is in reach. No planner call.
 
 A valuable is a free gem, a life (a code the item table learned, A47), or
-food while hurt. Every one in view is priced by the steps going by it adds
+food the character is hurt by at least the heal of (A155). Every one in view is priced by the steps going by it adds
 to the walk: the walking distance from where the character stands to the
 find, then on to the best cell of the route still ahead (the queued steps,
 then the path), less the steps the walk takes to that cell anyway
@@ -13,7 +13,7 @@ then the path), less the steps the walk takes to that cell anyway
 and the find counts). There is no fixed reach: each kind has its own
 allowance (``allowance``). A gem pile is worth ``GEM_PILE_STEPS``, and each
 gem pile next to it adds ``GEM_CLUSTER_STEPS`` (one stop takes them all);
-a life is worth ``LIFE_STEPS``; food while hurt ``FOOD_STEPS``. Hostile
+a life is worth ``LIFE_STEPS``; such food ``FOOD_STEPS``. Hostile
 safety is Gather's: the find must be on ground ``gather_ground`` allows
 (off hazards, clear of every known hostile's bar, in view or remembered),
 the path walked there must stay out of every known hostile's reach
@@ -46,8 +46,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from agentrealm_adk.healing import hurt
-from agentrealm_adk.supplies import is_food
+from agentrealm_adk.healing import worth_eating
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from agentrealm_adk.knowledge_base import knowledge_items
 from agentrealm_adk.memory import Memory
@@ -127,10 +126,11 @@ class DetourState(State):
 
 def valuable(w: WorldModel, e: Entity, items: dict, ctx: PlayContext) -> bool:
     """A free ground supply worth a detour that fits by the pack rule
-    (``pack.make_room``): a gem, a life, or food while hurt."""
+    (``pack.make_room``): a gem, a life, or food the character is hurt by
+    at least the heal of (``healing.worth_eating``, A155)."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
-    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or (hurt(w) and is_food(e.code))):
+    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code, items) or worth_eating(w, e.code)):
         return False
     return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind == TAKE
 
@@ -146,7 +146,7 @@ def allowance(w: WorldModel, e: Entity, finds: list[Entity], items: dict) -> int
         steps = GEM_PILE_STEPS + GEM_CLUSTER_STEPS * (min(piles, GEM_CLUSTER_MAX) - 1)
     if is_life_supply(e.code, items):
         steps = max(steps, LIFE_STEPS)
-    if hurt(w) and is_food(e.code):
+    if worth_eating(w, e.code):
         steps = max(steps, FOOD_STEPS)
     return steps
 

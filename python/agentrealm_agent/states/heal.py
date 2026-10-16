@@ -2,9 +2,10 @@
 ``Use`` on yourself (A24).
 
 Heal decides only how to heal, and health rises only from a heal: a potion,
-food, or food eaten on pickup (A130). There is no natural regeneration, so
-Heal never walks to safe ground to wait for health; safe ground is a refuge
-from attack (Retreat, Flee), not a healing spot. When a carried potion is
+or food, which is eaten on pickup and never carried (A130, A155). There is
+no natural regeneration, so Heal never walks to safe ground to wait for
+health; safe ground is a refuge from attack (Retreat, Flee), not a healing
+spot. When a carried potion is
 spent is the planner's ``low_health`` param (``healing.health_low``,
 ``healing.spend_potion``). What is sent after a refusal is the executor's
 (``executor.supply_refusals``); Heal asks only whether a supply may be tried
@@ -34,17 +35,19 @@ class HealState(State):
     """Reflex, above Fight. Hurt and no hostile in range, it heals by the
     first of these that can be had:
 
-    1. In combat or about to be (``healing.in_combat``), carried food or a
-       potion that is due goes first (A135).
-    2. Food lying within ``healing.FOOD_REACH``, the cheapest by its walk
-       on Heal's ground (``food.food_target``).
-    3. Out of combat, a block within that reach that drops food (a bush,
-       for berries) and a held blade opens, the cheapest the same way
+    1. In combat or about to be (``healing.in_combat``), a carried potion
+       that is due goes first (A135).
+    2. Food lying within ``healing.FOOD_REACH`` that it is hurt by at least
+       the heal of (``healing.worth_eating``, A155), the cheapest by its
+       walk on Heal's ground (``food.food_target``). Food is eaten on
+       pickup, so the ``Take`` is the meal.
+    3. Out of combat, a block within that reach that drops such food (a
+       bush, for berries) and a held blade opens, the cheapest the same way
        (``food.block_target``, A135).
-    4. Carried food, then a carried potion when ``healing.spend_potion``
-       says it is worth drinking now (A96): out of combat only at the low
-       line, and only once no food near could be had this decision (A135);
-       the reserve is kept otherwise.
+    4. A carried potion when ``healing.spend_potion`` says it is worth
+       drinking now (A96): out of combat only at the low line, and only
+       once no food near could be had this decision (A135); the reserve is
+       kept otherwise.
 
     With neither, Heal asks the planner once for food and potions (a
     ``heal_supplies`` trigger, counting the potions held back) and sends
@@ -202,8 +205,8 @@ def _act_block(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
 
 
 def use_carried_heal(w: WorldModel, ctx: PlayContext) -> StateOutcome | None:
-    """``Use`` on yourself carried food, or a potion ``healing.spend_potion``
-    says is worth drinking now (health low, or the drink turns the fight,
+    """``Use`` on yourself a carried potion ``healing.spend_potion`` says is
+    worth drinking now (health low, or the drink turns the fight,
     A96; out of combat only at the low line, A135: Heal calls it there only
     once no food near could be had), by the one Use-self path (``use_item.use_on_self``, A108). Retreat
     runs it too, when it is losing ground (A9).

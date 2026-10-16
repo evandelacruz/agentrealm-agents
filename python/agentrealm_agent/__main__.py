@@ -17,7 +17,9 @@ from agentrealm_adk.run_metrics import RunMetrics, compare_run_metrics, load_met
 from agentrealm_adk.supplies import load_for_run as load_supplies
 
 from .runner import Runner
-from .strategist import PlannerConfigError, Strategist
+from agentrealm_adk.llm import PlannerConfigError
+
+from .strategist import Strategist
 
 # How long `run` waits for the driver thread to stop before saving, once it
 # has stopped waiting on the park phase (A66): the driver returned, or a

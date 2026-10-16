@@ -5,7 +5,7 @@ is a test mode: triggers are drained and logged, and the built-in plan from
 ``policy.goals`` plus the no-LLM clue rules (A32) stay in charge; it answers
 an op's ``no_way_on`` itself by exploring (``plan.builtin_way_on``, A120). With the
 planner on and no key, :meth:`Strategist.from_env` raises
-:class:`PlannerConfigError` with one line, and the CLI stops before it plays.
+``llm.PlannerConfigError`` with one line, and the CLI stops before it plays.
 
 Two threads, one rule: everything that reads or writes the world, the plan,
 ``Memory`` or the trace runs on the tick thread, in :meth:`Strategist.on_window`.
@@ -40,6 +40,10 @@ The op table in ``plan.py`` (``OP_FIELDS``) is the contract with the model.
 When the planner needs something the states cannot do, add an op there and
 the state that runs it; never a state that starts itself.
 
+The providers, the call budget, backoff and reply parsing are the ADK's
+(``agentrealm_adk.llm``, A140), shared with Lorraine; the prompt, the
+triggers and what a reply does to the stack are Gary's, here.
+
 Settings (environment variables, defaults in brackets):
 
 - ``AGENTREALM_PLANNER_PROVIDER`` [anthropic, or openai when only an
@@ -47,7 +51,7 @@ Settings (environment variables, defaults in brackets):
 - ``AGENTREALM_PLANNER_MODEL`` [claude-sonnet-5-5 for anthropic; required for openai].
 - The provider's key: ``AGENTREALM_PLANNER_ANTHROPIC_KEY``, else
   ``ANTHROPIC_API_KEY``; ``AGENTREALM_PLANNER_OPENAI_KEY``, else
-  ``OPENAI_API_KEY`` (:data:`KEY_ENV`). The planner's own names come first
+  ``OPENAI_API_KEY`` (``llm.KEY_ENV``). The planner's own names come first
   because some hosts strip the standard ones from the environment.
 - ``AGENTREALM_PLANNER_EFFORT`` [low]: Anthropic effort level.
 - ``AGENTREALM_PLANNER_REPLAN_S`` [15]: with no event, replan this long
@@ -83,18 +87,17 @@ planner (:func:`default_tokens_per_min`).
 
 Failures: :meth:`Strategist.check` makes one call before play, and a key
 the provider refuses (401 or 403) stops the run with one line
-(:class:`PlannerAuthError`). A call that fails mid-run backs off: the next
-waits :data:`BACKOFF_BASE_S`, doubling with each failure in a row up to
-:data:`BACKOFF_CAP_S`. Acceptance runs count every failure and every
+(``llm.PlannerAuthError``). A call that fails mid-run backs off: the next
+waits :data:`llm.BACKOFF_BASE_S`, doubling with each failure in a row up to
+:data:`llm.BACKOFF_CAP_S`. Acceptance runs count every failure and every
 accepted plan (``acceptance.PlannerHealth``).
 
 Another provider is a class with the same ``complete(messages)`` and
-``check()`` methods (``LLMClient``), picked in :func:`make_client`.
+``check()`` methods (``llm.LLMClient``), picked in ``llm.make_client``.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import math
@@ -102,11 +105,28 @@ import os
 import queue
 import threading
 import time
-import urllib.error
-import urllib.request
-from collections import Counter, deque
+from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Callable, Collection, Mapping, Protocol
+from typing import Any, Callable, Collection, Mapping
+
+# The planner call plumbing, shared with Lorraine (A140).
+from agentrealm_adk.llm import (
+    AUTH_STATUSES,
+    DEFAULT_CALLS_PER_MIN,
+    DEFAULT_EFFORT,
+    Backoff,
+    CallBudget,
+    LLMClient,
+    ProviderConfig,
+    check_client,
+    connect,
+    env_number,
+    error_status,
+    planner_disabled_by_env,
+    trace_messages,
+)
+from agentrealm_adk.llm import default_tokens_per_min as llm_default_tokens_per_min
+from agentrealm_adk.llm import parse_reply as llm_parse_reply
 
 from agentrealm_adk.directives import Directives
 from agentrealm_adk.travel.resolve import given_up_travel, travel_dest, travel_given_up
@@ -188,12 +208,7 @@ log = logging.getLogger(__name__)
 INBOX_KEPT = 48  # newest triggers kept while waiting for a call
 FINDS_KEPT = 16  # newest finds one discovery trigger carries (A71)
 DEFER_MAX_S = 10.0  # a new head waits at most this long for an action boundary (A71)
-CHARS_PER_TOKEN = 4  # estimate for a call that reports no usage
-BUDGET_WINDOW_S = 60.0  # the budget counts calls and tokens over this much play
 DEFAULT_REPLAN_S = 15.0
-DEFAULT_CALLS_PER_MIN = 6
-DEFAULT_TOKENS_PER_MIN = 40_000  # floor; the default also fits one prefix write (default_tokens_per_min)
-PREFIX_BUDGET_FACTOR = 1.5
 DEFAULT_HURT_FRACTION = 0.5
 DEFAULT_IDLE_MINUTES = 10
 STALL_SECONDS = 30  # State shows a stall once nothing has changed for this long
@@ -202,25 +217,6 @@ RULER_STEP = 5  # State map: every this-many-th column's whole x is on the ruler
 # State on_the_ground: the things on the ground listed, nearest first (A148).
 # Doors are few, so doors_seen lists every door seen on the map.
 GROUND_SHOWN = 8
-# After a failed call the next waits BACKOFF_BASE_S, doubling per failure in a row, at most BACKOFF_CAP_S.
-BACKOFF_BASE_S = 2.0
-BACKOFF_CAP_S = 120.0
-AUTH_STATUSES = (401, 403)  # the provider refused the key: fatal at startup
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5-5"
-DEFAULT_EFFORT = "low"
-PROVIDERS = ("anthropic", "openai")
-# Where each provider's key is read from, first set wins.
-KEY_ENV: dict[str, tuple[str, ...]] = {
-    "anthropic": ("AGENTREALM_PLANNER_ANTHROPIC_KEY", "ANTHROPIC_API_KEY"),
-    "openai": ("AGENTREALM_PLANNER_OPENAI_KEY", "OPENAI_API_KEY"),
-}
-OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_MODELS_URL = "https://api.openai.com/v1/models"
-OPENAI_PROMPT_CACHE_KEY = "agentrealm-planner"
-ANTHROPIC_MAX_TOKENS = 16_000
-# Models that take the server-side refusal fallback (beta header plus `fallbacks`).
-ANTHROPIC_FALLBACK_MODELS = frozenset({"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5", "claude-fable-5-1"})
-ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 
 def _op_table() -> str:
@@ -318,48 +314,6 @@ def system_prompt(reference_sections: str = "") -> str:
     return "\n\n".join(parts) + "\n"
 
 
-class LLMClient(Protocol):
-    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]: ...
-
-    def check(self) -> None:
-        """One cheap authenticated call; raises what the provider raised."""
-
-
-class PlannerConfigError(ValueError):
-    """The planner is on but cannot run (no key, no SDK). One line, for the CLI to print."""
-
-
-class PlannerAuthError(PlannerConfigError):
-    """The provider refused the planner's key (401 or 403) on the startup check."""
-
-
-class ProviderHTTPError(RuntimeError):
-    """A provider answered with an HTTP error status."""
-
-    def __init__(self, message: str, status: int) -> None:
-        super().__init__(message)
-        self.status_code = status
-
-
-def error_status(e: BaseException) -> int | None:
-    """The HTTP status of a provider error (``anthropic`` SDK or ours), else None."""
-    status = getattr(e, "status_code", None)
-    return status if isinstance(status, int) else None
-
-
-def provider_key(provider: str) -> str:
-    """The provider's key from the first variable in :data:`KEY_ENV` that is set."""
-    for name in KEY_ENV[provider]:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return ""
-
-
-def planner_disabled_by_env() -> bool:
-    return os.environ.get("AGENTREALM_NO_PLANNER", "").strip().lower() in ("1", "true", "yes")
-
-
 @dataclass
 class StrategistConfig:
     provider: str = ""  # "" means off (the --no-planner test mode)
@@ -377,53 +331,31 @@ class StrategistConfig:
     def enabled(self) -> bool:
         return bool(self.provider and self.model and self.api_key)
 
+    @property
+    def provider_config(self) -> ProviderConfig:
+        return ProviderConfig(self.provider, self.model, self.api_key, self.effort)
+
     @classmethod
     def from_env(cls) -> StrategistConfig:
-        """Read the planner settings. Raises :class:`PlannerConfigError` when one is missing."""
-        provider = os.environ.get("AGENTREALM_PLANNER_PROVIDER", "").strip().lower()
-        if not provider:
-            provider = "openai" if provider_key("openai") and not provider_key("anthropic") else "anthropic"
-        if provider not in PROVIDERS:
-            raise PlannerConfigError(
-                f"planner: AGENTREALM_PLANNER_PROVIDER={provider!r}; use one of {', '.join(PROVIDERS)}"
-            )
-        api_key = provider_key(provider)
-        if not api_key:
-            names = " or ".join(KEY_ENV[provider])
-            raise PlannerConfigError(f"planner: set {names} (provider {provider}), or pass --no-planner")
-        model = os.environ.get("AGENTREALM_PLANNER_MODEL", "").strip()
-        if not model and provider == "anthropic":
-            model = DEFAULT_ANTHROPIC_MODEL
-        if not model:
-            raise PlannerConfigError(f"planner: set AGENTREALM_PLANNER_MODEL for provider {provider}")
-
-        def number(name: str, default: float) -> float:
-            raw = os.environ.get(name, "").strip()
-            if not raw:
-                return default
-            try:
-                return float(raw)
-            except ValueError:
-                raise PlannerConfigError(f"planner: {name}={raw!r} is not a number") from None
-
+        """Read the planner settings. Raises ``llm.PlannerConfigError`` when one is missing."""
+        p = ProviderConfig.from_env()
         return cls(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            effort=os.environ.get("AGENTREALM_PLANNER_EFFORT", "").strip() or DEFAULT_EFFORT,
-            replan_s=number("AGENTREALM_PLANNER_REPLAN_S", DEFAULT_REPLAN_S),
-            calls_per_min=int(number("AGENTREALM_PLANNER_CALLS_PER_MIN", DEFAULT_CALLS_PER_MIN)),
-            tokens_per_min=int(number("AGENTREALM_PLANNER_TOKENS_PER_MIN", 0)),
-            hurt_fraction=number("AGENTREALM_PLANNER_HURT_FRACTION", DEFAULT_HURT_FRACTION),
-            idle_minutes=number("AGENTREALM_PLANNER_IDLE_MINUTES", DEFAULT_IDLE_MINUTES),
+            provider=p.provider,
+            model=p.model,
+            api_key=p.api_key,
+            effort=p.effort,
+            replan_s=env_number("AGENTREALM_PLANNER_REPLAN_S", DEFAULT_REPLAN_S),
+            calls_per_min=int(env_number("AGENTREALM_PLANNER_CALLS_PER_MIN", DEFAULT_CALLS_PER_MIN)),
+            tokens_per_min=int(env_number("AGENTREALM_PLANNER_TOKENS_PER_MIN", 0)),
+            hurt_fraction=env_number("AGENTREALM_PLANNER_HURT_FRACTION", DEFAULT_HURT_FRACTION),
+            idle_minutes=env_number("AGENTREALM_PLANNER_IDLE_MINUTES", DEFAULT_IDLE_MINUTES),
             reference_sections=os.environ.get("AGENTREALM_PLANNER_REFERENCE_SECTIONS", "").strip(),
         )
 
 
 def default_tokens_per_min(reference_sections: str = "") -> int:
     """The per-minute token budget when none is set: room for one full prefix write."""
-    prefix = estimate_tokens([{"role": "system", "content": system_prompt(reference_sections)}])
-    return max(DEFAULT_TOKENS_PER_MIN, math.ceil(PREFIX_BUDGET_FACTOR * prefix))
+    return llm_default_tokens_per_min(system_prompt(reference_sections))
 
 
 def drain_triggers(m: Memory) -> list[dict[str, Any]]:
@@ -433,205 +365,10 @@ def drain_triggers(m: Memory) -> list[dict[str, Any]]:
     return out
 
 
-class OpenAIChatClient:
-    """OpenAI chat completions (stdlib ``urllib``)."""
-
-    def __init__(self, api_key: str, model: str) -> None:
-        self.api_key = api_key
-        self.model = model
-
-    def check(self) -> None:
-        """Read the model: 401 or 403 means the key is refused."""
-        req = urllib.request.Request(
-            f"{OPENAI_MODELS_URL}/{self.model}",
-            headers={"Authorization": f"Bearer {self.api_key}"},
-            method="GET",
-        )
-        self._send(req, timeout=30)
-
-    def _send(self, req: urllib.request.Request, *, timeout: float) -> dict[str, Any]:
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            detail = e.read().decode("utf-8", errors="replace")
-            raise ProviderHTTPError(f"openai http {e.code}: {detail}", e.code) from e
-        except urllib.error.URLError as e:
-            raise RuntimeError(f"openai network: {e}") from e
-
-    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        body = json.dumps(
-            {
-                "model": self.model,
-                "messages": [{"role": m["role"], "content": m["content"]} for m in messages],
-                "response_format": {"type": "json_object"},
-                # OpenAI caches a long shared prefix itself; the key keeps our calls on one cache.
-                "prompt_cache_key": OPENAI_PROMPT_CACHE_KEY,
-            }
-        ).encode("utf-8")
-        req = urllib.request.Request(
-            OPENAI_CHAT_URL,
-            data=body,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        payload = self._send(req, timeout=120)
-        choices = payload.get("choices") or []
-        if not choices:
-            raise RuntimeError("openai: empty choices")
-        content = choices[0].get("message", {}).get("content", "")
-        if not isinstance(content, str):
-            raise RuntimeError("openai: missing message content")
-        usage = dict(payload["usage"]) if isinstance(payload.get("usage"), dict) else {}
-        details = usage.get("prompt_tokens_details")
-        if isinstance(details, dict) and details.get("cached_tokens"):
-            # Report the cached prefix apart, as Anthropic does, so the budget skips it.
-            usage["cache_read_input_tokens"] = details["cached_tokens"]
-            usage["prompt_tokens"] = max(0, int(usage.get("prompt_tokens", 0)) - int(details["cached_tokens"]))
-        return content.strip(), usage
-
-
-class AnthropicClient:
-    """Claude through the official ``anthropic`` SDK (``pip install anthropic``)."""
-
-    def __init__(self, api_key: str, model: str, effort: str = DEFAULT_EFFORT) -> None:
-        import anthropic  # the planner's one optional dependency (AGENTS.md)
-
-        self.sdk = anthropic.Anthropic(api_key=api_key, max_retries=1)
-        self.model = model
-        self.effort = effort
-
-    def check(self) -> None:
-        """Read the model: the SDK raises ``AuthenticationError`` (401) or
-        ``PermissionDeniedError`` (403) for a refused key."""
-        self.sdk.models.retrieve(self.model)
-
-    def complete(self, messages: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
-        system = [anthropic_system_block(m) for m in messages if m["role"] == "system"]
-        turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system"]
-        request: dict[str, Any] = {
-            "model": self.model,
-            "max_tokens": ANTHROPIC_MAX_TOKENS,
-            "system": system,
-            "messages": turns,
-            "extra_body": {"output_config": {"effort": self.effort}},
-        }
-        if self.model in ANTHROPIC_FALLBACK_MODELS:
-            # A request a safety classifier declines is re-run on a fallback model server-side.
-            request["betas"] = [ANTHROPIC_FALLBACK_BETA]
-            request["extra_body"]["fallbacks"] = "default"
-        resp = self.sdk.beta.messages.create(**request)
-        if resp.stop_reason == "refusal":
-            raise RuntimeError("anthropic: refused")
-        text = "".join(block.text for block in resp.content if block.type == "text")
-        usage = {
-            "input_tokens": resp.usage.input_tokens,  # uncached input only; the cache counts are apart
-            "output_tokens": resp.usage.output_tokens,
-            "cache_read_input_tokens": getattr(resp.usage, "cache_read_input_tokens", 0) or 0,
-            "cache_creation_input_tokens": getattr(resp.usage, "cache_creation_input_tokens", 0) or 0,
-        }
-        return text.strip(), usage
-
-
-def anthropic_system_block(message: dict[str, Any]) -> dict[str, Any]:
-    """A system message as an Anthropic text block, with ``cache_control`` when marked ``cache``."""
-    block: dict[str, Any] = {"type": "text", "text": message["content"]}
-    if message.get("cache"):
-        block["cache_control"] = {"type": "ephemeral"}
-    return block
-
-
-def make_client(cfg: StrategistConfig) -> LLMClient:
-    """The provider client for ``cfg``. Add another provider here."""
-    if cfg.provider == "anthropic":
-        return AnthropicClient(cfg.api_key, cfg.model, cfg.effort)
-    return OpenAIChatClient(cfg.api_key, cfg.model)
-
-
-def tokens_used(usage: dict[str, Any]) -> int | None:
-    """Uncached prompt (cache writes included) plus answer tokens the API reported,
-    or None when it reported none. Cache reads are not counted.
-
-    OpenAI names them ``prompt_tokens``/``completion_tokens`` (the client takes
-    cached reads out of ``prompt_tokens``), Anthropic ``input_tokens``/
-    ``output_tokens`` with writes apart in ``cache_creation_input_tokens``.
-    """
-    keys = ("prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "cache_creation_input_tokens")
-    try:
-        total = sum(int(usage.get(k, 0) or 0) for k in keys)
-    except (TypeError, ValueError):
-        return None
-    return total or None
-
-
-def json_objects(raw: str) -> list[dict[str, Any]]:
-    """Every top-level JSON object in ``raw``, in order, skipping the text between.
-
-    A span is from a ``{`` to the ``}`` that balances it, braces inside strings
-    not counted. A span that is not valid JSON is skipped whole, never searched
-    for objects nested in it; an unclosed one ends the search.
-    """
-    found: list[dict[str, Any]] = []
-    i = raw.find("{")
-    while i >= 0:
-        end = _balanced_end(raw, i)
-        if end is None:
-            break
-        try:
-            obj = json.loads(raw[i:end])
-        except ValueError:
-            obj = None
-        if isinstance(obj, dict):
-            found.append(obj)
-        i = raw.find("{", end)
-    return found
-
-
-def _balanced_end(raw: str, start: int) -> int | None:
-    """The index just past the ``}`` that closes the ``{`` at ``start``, or None."""
-    depth, in_string, escaped = 0, False, False
-    for j in range(start, len(raw)):
-        c = raw[j]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif c == "\\":
-                escaped = True
-            elif c == '"':
-                in_string = False
-        elif c == '"':
-            in_string = True
-        elif c == "{":
-            depth += 1
-        elif c == "}":
-            depth -= 1
-            if depth == 0:
-                return j + 1
-    return None
-
-
 def parse_reply(raw: str) -> Any:
-    """The JSON object in a reply; a model without a JSON mode may wrap it in a code fence.
-
-    A reply holding several objects (a plan, then a correction) gives the last
-    one :func:`parse_plan_payload` accepts (:func:`accepts_plan`): the planner's final word.
-    """
-    try:
-        return json.loads(raw)
-    except ValueError:
-        objects = json_objects(raw)
-        plans = [obj for obj in objects if accepts_plan(obj)]
-        if len(objects) > 1:
-            log.info("planner reply held %d JSON objects, %d plans; using the last plan", len(objects), len(plans))
-        if plans:
-            return plans[-1]
-        first, last = raw.find("{"), raw.rfind("}")
-        if first < 0 or last < first:
-            raise
-        return json.loads(raw[first : last + 1])
+    """The JSON object in a reply (``llm.parse_reply``): of several, the last
+    one :func:`parse_plan_payload` accepts (:func:`accepts_plan`)."""
+    return llm_parse_reply(raw, accepts_plan)
 
 
 def same_ops(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
@@ -639,22 +376,6 @@ def same_ops(a: list[dict[str, Any]], b: list[dict[str, Any]]) -> bool:
     free-text ``why``, so a reworded reason does not restart a ``wait``."""
 
     return len(a) == len(b) and all(target_of(x) == target_of(y) for x, y in zip(a, b))
-
-
-def estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    """Characters over 4 for the part of the prompt that is not cached."""
-    return sum(len(msg["content"]) for msg in messages if not msg.get("cache")) // CHARS_PER_TOKEN + 1
-
-
-def trace_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The prompt for the trace, with the cached prefix as its size and digest, not its text."""
-    out = []
-    for msg in messages:
-        if msg.get("cache"):
-            digest = hashlib.sha256(msg["content"].encode("utf-8")).hexdigest()[:12]
-            msg = {**msg, "content": f"<cached prefix: {len(msg['content'])} chars, sha256 {digest}>"}
-        out.append(msg)
-    return out
 
 
 def stalled_lines(records: Collection[StalledOp]) -> str:
@@ -1676,9 +1397,8 @@ class Strategist:
     calls: int = 0  # calls this run, for the trace
     last_call_at: float | None = None  # when the last call was sent
     last_reply_at: float | None = None  # when the last call ended; the timer and discovery gaps count from it (A83)
-    failures_in_a_row: int = 0  # failed calls since the last good one; sets the backoff
-    retry_at: float = 0.0  # after a failure, no call before this clock time
-    spent: deque = field(default_factory=deque)  # [sent_at, tokens] per call in the budget window
+    backoff: Backoff = field(default_factory=Backoff)  # after a failed call, how long the next waits
+    budget: CallBudget = field(default_factory=CallBudget)  # calls and tokens in the budget window
     _last_map: tuple[int, int | None] | None = None  # (map_id, level) at the last window
     _hurt: bool = False
     _token_budget: int = 0  # resolved tokens_per_min (token_budget)
@@ -1703,47 +1423,42 @@ class Strategist:
     def from_env(cls) -> Strategist:
         """The planner for a live run; off only with ``AGENTREALM_NO_PLANNER``.
 
-        Raises :class:`PlannerConfigError` when it is on and cannot run.
+        Raises ``llm.PlannerConfigError`` when it is on and cannot run.
         """
         if planner_disabled_by_env():
             return cls.off()
         cfg = StrategistConfig.from_env()
-        try:
-            client = make_client(cfg)
-        except ImportError:
-            raise PlannerConfigError(
-                f"planner: provider {cfg.provider} needs its SDK: run `make setup` (pip install -r python/requirements.txt), or pass --no-planner"
-            ) from None
-        return cls(config=cfg, client=client)
+        return cls(config=cfg, client=connect(cfg.provider_config))
 
     @property
     def enabled(self) -> bool:
         return self.config.enabled and self.client is not None
 
+    @property
+    def failures_in_a_row(self) -> int:
+        return self.backoff.failures_in_a_row
+
+    @property
+    def retry_at(self) -> float:
+        return self.backoff.retry_at
+
+    @property
+    def spent(self):
+        """``[sent_at, tokens]`` per call in the budget window."""
+        return self.budget.spent
+
     def check(self) -> None:
-        """One call before play. Raises :class:`PlannerAuthError` when the
-        provider refuses the key (401 or 403), and :class:`PlannerConfigError`
+        """One call before play. Raises ``llm.PlannerAuthError`` when the
+        provider refuses the key (401 or 403), and ``llm.PlannerConfigError``
         on any other 4xx but 429 (a typo'd model is a 404). Rate limits,
         server errors and the network are left to the run, which counts them
         and backs off."""
         if not self.enabled:
             return
         assert self.client is not None
-        try:
-            self.client.check()
-        except Exception as e:  # network, HTTP status
-            status = error_status(e)
-            if status in AUTH_STATUSES:
-                names = " or ".join(KEY_ENV[self.config.provider])
-                raise PlannerAuthError(
-                    f"planner: {self.config.provider} refused the key (HTTP {status}); fix {names}, or pass --no-planner"
-                ) from None
-            if status is not None and 400 <= status < 500 and status != 429:
-                raise PlannerConfigError(
-                    f"planner: {self.config.provider} rejected model {self.config.model!r} (HTTP {status}); "
-                    "fix AGENTREALM_PLANNER_MODEL, or pass --no-planner"
-                ) from None
-            log.warning("strategist: startup check failed: %s", e)
+        failed = check_client(self.client, self.config.provider_config)
+        if failed is not None:
+            log.warning("strategist: startup check failed: %s", failed)
 
     # --- background thread: send the prompt, wait for the reply ---
 
@@ -1825,7 +1540,7 @@ class Strategist:
         if self.last_reply_at is None or self.clock() - self.last_reply_at >= self.config.replan_s:
             if not any(t["trigger"] == "timer" for t in self.inbox):
                 self.inbox.append({"trigger": "timer", "tick": runner.world.tick})
-        if self.clock() < self.retry_at:
+        if self.backoff.waiting(self.clock()):
             return  # backing off after a failed call
         if self.inbox and not self.limit_reached() and not self._discovery_waits():
             self._send(runner)
@@ -1844,14 +1559,7 @@ class Strategist:
 
     def limit_reached(self) -> str:
         """Which per-minute budget stops a call now, or "" when one may start."""
-        now = self.clock()
-        while self.spent and now - self.spent[0][0] >= BUDGET_WINDOW_S:
-            self.spent.popleft()
-        if len(self.spent) >= self.config.calls_per_min:
-            return "calls_per_min"
-        if sum(tokens for _, tokens in self.spent) >= self.token_budget():
-            return "tokens_per_min"
-        return ""
+        return self.budget.limit_reached(self.clock(), self.config.calls_per_min, self.token_budget())
 
     def _collect(self, runner: Any) -> None:
         """Move queued signals into the inbox and raise the map, hurt, idle and discovery triggers."""
@@ -1932,7 +1640,7 @@ class Strategist:
         # Charge the attempt now, so a call that fails still uses up the budget.
         self.calls += 1
         self.last_call_at = self.clock()
-        self.spent.append([self.last_call_at, estimate_tokens(messages)])
+        self.budget.charge(self.last_call_at, messages)
         self.in_flight, self.inbox = self.inbox, []
         w, plan = runner.world, runner.plan
         self.asked = Asked(
@@ -1969,14 +1677,12 @@ class Strategist:
         triggers, self.in_flight = self.in_flight or [], None
         asked, self.asked = self.asked, None
         self.last_reply_at = self.clock()
-        reported = tokens_used(answer.usage)
-        if reported is not None and self.spent:
-            self.spent[-1][1] = reported
+        self.budget.settle(answer.usage)
         record: dict[str, Any] = {
             "call": self.calls,
             "raw": answer.raw,
             "usage": answer.usage,
-            "tokens_last_minute": sum(tokens for _, tokens in self.spent),
+            "tokens_last_minute": self.budget.tokens(),
         }
         if answer.error:
             self._fail(runner, triggers, answer.error, record, auth=answer.status in AUTH_STATUSES)
@@ -1991,7 +1697,7 @@ class Strategist:
             # was not JSON cleared gather_gems and buy for the safe default).
             self._fail(runner, triggers, unreadable, record)
             return
-        self.failures_in_a_row, self.retry_at = 0, 0.0
+        self.backoff.ok()
         d = runner.directives.directives
         (goals, params, notes), self.rejected = collect_rejections(
             lambda: parse_plan_payload(reply, floor_params=dict(d.params), current_params=runner.plan.params)
@@ -2131,9 +1837,7 @@ class Strategist:
         read as a JSON object): keep the stack, put its triggers back, and
         back off before the next call."""
         self.inbox = (triggers + self.inbox)[-INBOX_KEPT:]
-        self.failures_in_a_row += 1
-        delay = min(BACKOFF_CAP_S, BACKOFF_BASE_S * 2 ** (self.failures_in_a_row - 1))
-        self.retry_at = self.clock() + delay
+        delay = self.backoff.fail(self.clock())
         log.warning("strategist: call failed: %s", error)
         runner.log(
             "strategist",

@@ -4,6 +4,8 @@ import random
 import tempfile
 import threading
 import unittest
+
+from agentrealm_adk.equip import CHOP
 from pathlib import Path
 from unittest import mock
 
@@ -65,6 +67,12 @@ class BreakMemoryTest(unittest.TestCase):
             self.assertTrue(cannot_cut(code), code)
         for code in ("pocket_knife", "bronze_sword", "fake_cleaver", None):
             self.assertFalse(cannot_cut(code), code)
+
+    def test_cannot_cut_takes_the_capability_a_tree_needs(self):
+        self.assertTrue(cannot_cut("pocket_knife", capability=CHOP), "the knife cuts but does not chop")
+        self.assertTrue(cannot_cut("bronze_mallet", capability=CHOP))
+        for code in ("bronze_sword", "fake_cleaver", None):
+            self.assertFalse(cannot_cut(code, capability=CHOP), code)
 
     def test_capability_learned_from_an_opened_break(self):
         kb = KnowledgeBase.empty("sandbox")

@@ -370,6 +370,41 @@ class GatherFellsTreesTest(unittest.TestCase):
         self.assertEqual(m.gather_status, "felling a tree")
         self.assertIsNone(m.gather_rearm, "the knife cuts: it was only bettered")
 
+    def test_the_walk_ends_within_the_choppers_reach(self):
+        """A116: the stand cells come from the chopper's reach, not a constant."""
+        w = fence(grid(["......t"], at=(0, 0)))
+        w.armed_code = "bronze_sword"
+        k = KnowledgeBase.empty("fake-world")
+        k.items["bronze_sword"] = {"attack_range": 2}
+        m = Memory()
+        gather_outcome(w, m, Policy(on_hostile="ignore"), knowledge=k, op={"op": "gather_gems", "count": 3})
+        self.assertEqual(m.gather_target, ("tree", (6, 0)))
+        self.assertEqual(m.path[-1], (4, 0), "two cells off, the sword's learned reach")
+        w.pos = (4, 0)
+        out = gather_outcome(w, m, Policy(on_hostile="ignore"), knowledge=k, op={"op": "gather_gems", "count": 3})
+        self.assertEqual(out.intents, [{"verb": "Use", "target": {"kind": "block", "x": 6, "y": 0}}])
+
+    def test_blocked_by_hostile_when_only_a_hostile_bars_the_tree(self):
+        w = grid(["...t"], at=(0, 0))
+        w.armed_code = "bronze_sword"
+        w.entities = [Entity("npc", 9, (3, 1), "gnawer")]
+        w.hostile_types.add(("npc", "gnawer"))
+        m = Memory()
+        out = outcome(w, m, hostile=["npc"])
+        self.assertIsNone(out.intents)
+        self.assertEqual(m.gather_status, gather_mod.BLOCKED)
+        w.armed_code = "pocket_knife"  # no chopper: the tree is no target, so nothing is barred
+        out = outcome(w, Memory(), hostile=["npc"])
+        self.assertIsNone(out.intents)
+
+    def test_trees_felled_on_this_map_raise_the_trees_yield(self):
+        k = KnowledgeBase.empty("fake-world")
+        for i in range(40):
+            record_cut(k, 7, (30, 1 + i % 10), "tree", i, i % 2 == 0)
+        _, by_region = gather_mod.region_yields(k, 7)
+        odds = gather_mod.GemOdds(4, 0.2, by_region, fells=gather_mod.fell_totals(k, 7))
+        self.assertLess(odds.work("tree", (1, 1)), odds.work("grass", (1, 1)))
+
     def test_a_trees_yield_is_at_least_grass_on_that_ground(self):
         odds = gather_mod.GemOdds(4, 0.2, {(0, 0): 0.4})
         for at in ((1, 1), (40, 40)):

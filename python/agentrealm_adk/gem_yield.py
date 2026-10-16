@@ -26,7 +26,8 @@ Stored in the world knowledge base under ``kb.extra["gem_yield"]``::
 
     {"version": VERSION,
      "<map_id>": {"cuts": [{"x", "y", "block", "tick", "gem"}, ...],
-                  "regions": {"<rx>,<ry>": {"cuts", "gems", "last_tick"}}}}
+                  "regions": {"<rx>,<ry>": {"cuts", "gems", "last_tick"}},
+                  "fells": {"cuts", "gems"}}}
 
 A store of another ``version`` is read as empty and replaced on the next
 cut: totals from before A81 counted bush cuts at the old drop rates, and
@@ -89,8 +90,8 @@ CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
 GATHER_BLOCKS = frozenset({"grass"})
 # The blocks Gather fells with an item that chops (A161): a felled wild tree
 # drops a gem at least as often as grass on the same ground (Manual §16 How to
-# make money, B148). Its cuts are filed but never counted in a region's grass
-# totals; its yield is ``fell_yield``.
+# make money, B148). A fell is filed like a cut and counted in the map's
+# ``fells`` totals, never in a region's grass totals; its yield is ``fell_yield``.
 FELL_BLOCKS = frozenset({"tree"})
 # Every block Gather works for gems: its stall clock and run counts read these.
 WORK_BLOCKS = GATHER_BLOCKS | FELL_BLOCKS
@@ -358,13 +359,18 @@ def _map_row(kb: KnowledgeBase, map_id: int) -> dict[str, Any]:
 
 
 def record_cut(kb: KnowledgeBase | None, map_id: int, pos: Pos, block: str, tick: int, gem: bool) -> None:
-    """File one cut, and count it in its region when it was grass."""
+    """File one cut, and count it in its region when it was grass, or in the
+    map's ``fells`` when it felled a tree."""
     if kb is None:
         return
     with kb.lock:
         row = _map_row(kb, map_id)
         row["cuts"].append({"x": pos[0], "y": pos[1], "block": block, "tick": tick, "gem": gem})
         del row["cuts"][:-MAX_RECORDS]
+        if block in FELL_BLOCKS:
+            fells = row.setdefault("fells", {"cuts": 0, "gems": 0})
+            fells["cuts"] = int(fells.get("cuts", 0)) + 1
+            fells["gems"] = int(fells.get("gems", 0)) + (1 if gem else 0)
         if block not in GATHER_BLOCKS:
             return
         region = row["regions"].setdefault(region_key(pos), {"cuts": 0, "gems": 0, "last_tick": tick})
@@ -405,11 +411,25 @@ def region_yield(region: dict[str, Any] | None, rate: float) -> float:
     return (gems + rate * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
 
 
-def fell_yield(grass: float) -> float:
-    """Gems a felled tree drops, given ``grass``, a cut's yield on the same
-    ground: at least grass's (Manual §16 How to make money, B148), so it is
-    priced at that floor."""
-    return grass
+def fell_totals(kb: KnowledgeBase | None, map_id: int | None) -> tuple[int, int]:
+    """This map's felled trees and the gems they dropped, ``(fells, gems)``."""
+    if kb is None or map_id is None:
+        return 0, 0
+    with kb.lock:
+        row = _stored_row(kb, map_id)
+        raw = row.get("fells") if row is not None else None
+        if not isinstance(raw, dict):
+            return 0, 0
+        return int(raw.get("cuts", 0)), int(raw.get("gems", 0))
+
+
+def fell_yield(grass: float, fells: tuple[int, int] = (0, 0)) -> float:
+    """Gems a felled tree drops on ground where a grass cut drops ``grass``:
+    this map's felled trees (``fell_totals``) pulled toward ``grass`` as a
+    region's cuts are toward the map's rate, and never below it (Manual §16
+    How to make money, B148: at least as often as grass on the same ground)."""
+    cuts, gems = fells
+    return max(grass, (gems + grass * PRIOR_CUTS) / (cuts + PRIOR_CUTS))
 
 
 def region_yields(kb: KnowledgeBase | None, map_id: int | None) -> tuple[float, dict[tuple[int, int], float]]:

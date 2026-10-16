@@ -64,6 +64,7 @@ from agentrealm_adk.gem_yield import (
     blocks_to_region,
     cut_or_since,
     exhausted_cells,
+    fell_totals,
     fell_yield,
     region_corner,
     region_of,
@@ -77,6 +78,7 @@ from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import CostGridParams, cost_path, nearest_target
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.pathing import grid_params, next_step, plan_sets
+from agentrealm_adk.reach import supply_reach
 from agentrealm_adk.equip import CHOP, CUT, does_job, hunting_ceiling, weapon_to_arm
 from agentrealm_adk.survival import is_hostile
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
@@ -105,9 +107,6 @@ GATHER_CANDIDATES = 16
 # Gather waits this long for a taken first step toward its target (an
 # occupant), then gives the target up (5 s at 10 ticks/s, as a walk's fog hold).
 HOLD_TICKS = 50
-# A tree is felled from this far: every sword's attack range (Manual §11
-# Breaking blocks: a weapon's reach is its attack range).
-FELL_REACH = 1
 # Gather's last decision, for the planner's State (``Memory.gather_status``).
 CUTTING = "cutting"
 FELLING = "felling a tree"
@@ -176,13 +175,15 @@ class GemOdds:
     """What a place to work costs beyond the walk there: the gems the op
     still needs, the gems a cut drops in each region of this map
     (``gem_yield.region_yield``; the map's ``expected_yield`` where no cut
-    was made; a felled tree's, ``gem_yield.fell_yield``, at least that), and
-    the steps past an edge of unexplored ground to grass."""
+    was made; a felled tree's, ``gem_yield.fell_yield`` over this map's
+    ``fells``, at least that), and the steps past an edge of unexplored
+    ground to grass."""
 
     need: int
     rate: float
     by_region: dict[tuple[int, int], float]
     past_edge: float = 0.0
+    fells: tuple[int, int] = (0, 0)
 
     def work(self, kind: str, at: Pos) -> float:
         """The actions at ``at`` that get the gems still needed, each priced
@@ -190,7 +191,7 @@ class GemOdds:
         drop; a pile is one ``Take`` for a sure gem, then cuts for the rest;
         an edge first pays the steps past it to grass."""
         rate = self.by_region.get(region_of(at), self.rate)
-        per_gem = 1 / max(fell_yield(rate) if kind == TREE else rate, 1e-6)
+        per_gem = 1 / max(fell_yield(rate, self.fells) if kind == TREE else rate, 1e-6)
         if kind == PILE:
             return 1 + (self.need - 1) * per_gem
         return self.need * per_gem + (self.past_edge if kind == FRONTIER else 0)
@@ -207,8 +208,10 @@ class Ground:
     ``dead_cells``: ground where cuts keep having no effect
     (``_cut_ground``). ``named``: the region the op names, if any;
     ``region``: the target region Gather works only in, else None.
-    ``fells``: an item that chops is held, so trees are targets.
-    ``stands``: the cells a walk to each tree may end on, beside it.
+    ``fell_reach``: the ``Use`` reach of the item that would fell a tree
+    (``reach.supply_reach``, A116), 0 when nothing carried chops, so no tree
+    is a target. ``stands``: the cells a walk to each tree may end on, within
+    that reach of it.
     ``targets``: every place it may go for, by kind and cell, with its work
     (``GemOdds.work``); ``anywhere``: the same with no region bound
     (``lift_region``)."""
@@ -221,7 +224,7 @@ class Ground:
     named: tuple[int, int] | None
     region: tuple[int, int] | None
     odds: GemOdds
-    fells: bool
+    fell_reach: int
     stands: dict[Pos, list[Pos]]
     targets: dict[Target, float]
     anywhere: dict[Target, float]
@@ -231,7 +234,7 @@ class Ground:
         self.region, self.targets = None, self.anywhere
 
     def goals(self, t: Target) -> list[Pos]:
-        """The cells a walk to ``t`` ends on: beside a tree, else its own cell."""
+        """The cells a walk to ``t`` ends on: within ``fell_reach`` of a tree, else its own cell."""
         return self.stands.get(t[1], []) if t[0] == TREE else [t[1]]
 
 
@@ -252,9 +255,10 @@ def ground(
     spent = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts)
     rate, by_region = region_yields(knowledge, w.map_id)
     need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
-    odds = GemOdds(need, rate, by_region, _steps_to_grass(w))
-    fells = _fell_tool(w, knowledge) is not None
-    g = Ground(d, skip, spent, dead_regions, dead_cells, named, None, odds, fells, {}, {}, {})
+    odds = GemOdds(need, rate, by_region, _steps_to_grass(w), fell_totals(knowledge, w.map_id))
+    tool = _fell_tool(w, knowledge)
+    fell_reach = supply_reach(knowledge, tool.code) if tool is not None else 0
+    g = Ground(d, skip, spent, dead_regions, dead_cells, named, None, odds, fell_reach, {}, {}, {})
     found = g.anywhere = _targets(w, m, policy, g)
     if named is not None and not _seen_region(w, named):
         x0, y0 = region_corner(named)
@@ -268,8 +272,8 @@ def ground(
 
 def _targets(w: WorldModel, m: Memory, policy: Policy, g: Ground) -> dict[Target, float]:
     """Every place Gather may go for, with its work: grass to cut, trees to
-    fell while an item that chops is held (each with a cell beside it on
-    ``gather_ground`` to work it from, kept in ``g.stands``), and edges of
+    fell while an item that chops is held (each with a cell within its reach
+    on ``gather_ground`` to work it from, kept in ``g.stands``), and edges of
     unexplored ground (all off skipped regions and ground where cuts have no
     effect), and gem piles, all on ``gather_ground``. A pile out of sight
     that Gather is walking to stays one until a look at its cell shows it
@@ -291,10 +295,13 @@ def _targets(w: WorldModel, m: Memory, policy: Policy, g: Ground) -> dict[Target
     kept = m.gather_target
     if kept is not None and kept[0] == PILE and chebyshev(kept[1], here) > w.perception:
         piles.add(kept[1])
-    if g.fells:
+    if g.fell_reach:
+        r = g.fell_reach
+        ring = [(dx, dy) for dx in range(-r, r + 1) for dy in range(-r, r + 1) if (dx, dy) != (0, 0)]
         for p, block in w.view.tiles.items():
             if block in FELL_BLOCKS and p not in g.spent and may_cut(p):
-                stands = [n for n in w.neighbours(p) if w.walkable(n) and may_work(n)]
+                cells = ((p[0] + dx, p[1] + dy) for dx, dy in ring)
+                stands = [n for n in cells if w.walkable(n) and may_work(n)]
                 if stands:
                     g.stands[p] = stands
                     out.append((TREE, p))
@@ -393,13 +400,15 @@ def _seconds_without_cut(w: WorldModel, m: Memory, gem_cuts: GemYieldTracker | N
 
 
 def _barred_by_hostile(w: WorldModel, policy: Policy, g: Ground) -> bool:
-    """Known grass Gather would cut, but for a hostile near it, in view or remembered."""
+    """Known grass Gather would cut, or a tree it would fell while an item
+    that chops is held, but for a hostile near it, in view or remembered."""
     if not any(is_hostile(w, policy, e) for e in w.entities) and not any(
         is_hostile(w, policy, s.entity) for s in w.sightings.values()
     ):
         return False
+    blocks = GATHER_BLOCKS | FELL_BLOCKS if g.fell_reach else GATHER_BLOCKS
     return any(
-        block in GATHER_BLOCKS
+        block in blocks
         and p not in g.spent
         and _cut_ground(g, p)
         and block not in policy.avoid_blocks
@@ -487,7 +496,7 @@ def _in_reach(
     if not reach:
         return None
     best = min(reach, key=lambda t: (reach[t], t))
-    floor = min((v + _steps_floor(t, here) for t, v in g.targets.items() if t not in reach), default=None)
+    floor = min((v + _steps_floor(g, t, here) for t, v in g.targets.items() if t not in reach), default=None)
     if floor is None or reach[best] <= floor:
         return best
     walk = _walk_price(w, m, g, params(), blocked)
@@ -496,7 +505,7 @@ def _in_reach(
 
 def _reach(w: WorldModel, g: Ground) -> dict[Target, float]:
     """The targets in reach, with their work: a gem pile beside the
-    character, a tree within ``FELL_REACH``, the grass it stands on."""
+    character, a tree within ``Ground.fell_reach``, the grass it stands on."""
     here = w.pos
     assert here is not None
 
@@ -504,16 +513,16 @@ def _reach(w: WorldModel, g: Ground) -> dict[Target, float]:
         if t[0] == PILE:
             return chebyshev(t[1], here) <= 1
         if t[0] == TREE:
-            return chebyshev(t[1], here) <= FELL_REACH
+            return chebyshev(t[1], here) <= g.fell_reach
         return t == (GRASS, here)
 
     return {t: v for t, v in g.targets.items() if in_reach(t)}
 
 
-def _steps_floor(t: Target, here: Pos) -> int:
+def _steps_floor(g: Ground, t: Target, here: Pos) -> int:
     """The fewest steps a walk to ``t`` takes, at least one: its straight-line
-    distance, less a tree's ``FELL_REACH``."""
-    return max(1, chebyshev(t[1], here) - (FELL_REACH if t[0] == TREE else 0))
+    distance, less a tree's ``Ground.fell_reach``."""
+    return max(1, chebyshev(t[1], here) - (g.fell_reach if t[0] == TREE else 0))
 
 
 def _walk_price(w: WorldModel, m: Memory, g: Ground, params: CostGridParams, blocked: set[Pos]) -> float | None:

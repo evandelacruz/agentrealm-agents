@@ -87,6 +87,13 @@ CUT_BLOCKS = BREAKABLE | {"grass"}  # blocks a cut or break is recorded on
 # The cuts the region yield counts, and the blocks Gather cuts: bushes drop
 # berries, not gems (GAME_NOTES.md Gems).
 GATHER_BLOCKS = frozenset({"grass"})
+# The blocks Gather fells with an item that chops (A161): a felled wild tree
+# drops a gem at least as often as grass on the same ground (Manual §16 How to
+# make money, B148). Its cuts are filed but never counted in a region's grass
+# totals; its yield is ``fell_yield``.
+FELL_BLOCKS = frozenset({"tree"})
+# Every block Gather works for gems: its stall clock and run counts read these.
+WORK_BLOCKS = GATHER_BLOCKS | FELL_BLOCKS
 SUMMARY_RADIUS = 3  # barren regions this far (Chebyshev, in regions) from ours are shown
 # Best regions shown to the planner, at any distance: walking out of range of
 # the one productive region must not hide it.
@@ -152,8 +159,8 @@ class GemYieldTracker:
     # forgotten after NO_EFFECT_TTL. Each holds its cell out of Gather for
     # REGROW_TICKS; NO_EFFECT_ZONE_CUTS of them mark ground uncuttable.
     no_effect: list[tuple[int, Pos, int]] = field(default_factory=list)
-    cuts: int = 0  # Uses on grass that took effect, this run
-    no_effect_cuts: int = 0  # Uses on grass that did nothing, this run
+    cuts: int = 0  # Uses on grass or a tree that took effect, this run
+    no_effect_cuts: int = 0  # Uses on grass or a tree that did nothing, this run
     # The latest no-effect cut (map_id, cell, tick), cleared by a cut that takes effect.
     last_no_effect: tuple[int, Pos, int] | None = None
     gems_gained: int = 0  # rises of the gem counter this run, spending not taken off
@@ -170,7 +177,7 @@ class GemYieldTracker:
         does not show yet."""
         if w.map_id is None or not block:
             return
-        if block in GATHER_BLOCKS:
+        if block in WORK_BLOCKS:
             self.cuts += 1
             self.last_no_effect = None
             self.last_cut_tick, self.last_cut_pos = tick, pos
@@ -180,8 +187,8 @@ class GemYieldTracker:
 
     def note_no_effect(self, w: WorldModel, pos: Pos, block: str, tick: int) -> None:
         """Our ``Use`` on ``pos`` came back ``applied_no_effect`` while it showed
-        ``block``. Grass: held out of Gather, never filed as a cut."""
-        if w.map_id is None or block not in GATHER_BLOCKS:
+        ``block``. Grass or a tree: held out of Gather, never filed as a cut."""
+        if w.map_id is None or block not in WORK_BLOCKS:
             return
         self.no_effect.append((w.map_id, pos, tick))
         self._prune(tick)
@@ -396,6 +403,13 @@ def region_yield(region: dict[str, Any] | None, rate: float) -> float:
     cuts = int(region.get("cuts", 0)) if region else 0
     gems = int(region.get("gems", 0)) if region else 0
     return (gems + rate * PRIOR_CUTS) / (cuts + PRIOR_CUTS)
+
+
+def fell_yield(grass: float) -> float:
+    """Gems a felled tree drops, given ``grass``, a cut's yield on the same
+    ground: at least grass's (Manual §16 How to make money, B148), so it is
+    priced at that floor."""
+    return grass
 
 
 def region_yields(kb: KnowledgeBase | None, map_id: int | None) -> tuple[float, dict[tuple[int, int], float]]:

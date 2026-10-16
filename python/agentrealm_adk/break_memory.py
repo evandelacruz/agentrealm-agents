@@ -80,10 +80,11 @@ def capabilities_for_code(code: str, kb: KnowledgeBase | None = None) -> frozens
     return frozenset(caps)
 
 
-def cannot_cut(code: str | None, kb: KnowledgeBase | None = None) -> bool:
-    """Sourced facts say ``code`` does not cut: the Supplies reference lists it
-    without ``cut`` (food, a potion, a mallet, matches), or its known
-    capabilities leave ``cut`` out.
+def cannot_cut(code: str | None, kb: KnowledgeBase | None = None, capability: str = "cut") -> bool:
+    """Sourced facts say ``code`` does not cut (or does not have
+    ``capability``, ``chop`` for a tree): the Supplies reference lists it
+    without it (food, a potion, a mallet, matches; the knife for ``chop``), or
+    its known capabilities leave it out.
 
     A code the reference does not list, or an empty hand, may still cut: only
     a known miss is ruled out.
@@ -92,8 +93,8 @@ def cannot_cut(code: str | None, kb: KnowledgeBase | None = None) -> bool:
         return False
     caps = capabilities_for_code(code, kb)
     if listed(code):
-        return "cut" not in caps
-    return bool(caps) and "cut" not in caps
+        return capability not in caps
+    return bool(caps) and capability not in caps
 
 
 def _break_row(kb: KnowledgeBase | None, key: str) -> dict[str, Any] | None:

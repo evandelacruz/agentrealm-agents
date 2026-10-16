@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from agentrealm_adk.break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
-from agentrealm_adk.gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
+from agentrealm_adk.gem_yield import CUT_BLOCKS, FELL_BLOCKS, GemYieldTracker, take_raises_gems
 from agentrealm_adk.navigation.rejection import learn_step_rejection, on_block_changed
 from agentrealm_adk.navigation.stuck import active as nav_active
 from agentrealm_adk.navigation.stuck import lapsed as lapsed_give_ups
@@ -1144,8 +1144,10 @@ class Runner:
                     # Nothing was cut, so nothing to file: Gather just moves on (A63).
                     # A Break probe that misses is a capability miss (GAME_NOTES:
                     # which item works is per block), not ground that does not cut,
-                    # and so is a cut made with an item that does not cut (a potion).
-                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge):
+                    # and so is a cut made with an item that does not cut (a potion),
+                    # or a tree felled with one that does not chop.
+                    capability = "chop" if tile in FELL_BLOCKS else "cut"
+                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge, capability):
                         self.gem_cuts.note_no_effect(w, block, tile, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])

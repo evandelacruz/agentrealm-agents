@@ -15,7 +15,7 @@ from agentrealm_agent.states import gather as gather_mod
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, danger, is_safe_ish
 from agentrealm_agent.states.gather_safe import gather_ground, route_clear
 from agentrealm_adk.world import STILL_TICKS, Entity, WorldModel, chebyshev
-from agentrealm_adk.gem_yield import NO_EFFECT_ZONE_CUTS, REGION_SIZE, GemYieldTracker, record_cut, region_of
+from agentrealm_adk.gem_yield import NO_EFFECT_ZONE_CUTS, REGION_SIZE, GemYieldTracker, fell_yield, record_cut, region_of
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.zone_discovery import apply_zone
@@ -23,7 +23,7 @@ from agentrealm_adk.zone_discovery import apply_zone
 
 def grid(rows: list[str], at=(1, 1)) -> WorldModel:
     """A world from ``rows``; a space is a cell not known yet."""
-    glyph = {".": "dirt", "g": "grass", "b": "bush", "#": "wall", "l": "lava"}
+    glyph = {".": "dirt", "g": "grass", "b": "bush", "#": "wall", "l": "lava", "t": "tree"}
     w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
@@ -333,6 +333,72 @@ class GatherArmsACutterTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(4, "small_potion")]
         self.assertEqual(outcome(w).intents, [{"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}])
 
+
+
+class GatherFellsTreesTest(unittest.TestCase):
+    """A161: with an item that chops held, a wild tree is a Gather target
+    under the one price, its yield at least grass's on that ground; without
+    one it is not (Manual §16 How to make money)."""
+
+    def test_a_tree_is_a_target_with_a_sword_held(self):
+        w = fence(grid(["....t"], at=(0, 0)))
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        m = Memory()
+        out = outcome(w, m)
+        self.assertEqual(m.gather_target, ("tree", (4, 0)))
+        self.assertEqual(m.path[-1], (3, 0), "the walk ends beside the tree")
+        self.assertEqual(out.intents[0], {"verb": "SetPosition", "x": 1, "y": 0})
+        self.assertEqual(m.gather_status, "walking to a tree")
+
+    def test_a_tree_is_no_target_with_only_a_knife(self):
+        w = fence(grid(["....t"], at=(0, 0)))
+        w.armed_code = "pocket_knife"
+        m = Memory()
+        out = outcome(w, m)
+        self.assertIsNone(m.gather_target)
+        self.assertIsNone(out.intents)
+
+    def test_a_tree_beside_it_is_felled_with_the_sword_armed(self):
+        w = fence(grid(["..t"], at=(1, 0)))
+        w.armed_code = "pocket_knife"
+        w.held_supplies = [InventorySupply(5, "bronze_sword")]
+        m = Memory()
+        out = outcome(w, m)
+        self.assertEqual(out.intents, [{"verb": "Arm", "supply_id": 5}, {"verb": "Use", "target": {"kind": "block", "x": 2, "y": 0}}])
+        self.assertEqual(out.reason, "arm bronze_sword, fell a tree")
+        self.assertEqual(m.gather_status, "felling a tree")
+        self.assertIsNone(m.gather_rearm, "the knife cuts: it was only bettered")
+
+    def test_a_trees_yield_is_at_least_grass_on_that_ground(self):
+        odds = gather_mod.GemOdds(4, 0.2, {(0, 0): 0.4})
+        for at in ((1, 1), (40, 40)):
+            self.assertLessEqual(odds.work("tree", at), odds.work("grass", at), at)
+        for rate in (0.0, 0.2, 0.5):
+            self.assertGreaterEqual(fell_yield(rate), rate)
+
+    def test_the_price_picks_the_cheaper_of_grass_and_tree_by_walk_and_yield(self):
+        """From (14, 0), grass at (8, 0) is 6 steps west in region 0,0; a tree
+        at (22, 0) is 7 east in region 1,0 (worked from (21, 0)). At one yield
+        the shorter walk wins; with region 1,0 yielding more, the tree does,
+        and with the tree nearer it wins at one yield."""
+
+        def pick(tree=(22, 0), knowledge=None):
+            w = fence(grid(["." * 30], at=(14, 0)))
+            w.tick = 10_000  # the recorded cuts below have grown back
+            w.view.tiles[(8, 0)], w.view.tiles[tree] = "grass", "tree"
+            w.armed_code = "bronze_sword"
+            m = Memory()
+            gather_outcome(w, m, Policy(on_hostile="ignore"), knowledge=knowledge, op={"op": "gather_gems", "count": 3})
+            return m.gather_target
+
+        self.assertEqual(pick(), ("grass", (8, 0)), "same yield: the shorter walk")
+        self.assertEqual(pick(tree=(19, 0)), ("tree", (19, 0)), "same yield, the tree nearer")
+        k = KnowledgeBase.empty("fake-world")
+        for i in range(40):
+            record_cut(k, 7, (2, 1 + i % 10), "grass", i, i % 20 == 0)  # region 0,0: poor, 2 in 40
+            record_cut(k, 7, (20, 1 + i % 10), "grass", 40 + i, i % 2 == 0)  # region 1,0: 1 in 2
+        self.assertEqual(pick(knowledge=k), ("tree", (22, 0)), "the tree's yield pays for its longer walk")
 
 
 class TargetSearchTest(unittest.TestCase):

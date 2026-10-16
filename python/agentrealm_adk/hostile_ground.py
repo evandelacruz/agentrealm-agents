@@ -1,32 +1,43 @@
-"""The ground known hostiles hold: one threat picture for every walk that keeps clear of them (A22, A9).
+"""The ground known hostiles hold: one threat picture for every walk that keeps clear of them (A22, A9, A162).
+
+A hostile keeps no post (Manual §11 Hostiles): it goes for the nearest
+living character on its map, with no sight or distance limit. A chaser steps
+to the neighbouring block that brings it closest and stands still where none
+does, so a wall or water stops it; a patroller walks its loop; a zone spawn
+never leaves its zone; none heals or walks back to its spawn. The agent sees
+neither a hostile's kind nor its zone, so it prices every hostile as a
+chaser free to follow (``chase``): the one that costs most.
 
 A hostile in view reaches ``policy.hostile_range`` round where it stands
-(``survival.hostile_reach``). One remembered out of view (``WorldModel.sightings``)
-still holds ground: round its post, and round the cell it was last seen on
-(``known_reach``, free-play run 5). ``ground_by_hostile`` puts both together
-per hostile.
+(``survival.hostile_reach``). One remembered out of view
+(``WorldModel.sightings``) holds its ``gather_bar`` round the cell it was
+last seen on (``known_reach``, free-play run 5): for ``SIGHTING_TICKS`` when
+it was moving, and for ``BLOCKED_SIGHTING_TICKS`` when it was blocked there
+(``Sighting.still``), never once that cell is seen empty. ``ground_by_hostile`` puts both together per hostile.
+
+Safety is judged on the exact block (Manual §11 Combat): no hit, damaging
+block or trap hurts on a safe-zone block, so a known safe block is no
+hostile's ground (``off_safe``), and the only refuge a hurt character walks
+to first (``is_safe_ish``).
 
 Gather and Detour keep their targets and routes off this ground
-(``states/gather_safe.py``). A remembered post fades (``Sighting.strength``):
-once faded it holds no ground, only prices it, so Gather cuts its grass when
-no free grass is near (``Danger.price``). Ground near what a hostile holds,
-or near one in view, is priced the same way (``near_reach``): a target there
-may draw it out, so Gather and Detour count its steps. Retreat, Park
-and Heal pick a safe cell only outside it, and Flee runs toward the cell
-Retreat picked, so the two never pull opposite ways
-(``pathing.retreat_safe_goal``, free-play run 7).
+(``states/gather_safe.py``). Ground near what a hostile holds, or near one
+in view, is priced, never barred (``near_reach``): a target there may draw
+it in, so Gather and Detour count its steps. Retreat, Park and Heal pick a
+safe cell, and Flee runs toward the cell Retreat picked, so the two never
+pull opposite ways (``pathing.retreat_safe_goal``, free-play run 7).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING
 
 from .navigation.planner import HOSTILE_DANGER_RADIUS
 from .survival import hostile_reach, is_attacker, is_hostile, recently_attacked
-from .world import NEIGHBOURS, POST_HOLD_STRENGTH, SIGHTING_TICKS, Entity, Pos, Sighting, WorldModel, chebyshev
-from .zone_discovery import RESPAWN_PROBE_RADIUS, safe_tiles
+from .world import BLOCKED_SIGHTING_TICKS, SIGHTING_TICKS, Entity, Pos, Sighting, WorldModel, chaser_step, chebyshev
+from .zone_discovery import known_safe, safe_tiles
 
 if TYPE_CHECKING:
     from .config import Policy
@@ -39,20 +50,12 @@ GATHER_HOSTILE_RADIUS = HOSTILE_DANGER_RADIUS
 # that followed at 4–6 blocks without attacking stopped all cutting for 45 s
 # under the full radius (A63 run 3).
 GATHER_SHADOW_MARGIN = 1
-# A post's reach counts at most this far from it, however far its guard
-# chased us before a hit: a reach learned from a long chase walled off the
-# grass round town (A85).
-POST_REACH_CAP = GATHER_HOSTILE_RADIUS
-# The most a faded post (below ``POST_HOLD_STRENGTH``) adds to a cell Gather
-# would work inside its ground, in steps of walk: it prices that grass, so
-# free grass this much further off is picked first, and never bars it.
-FADED_POST_STEPS = 6
 # Ground within this many steps of what a known hostile holds, or of one in
 # view, is priced at ``NEAR_GROUND_STEPS`` a cell, never barred: a target or
-# a walk there may draw it out. The radius inside which the path planner
+# a walk there may draw it in. The radius inside which the path planner
 # prices a hostile's cells as dangerous.
 NEAR_GROUND_RADIUS = GATHER_HOSTILE_RADIUS
-NEAR_GROUND_STEPS = FADED_POST_STEPS
+NEAR_GROUND_STEPS = 6
 # A walk on an op's behalf keeps this many steps clear of a seen hostile's
 # ``policy.hostile_range`` (``walk_reach``, A128).
 WALK_REACH_MARGIN = GATHER_SHADOW_MARGIN
@@ -72,14 +75,22 @@ def gather_bar(w: WorldModel, e: Entity, policy: Policy) -> int:
     return max(w.attack_range or 1, policy.hostile_range) + GATHER_SHADOW_MARGIN
 
 
+def off_safe(w: WorldModel, cells: set[Pos]) -> set[Pos]:
+    """``cells`` less the known safe blocks on this map: nothing hurts on
+    one (Manual §11 Combat), so it is no hostile's ground."""
+    if w.map_id is None or not cells:
+        return cells
+    return cells - safe_tiles(w, w.map_id)
+
+
 @dataclass(frozen=True)
 class Danger:
     """What one decision knows of hostile ground, worked out once (``danger``):
     ``held``, the ground remembered hostiles hold (``known_reach``),
-    ``priced``, ground with the steps it adds to a cell in it: faded posts'
-    (``faded_reach``) and the ground near what a hostile holds or where one
-    in view stands (``near_reach``), and ``fight``, the op chose to fight for
-    its ground, so remembered ground and routes bar nothing."""
+    ``priced``, ground with the steps it adds to a cell in it (``near_reach``:
+    near what a hostile holds or where one in view stands), and ``fight``,
+    the op chose to fight for its ground, so remembered ground and routes
+    bar nothing."""
 
     held: tuple[tuple[Pos, int], ...] = ()
     priced: tuple[tuple[Pos, int, int], ...] = ()
@@ -87,7 +98,7 @@ class Danger:
 
     def price(self, pos: Pos) -> int:
         """Steps the priced ground covering ``pos`` adds to it: the dearest
-        zone's, so it stays at most ``FADED_POST_STEPS``."""
+        zone's, so it stays at most ``NEAR_GROUND_STEPS``."""
         return max((steps for c, r, steps in self.priced if chebyshev(c, pos) <= r), default=0)
 
     def priced_cells(self) -> dict[Pos, int]:
@@ -103,84 +114,43 @@ class Danger:
 
 def danger(w: WorldModel, policy: Policy, fight: bool = False) -> Danger:
     """This decision's ``Danger``: nothing held or priced when ``fight``, else
-    ``known_reach``, and ``faded_reach`` with ``near_reach``."""
+    ``known_reach`` and ``near_reach``."""
     if fight:
         return Danger(fight=True)
     held = known_reach(w, policy)
-    return Danger(tuple(held), tuple(faded_reach(w, policy) + near_reach(w, policy, held)))
+    return Danger(tuple(held), tuple(near_reach(w, policy, held)))
 
 
 def near_reach(w: WorldModel, policy: Policy, held: list[tuple[Pos, int]]) -> list[tuple[Pos, int, int]]:
     """The ground within ``NEAR_GROUND_RADIUS`` of ``held`` zones and of every
-    hostile in view's ``hostile_range``, each cell at ``NEAR_GROUND_STEPS``.
-    A post's reach grows when its guard comes out for us
-    (``WorldModel.note_came_for_us``), and this ground with it."""
+    hostile in view's ``hostile_range``, each cell at ``NEAR_GROUND_STEPS``."""
     zones = held + [(e.pos, policy.hostile_range) for e in w.entities if is_hostile(w, policy, e)]
     return [(c, r + NEAR_GROUND_RADIUS, NEAR_GROUND_STEPS) for c, r in zones]
 
 
-def held_by_hostile(
-    w: WorldModel, policy: Policy, faded: bool = False
-) -> dict[HostileKey, list[tuple[Pos, int]]]:
-    """Ground each remembered hostile holds beyond where it stands in view:
-    (centre, radius) zones per (kind, id) (free-play run 5).
-
-    One that keeps a post (``Sighting.post``) holds ``policy.hostile_range``,
-    or the reach it hit us from when further (up to ``POST_REACH_CAP``), plus
-    ``GATHER_SHADOW_MARGIN``, round that post, in view or not: it goes back
-    there. A post that has faded below ``POST_HOLD_STRENGTH``
-    (``Sighting.strength``) holds no ground there. One out of view also
-    holds its ``gather_bar`` round the cell it was last seen on, by the
-    passer-by's rule whether or not it keeps a post: while it was seen there
-    within ``SIGHTING_TICKS`` and that cell is not in sight with it gone
-    (``_last_seen_holds``). ``faded`` lists the faded zones instead, which
-    only price ground (``faded_reach``): a faded post, and a faded post's
-    guard's last-seen cell once that no longer holds.
-    """
+def held_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, list[tuple[Pos, int]]]:
+    """Ground each remembered hostile out of view holds: its ``gather_bar``
+    round the cell it was last seen on, while that cell still holds
+    (``_last_seen_holds``), as (centre, radius) zones per (kind, id)
+    (free-play run 5). A hostile in view holds where it stands, not here."""
     if w.map_id is None:
         return {}
     in_view = {(e.kind, e.id) for e in w.entities}
     out: dict[HostileKey, list[tuple[Pos, int]]] = {}
     for key, s in w.sightings.items():
-        if s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
+        if key in in_view or s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
             continue
-        zones = []
-        if s.post and _post_faded(s) == faded:
-            reach = max(policy.hostile_range, min(s.reach, POST_REACH_CAP))
-            zones.append((s.home, reach + GATHER_SHADOW_MARGIN))
-        if key not in in_view:
-            holds = _last_seen_holds(w, s)
-            if holds != faded and (holds or _post_faded(s)):
-                zones.append((s.entity.pos, gather_bar(w, s.entity, policy)))
-        if zones:
-            out[key] = zones
+        if _last_seen_holds(w, s):
+            out[key] = [(s.entity.pos, gather_bar(w, s.entity, policy))]
     return out
-
-
-def _post_faded(s: Sighting) -> bool:
-    """``s`` keeps a post that has faded below ``POST_HOLD_STRENGTH``."""
-    return s.post and s.strength < POST_HOLD_STRENGTH
 
 
 def _last_seen_holds(w: WorldModel, s: Sighting) -> bool:
-    """The cell ``s`` was last seen on still holds ground: it was seen there
-    within ``SIGHTING_TICKS`` and that cell is not in sight with it gone, as
-    a passer-by is remembered. A guard that keeps a post goes back to it, so
-    its post, not where it last stood, holds ground after that."""
+    """The cell ``s`` was last seen on still holds ground: that cell is not
+    in sight with it gone, and it was seen there within ``SIGHTING_TICKS``,
+    or ``BLOCKED_SIGHTING_TICKS`` when it was blocked there."""
     in_sight = w.pos is not None and chebyshev(s.entity.pos, w.pos) < w.perception
-    return not in_sight and w.tick - s.tick <= SIGHTING_TICKS
-
-
-def faded_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int, int]]:
-    """The zones of faded posts (``held_by_hostile`` with ``faded``), each
-    with the steps it adds to a cell in it: ``FADED_POST_STEPS`` scaled by
-    how strong the post still is against ``POST_HOLD_STRENGTH``, at least 1."""
-    out = []
-    for key, zones in held_by_hostile(w, policy, faded=True).items():
-        s = w.sightings[key]
-        steps = max(1, round(FADED_POST_STEPS * s.strength / POST_HOLD_STRENGTH))
-        out.extend((c, r, steps) for c, r in zones)
-    return out
+    return not in_sight and w.tick - s.tick <= (BLOCKED_SIGHTING_TICKS if s.still else SIGHTING_TICKS)
 
 
 def known_reach(w: WorldModel, policy: Policy) -> list[tuple[Pos, int]]:
@@ -198,49 +168,55 @@ def zone_cells(zones: list[tuple[Pos, int]] | tuple[tuple[Pos, int], ...]) -> se
 
 def reach_cells(w: WorldModel, policy: Policy, d: Danger | None = None) -> set[Pos]:
     """Every cell in a known hostile's reach: ``hostile_reach`` of those in
-    view and ``d.held``. A walk prices them ``costly``."""
-    return hostile_reach(w, policy) | zone_cells((d or danger(w, policy)).held)
+    view and ``d.held``, known safe blocks left out (``off_safe``). A walk
+    prices them ``costly``."""
+    return off_safe(w, hostile_reach(w, policy) | zone_cells((d or danger(w, policy)).held))
+
+
+def chase(w: WorldModel, start: Pos, path: Sequence[Pos]) -> list[Pos]:
+    """Where a chaser that stands on ``start`` is as we stand on each cell of
+    ``path`` in turn: one ``chaser_step`` toward each, on the ground a
+    hostile walks (``WorldModel.chaser_ground``). It goes for the nearest
+    character, which is priced as us, at our pace: the Manual publishes no
+    hostile's speed. So a chaser in the open keeps up with a walk past it,
+    and only one the ground stops (blocked) can be passed."""
+    ground = w.chaser_ground()
+    at, out = start, []
+    for p in path:
+        at = chaser_step(at, p, ground)
+        out.append(at)
+    return out
 
 
 @dataclass(frozen=True)
 class WalkGround:
     """One known hostile's ground a walk on an op's behalf keeps out of
     (``walk_ground``): ``entity`` as in view, or as last seen when
-    remembered, ``stands`` the cells it is known to stand on (where it is in
-    view; out of view, where it was last seen and its post), and ``cells``."""
+    remembered (where a chase of it starts, ``chase``), ``cells``, and
+    ``radius``, how far round where it stands its ground reaches."""
 
     entity: Entity
     in_view: bool
-    stands: tuple[Pos, ...]
     cells: frozenset[Pos]
+    radius: int
 
 
 def walk_ground(w: WorldModel, policy: Policy, skip: Collection[HostileKey] = ()) -> dict[HostileKey, WalkGround]:
     """Each known hostile's ground a walk on an op's behalf keeps out of
     (A128), by (kind, id): within ``policy.hostile_range`` plus
     ``WALK_REACH_MARGIN`` of every hostile in view but those in ``skip``,
-    and what each holds as remembered (``held_by_hostile``: a post, and out
-    of view the cell it was last seen on, margin included). ``skip`` is the
-    hostiles the engagement would fight (``pathing.op_walk_sets``): those
-    are left to it, all but a post they hold."""
+    and of each remembered one out of view, what it holds round the cell it
+    was last seen on (``held_by_hostile``), known safe blocks left out
+    (``off_safe``). ``skip`` is the hostiles the engagement would fight
+    (``pathing.op_walk_sets``): those are left to it."""
     out: dict[HostileKey, WalkGround] = {}
     for e in w.entities:
         if is_hostile(w, policy, e) and (e.kind, e.id) not in skip:
-            cells = zone_cells([(e.pos, policy.hostile_range + WALK_REACH_MARGIN)])
-            out[(e.kind, e.id)] = WalkGround(e, True, (e.pos,), frozenset(cells))
-    in_view = {(e.kind, e.id): e for e in w.entities}
+            radius = policy.hostile_range + WALK_REACH_MARGIN
+            out[(e.kind, e.id)] = WalkGround(e, True, frozenset(off_safe(w, zone_cells([(e.pos, radius)]))), radius)
     for key, zones in held_by_hostile(w, policy).items():
-        held = zone_cells(zones)
-        if key in out:
-            g = out[key]
-            out[key] = WalkGround(g.entity, True, g.stands, g.cells | held)
-        elif key in in_view:
-            e = in_view[key]
-            out[key] = WalkGround(e, True, (e.pos,), frozenset(held))
-        else:
-            s = w.sightings[key]
-            stands = tuple(dict.fromkeys([s.entity.pos, *([s.home] if s.post else [])]))
-            out[key] = WalkGround(s.entity, False, stands, frozenset(held))
+        cells = frozenset(off_safe(w, zone_cells(zones)))
+        out[key] = WalkGround(w.sightings[key].entity, False, cells, max(r for _, r in zones))
     return out
 
 
@@ -254,11 +230,10 @@ def walk_reach(w: WorldModel, policy: Policy, skip: Collection[HostileKey] = ())
 
 def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos]]:
     """Each known hostile, (kind, id), with the ground it holds: its
-    ``hostile_reach`` when in view, and its ``held_by_hostile`` zones.
-
-    A safe cell inside any of it is no refuge (free-play run 7: Retreat
-    walked to a safe cell 2 from the hostile it ran from and took 6 hits).
-    """
+    ``hostile_reach`` when in view, and its ``held_by_hostile`` zones out of
+    view. A refuge is judged by its approach (``pathing.retreat_safe_goal``):
+    a safe block hurts nobody standing on it (Manual §11 Combat), but one a
+    hostile gets to first is walked into its hits (free-play run 7)."""
     out: dict[HostileKey, set[Pos]] = {}
     for e in w.entities:
         if is_hostile(w, policy, e):
@@ -270,21 +245,15 @@ def ground_by_hostile(w: WorldModel, policy: Policy) -> dict[HostileKey, set[Pos
 
 def hostiles_within(w: WorldModel, policy: Policy, pos: Pos, radius: int) -> list[Entity]:
     """The known hostiles within ``radius`` of ``pos``: one in view where it
-    stands; one remembered (``WorldModel.sightings``) at its post, and out of
-    view also where it was last seen. Ground a faded post no longer holds is
-    not counted (``held_by_hostile``, A85)."""
+    stands, one remembered out of view where it was last seen while that
+    cell holds (``held_by_hostile``)."""
     out: dict[HostileKey, Entity] = {
         (e.kind, e.id): e for e in w.entities if is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= radius
     }
-    in_view = {(e.kind, e.id) for e in w.entities}
-    for key, s in w.sightings.items():
-        if key in out or s.map_id != w.map_id or not is_hostile(w, policy, s.entity):
-            continue
-        cells = ([s.home] if s.post and not _post_faded(s) else []) + (
-            [s.entity.pos] if key not in in_view and _last_seen_holds(w, s) else []
-        )
-        if any(chebyshev(c, pos) <= radius for c in cells):
-            out[key] = s.entity
+    for key in held_by_hostile(w, policy):
+        e = w.sightings[key].entity
+        if key not in out and chebyshev(e.pos, pos) <= radius:
+            out[key] = e
     return list(out.values())
 
 
@@ -295,35 +264,10 @@ def hostiles_near(w: WorldModel, pos: Pos, policy: Policy, radius: int | None = 
     return any(is_hostile(w, policy, e) and chebyshev(e.pos, pos) <= reach for e in w.entities)
 
 
-def near_respawn_anchor(w: WorldModel, pos: Pos) -> bool:
-    if w.map_id is None:
-        return False
-    for map_id, anchor in w.respawn_anchors:
-        if map_id == w.map_id and chebyshev(pos, anchor) <= RESPAWN_PROBE_RADIUS:
-            return True
-    return False
-
-
-def touches_safe_zone(w: WorldModel, pos: Pos) -> bool:
-    if w.map_id is None:
-        return False
-    safe = safe_tiles(w, w.map_id)
-    if pos in safe:
-        return True
-    return any((pos[0] + dx, pos[1] + dy) in safe for dx, dy in NEIGHBOURS)
-
-
-def is_safe_ish(w: WorldModel, pos: Pos, policy: Policy) -> bool:
-    """Known safe-zone ground: what a hurt character walks first.
-
-    The cell must be revealed, not on a hazard tile, and free of hostiles in
-    range. It qualifies when it is a known safe zone, touches one, or lies
-    within the respawn probe ring around town.
-    """
-    if w.map_id is None or pos not in w.view.tiles:
-        return False
-    if w.view.tiles.get(pos) in policy.avoid_blocks:
-        return False
-    if hostiles_near(w, pos, policy):
-        return False
-    return touches_safe_zone(w, pos) or near_respawn_anchor(w, pos)
+def is_safe_ish(w: WorldModel, pos: Pos) -> bool:
+    """A known safe-zone block: what a hurt character walks first. Safety is
+    judged on the exact block (Manual §11 Combat): a hostile may walk in but
+    deals nothing there, and damaging blocks and traps do not hurt, so
+    neither a hostile near nor a hazard tile makes it less safe, and a block
+    beside a safe zone is not safe at all."""
+    return w.map_id is not None and known_safe(w, w.map_id, pos)

@@ -11,7 +11,7 @@ at exit, and the last save wins.
 
 What a run learned that the next one should start from is written into it
 by the module that owns it: ``knowledge_base.hostiles`` for hostile NPC
-types, their threat measurements and their posts (A91);
+types, their threat measurements and where they were last seen (A91, A162);
 ``knowledge_base.death_chests`` for the chests our deaths dropped (A122);
 ``knowledge_maps`` for tiles, warps and levels.
 """

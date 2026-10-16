@@ -29,7 +29,7 @@ from .healing import heals_carried, hurt
 from . import targets as targets_mod
 from .directives import attack_forbidden
 from .engagement import would_fight
-from .hostile_ground import HostileKey, WalkGround, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
+from .hostile_ground import HostileKey, WalkGround, chase, ground_by_hostile, hostiles_near, is_safe_ish, walk_ground
 from .executor.pacing import DEFAULT_TICK_RATE_HZ, use_cooldown_ticks
 from .fording import on_water
 from .supplies import afloat
@@ -37,9 +37,7 @@ from .survival import (
     estimate_health,
     expected_damage,
     health_floor,
-    hostiles_in_range,
     is_hostile,
-    pursuer_peaks,
     safe_goals,
     town_cell,
     worn_defense,
@@ -47,6 +45,7 @@ from .survival import (
 from .executor.movement import step_landing, ticks_per_step
 from .targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from .world import DOORS, Entity, Pos, WorldModel, chebyshev
+from .zone_discovery import safe_tiles
 
 
 def goto_target(w: WorldModel, policy: Policy) -> tuple[int | None, Pos] | None:
@@ -497,8 +496,8 @@ def reachable_safe_goal(
     below rules it out, however near the others have come.
 
     Skipped, ``town`` included: a cell in the ``reach`` of a known hostile
-    (``hostile_ground.ground_by_hostile``, in view or remembered: a cell
-    beside a pack is no refuge), or seen there
+    (``hostile_ground.ground_by_hostile``, in view or remembered: a cell a
+    pack gets to first is walked into its hits), or seen there
     within ``SAFE_THREATENED_TICKS`` (``Memory.safe_threatened``), since a
     pick that forgot the pack once it left view would turn back toward it; a
     mark by a hostile still in view counts only while ``reach`` says so.
@@ -585,16 +584,19 @@ def retreat_safe_goal(
     """The refuge: where Retreat, Park and Fight's retreat tail walk, and Flee
     runs toward. The nearest known safe cell a path reaches outside the
     ground of every known hostile, in view or remembered
-    (``hostile_ground.ground_by_hostile``; the ones it runs from hold only
-    the cells they get to before we do), else the town cell
-    on the same terms (``reachable_safe_goal``). Once picked, the cell is
-    committed (``RETREAT_TARGET``, A71) and kept while it stays valid.
+    (``hostile_ground.ground_by_hostile``), each holding only the cells it
+    gets to before we do, since every hostile chases (Manual §11 Hostiles),
+    else the town cell on the same terms (``reachable_safe_goal``). Once
+    picked, the cell is committed (``RETREAT_TARGET``, A71) and kept while
+    it stays valid.
 
-    A safe cell a pursuer gets to before we do is no refuge: Retreat
-    walked back toward one 2 cells from the hostile it ran from while Flee
-    stepped away, 6 hits in 19 s (free-play run 7). One we get to first,
-    or as soon, stays one, however near the pursuer following us: entering it ends the
-    chase. One threat picture for both keeps them pulling the same way.
+    Nothing hurts on a safe block (Manual §11 Combat), so a refuge is judged
+    by its approach: one a hostile gets to before we do is walked into its
+    hits on the way in. Retreat walked back toward one 2 cells from the
+    hostile it ran from while Flee stepped away, 6 hits in 19 s (free-play
+    run 7). One we get to first, or as soon, stays one, however near the
+    hostile following us: entering it ends the chase. One threat picture
+    for both keeps them pulling the same way.
 
     Not read-only: picking commits the cell, and runs the path checks of
     ``reachable_safe_goal`` (a few at most; none for a kept cell its walk
@@ -604,16 +606,16 @@ def retreat_safe_goal(
     params = grid_params(policy, avoid, costly)
     ground = ground_by_hostile(w, policy)
     here = w.pos
-    # Those it runs from: the fight's group, the hitter, and every hostile in
-    # range (Flee runs from all of these, ``survival.flee_from``).
-    chasing = set(pursuer_peaks(w, policy)) | {(e.kind, e.id) for e in hostiles_in_range(w, policy)}
-    for e in w.entities:
-        key = (e.kind, e.id)
-        if key in chasing and key in ground and here is not None:
-            # One we run from holds only the cells it gets to before we do:
-            # a refuge we reach first, or as soon, ends the chase (review on
-            # #168: one a step behind otherwise covers every refuge we near).
-            ground[key] = {c for c in ground[key] if chebyshev(e.pos, c) < chebyshev(here, c)}
+    if here is not None:
+        stands = {(e.kind, e.id): e.pos for e in w.entities}
+        for key, cells in ground.items():
+            # Every hostile chases (Manual §11 Hostiles), so each holds only
+            # the cells it gets to before we do, from where it stands or was
+            # last seen: a refuge we reach first, or as soon, ends the chase
+            # (review on #168: one a step behind otherwise covers every
+            # refuge we near).
+            at = stands.get(key) or w.sightings[key].entity.pos
+            ground[key] = {c for c in cells if chebyshev(at, c) < chebyshev(here, c)}
     goal = reachable_safe_goal(
         m,
         w,
@@ -993,7 +995,7 @@ def safe_explore_targets(w: WorldModel, m: Memory, policy: Policy, *, push: bool
     targets = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, w.frontier() - {w.pos}, w.tick)
     targets = {p for p in targets if w.view.tiles.get(p) not in policy.avoid_blocks}
     if hurt(w) and not push:
-        return {p for p in targets if is_safe_ish(w, p, policy)}
+        return {p for p in targets if is_safe_ish(w, p)}
     return {p for p in targets if not hostiles_near(w, p, policy)}
 
 
@@ -1103,31 +1105,43 @@ def covers_pass(
     ground: dict[HostileKey, WalkGround],
     m: Memory | None = None,
 ) -> bool:
-    """The pass along ``path``'s cells in ``reach`` can be made (A146, A151):
+    """The pass along ``path``'s cells in ``reach`` can be made (A146, A151, A162):
 
     - every such cell is ground a known hostile holds (``ground``, the
       ``walk_ground`` the walk's reach was built from), one in view or one
       remembered, out of view, priced from the threat table as one in view
       is (its largest hit known, else the published roll);
-    - none is within ``policy.hostile_range`` of where one of them is known
-      to stand: there the engagement, which would not fight them, says flee,
-      so a pass runs only where Flee does not;
-    - what they are expected to deal while we cross those cells at our
-      movement speed (``survival.expected_damage``, priced as the win
+    - each of them is priced as a chaser (``hostile_ground.chase``: from
+      where it stands, or was last seen, a greedy step toward each cell we
+      walk to, at our pace), and none comes within ``policy.hostile_range``
+      of us on the walk: there the engagement, which would not fight it,
+      says flee, so a pass runs only where Flee does not. A chaser in the
+      open keeps up, so only one the ground stops is passed;
+    - what they are expected to deal while each is within its ground's
+      ``radius`` of us (``survival.expected_damage``, priced as the win
       estimate prices their hits, through the armor worn), less what the
       heals carried can win back on the pass (``heal_on_pass``), leaves
-      health above Retreat's floor against them (``survival.health_floor``)."""
+      health above Retreat's floor against them (``survival.health_floor``).
+      A known safe block costs nothing: no hit lands there (Manual §11 Combat)."""
     inside = [p for p in path if p in reach]
     crossed = [g for g in ground.values() if any(p in g.cells for p in inside)]
     if not inside or any(all(p not in g.cells for g in crossed) for p in inside):
         return False
-    if any(chebyshev(c, p) <= policy.hostile_range for g in crossed for c in g.stands for p in inside):
-        return False
+    safe = set() if w.map_id is None else safe_tiles(w, w.map_id)
+    step_ticks = ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
+    armor = worn_defense(w)
+    taken, near = 0.0, set()
+    for g in crossed:
+        trail = list(zip(chase(w, g.entity.pos, path), path))
+        if any(chebyshev(c, p) <= policy.hostile_range for c, p in trail if p not in safe):
+            return False
+        steps = [p for c, p in trail if p not in safe and chebyshev(c, p) <= g.radius]
+        taken += expected_damage([g.entity], w.threat, 1, armor) * len(steps) * step_ticks
+        near.update(steps)
     hostiles = [g.entity for g in crossed]
-    ticks = len(inside) * ticks_per_step(tick_rate_hz=tick_hz, movement_speed_milli=max(1, w.movement_speed))
-    per_tick = expected_damage(hostiles, w.threat, 1, worn_defense(w))
-    healed, drinking = heal_on_pass(w, inside, per_tick, tick_hz, m)
-    taken = per_tick * (ticks + drinking)
+    per_tick = expected_damage(hostiles, w.threat, 1, armor)
+    healed, drinking = heal_on_pass(w, [p for p in path if p in near], per_tick, tick_hz, m)
+    taken += per_tick * drinking
     left = estimate_health(w) - taken + min(healed, taken)
     return left > health_floor(w, params, hostiles)
 
@@ -1218,11 +1232,13 @@ def plan_sets(
     """``blocked``, ``plan_avoid``, ``plan_costly`` for this decision.
 
     Rejection learnings and ``avoid_blocks`` hazards stay out of every choice
-    (A14, reflex 1). Standing on a hazard with no way straight off, the plan may
-    cross hazards at a high price instead.
+    (A14, reflex 1), but for a hazard on a known safe block, which does not
+    hurt there (Manual §11 Combat, A162). Standing on a hazard with no way
+    straight off, the plan may cross hazards at a high price instead.
     """
     nav_avoid, nav_costly = navigation_avoid_costly(m.nav, knowledge, w.map_id, w.tick)
-    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks}
+    safe = set() if w.map_id is None else safe_tiles(w, w.map_id)
+    hazards = {p for p, b in w.view.tiles.items() if b in policy.avoid_blocks and p not in safe}
     blocked = nav_avoid | hazards
     escape = hazards if w.pos in hazards else set()
     return blocked, blocked - escape, escape | nav_costly

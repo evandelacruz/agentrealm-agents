@@ -122,13 +122,12 @@ def effect_at_max(w: WorldModel, code: str | None) -> bool:
 
 
 def in_hand(w: WorldModel) -> list[InventorySupply]:
-    """The held supplies, and the armed one, which ``held`` never lists
-    (Manual §11 Where your supplies are). What a ``Use`` on yourself can be
-    sent with, after its ``Arm``."""
-    carried = list(w.held_supplies)
-    if w.armed_id is not None and w.armed_code is not None and all(h.id != w.armed_id for h in carried):
-        carried.append(InventorySupply(w.armed_id, w.armed_code))
-    return carried
+    """The held supplies and the armed one: each supply is in exactly one
+    place, and ``held`` never lists the armed one (Manual §11 Where your
+    supplies are, A154). What a ``Use`` on yourself can be sent with, after
+    its ``Arm``."""
+    armed = [InventorySupply(w.armed_id, w.armed_code)] if w.armed_id is not None and w.armed_code else []
+    return list(w.held_supplies) + armed
 
 
 def carried_ids(w: WorldModel) -> tuple[int, ...]:

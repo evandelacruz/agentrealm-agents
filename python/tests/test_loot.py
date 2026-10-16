@@ -1,4 +1,4 @@
-"""A20: Pickup reflex (Take, WithdrawFromChest, Drop junk when full; gems first, hearts first is A47)
+"""A20: Pickup reflex (Take, WithdrawFromChest, Drop junk when full; hearts first, then gems, A156)
 and the Loot executor for ``fetch_item`` ops."""
 
 import random
@@ -26,7 +26,6 @@ from agentrealm_adk.loot import (
     droppable_supplies,
     inventory_full,
     is_counter_supply,
-    learn_life_code,
     learn_loot_rejection,
     loot_score,
     pickups,
@@ -87,9 +86,10 @@ def full_inventory(w: WorldModel, *, junk: str = "torch") -> None:
 
 
 class LootPriorityTest(unittest.TestCase):
-    def test_gem_is_a_counter_supply(self):
-        self.assertTrue(is_counter_supply("gem", {}))
-        self.assertFalse(is_counter_supply("heart", {}))
+    def test_gems_and_hearts_are_counter_supplies(self):
+        self.assertTrue(is_counter_supply("gem"))
+        self.assertTrue(is_counter_supply("heart"), "class life in the Supplies reference (A156)")
+        self.assertFalse(is_counter_supply("berry"))
 
     def test_gem_beats_sword(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -97,12 +97,21 @@ class LootPriorityTest(unittest.TestCase):
         d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
         self.assertEqual(d.intent, {"verb": "Take", "supply_id": 3})
 
-    def test_heart_beats_sword_once_the_life_code_is_known(self):
+    def test_heart_beats_gem_and_sword_on_sight(self):
         w = world(["...", "...", "..."], at=(1, 1))
-        w.entities = [Entity("supply", 2, (1, 2), "bronze_sword"), Entity("supply", 3, (2, 1), "heart")]
-        with mock.patch("agentrealm_adk.loot.LIFE_SUPPLY_CODES", frozenset({"heart"})):
-            d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
+        w.entities = [
+            Entity("supply", 2, (1, 2), "bronze_sword"),
+            Entity("supply", 4, (0, 1), "gem"),
+            Entity("supply", 3, (2, 1), "heart"),
+        ]
+        d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
         self.assertEqual(d.intent, {"verb": "Take", "supply_id": 3})
+
+    def test_a_heart_is_taken_with_a_full_pack(self):
+        w = world(["...", "...", "..."], at=(1, 1))
+        full_inventory(w)
+        w.entities = [Entity("supply", 3, (2, 1), "heart")]
+        self.assertEqual(dispatch(w, ctx()).intents, [{"verb": "Take", "supply_id": 3}])
 
     def test_counter_supply_taken_with_a_full_pack(self):
         w = world(["...", "...", "..."], at=(1, 1))
@@ -383,30 +392,8 @@ class RejectionTest(unittest.TestCase):
         self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
 
-class LifeCodeTest(unittest.TestCase):
-    """A47: a life's ground code is learned only when one Take explains the rise."""
-
-    def test_one_take_and_lives_up_files_the_code(self):
-        kb = KnowledgeBase("sandbox")
-        self.assertEqual(learn_life_code(kb, ["heart"], 10, 11), "heart")
-        self.assertEqual(kb.items, {"heart": {"life_on_pickup": True}})
-
-    def test_two_takes_in_one_response_learn_nothing(self):
-        kb = KnowledgeBase("sandbox")
-        self.assertIsNone(learn_life_code(kb, ["heart", "berry"], 10, 11))
-        self.assertEqual(kb.items, {})
-
-    def test_lives_unchanged_or_down_learn_nothing(self):
-        kb = KnowledgeBase("sandbox")
-        self.assertIsNone(learn_life_code(kb, ["berry"], 10, 10))
-        self.assertIsNone(learn_life_code(kb, ["berry"], 10, 9))
-        self.assertEqual(kb.items, {})
-
-    def test_a_gem_or_unknown_code_is_never_a_life(self):
-        kb = KnowledgeBase("sandbox")
-        self.assertIsNone(learn_life_code(kb, ["gem"], 10, 11))
-        self.assertIsNone(learn_life_code(kb, [None], 10, 11))
-        self.assertEqual(kb.items, {})
+class LifeFromReferenceTest(unittest.TestCase):
+    """A156: a supply of class ``life`` in the Supplies reference is a life; nothing is learned in play."""
 
     def test_food_and_potions_are_the_supplies_references_only(self):
         # A54: no guessing from a code's spelling; an unlisted code is unknown.
@@ -414,19 +401,22 @@ class LifeCodeTest(unittest.TestCase):
         self.assertGreater(loot_score("small_potion", {}), UNKNOWN_SCORE)
         self.assertEqual(loot_score("mystery_potion", {}), UNKNOWN_SCORE)
 
-    def test_a_learned_life_scores_above_gems_and_takes_no_slot(self):
-        items = {"heart": {"life_on_pickup": True}}
-        self.assertEqual(loot_score("heart", items), LIFE_SCORE)
-        self.assertTrue(is_counter_supply("heart", items))
-        self.assertFalse(is_counter_supply("berry", items))
+    def test_a_heart_scores_above_gems_and_takes_no_slot(self):
+        self.assertEqual(loot_score("heart", {}), LIFE_SCORE)
+        self.assertTrue(is_counter_supply("heart"))
 
-    def test_a_learned_life_survives_a_save_and_load(self):
+    def test_an_item_row_learned_by_an_older_agent_makes_no_life(self):
+        items = {"berry": {"life_on_pickup": True}}
+        self.assertNotEqual(loot_score("berry", items), LIFE_SCORE)
+        self.assertFalse(is_counter_supply("berry"))
+
+    def test_the_learned_life_key_is_dropped_at_load(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch("agentrealm_adk.knowledge_base.WORLDS_DIR", Path(tmp)):
             kb = KnowledgeBase("sandbox")
-            learn_life_code(kb, ["heart"], 10, 11)
+            kb.items["heart"] = {"life_on_pickup": True}
             knowledge_base.save(kb)
             loaded = knowledge_base.load("sandbox")
-        self.assertTrue(is_counter_supply("heart", loaded.items))
+        self.assertNotIn("heart", loaded.items)
 
     def test_stowed_supplies_are_never_dropped(self):
         w = WorldModel(character_id=1)
@@ -476,7 +466,7 @@ class FakeClient:
 
 
 class RunnerLootLearningTest(unittest.TestCase):
-    """A47 through the runner's full tick: results, events, then the observation."""
+    """The runner's full tick: results, events, then the observation."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -520,40 +510,12 @@ class RunnerLootLearningTest(unittest.TestCase):
             r.tick()
         return r
 
-    def test_one_applied_take_that_raises_lives_files_its_code(self):
+    def test_a_heart_taken_files_nothing(self):
+        # A life is the Supplies reference's (A156): nothing is learned from lives rising.
         self.run_tick(
             [{"verb": "Take", "supply_id": 7}],
             [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
             lives_after=11,
-        )
-        self.assertEqual(self.kb.items.get("heart"), {"life_on_pickup": True})
-
-    def test_two_applied_takes_with_lives_up_file_nothing(self):
-        self.run_tick(
-            [{"verb": "Take", "supply_id": 7}, {"verb": "Take", "supply_id": 8}],
-            [
-                {"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"},
-                {"queue_id": "q1", "index": 1, "tick": 12, "outcome": "applied"},
-            ],
-            lives_after=11,
-        )
-        self.assertNotIn("heart", self.kb.items)
-        self.assertNotIn("berry", self.kb.items)
-
-    def test_a_result_from_another_queue_is_not_ours(self):
-        # A stale result from an older queue must not be read against this queue's Take.
-        self.run_tick(
-            [{"verb": "Take", "supply_id": 8}],
-            [{"queue_id": "q0", "index": 0, "tick": 11, "outcome": "applied"}],
-            lives_after=11,
-        )
-        self.assertEqual(self.kb.items, {})
-
-    def test_take_with_lives_unchanged_files_nothing(self):
-        self.run_tick(
-            [{"verb": "Take", "supply_id": 8}],
-            [{"queue_id": "q1", "index": 0, "tick": 11, "outcome": "applied"}],
-            lives_after=10,
         )
         self.assertEqual(self.kb.items, {})
 

@@ -155,9 +155,10 @@ def _migrate_entrance_keys(entrances: dict[str, Any]) -> None:
 # potions and food).
 RETIRED_KEYS = {"survival": ("safe_zone_regen", "safe_zone_regen_rates")}
 # Item-table keys older agents saved on each item row, dropped at load: the
-# heals learned in play (A24). Heals are the Supplies reference's, and food
-# is eaten on pickup, never carried (A155).
-RETIRED_ITEM_KEYS = ("heal_amount", "heal_on_pickup")
+# heals learned in play (A24) and the life code learned in play (A47). Heals
+# and lives are the Supplies reference's: food is eaten on pickup, never
+# carried (A155), and a supply of class ``life`` is a life (A156).
+RETIRED_ITEM_KEYS = ("heal_amount", "heal_on_pickup", "life_on_pickup")
 
 
 def _drop_retired_keys(extra: dict[str, Any], items: dict[str, Any]) -> None:

@@ -171,11 +171,11 @@ def record_attempt(
 
 
 def held_supplies(w: WorldModel) -> list[InventorySupply]:
-    """Supplies Break can arm: held, plus the armed one. Worn gear is not armable."""
-    out = list(w.held_supplies)
-    if w.armed_code and not any(s.code == w.armed_code for s in w.held_supplies):
-        out.append(InventorySupply(-1, w.armed_code))
-    return out
+    """Supplies Break can arm: held, plus the armed one (id -1: already armed),
+    which ``held`` never lists (Manual §11 Where your supplies are, A154),
+    even when a held one shares its code. Worn gear is not armable."""
+    armed = [InventorySupply(-1, w.armed_code)] if w.armed_code else []
+    return list(w.held_supplies) + armed
 
 
 def held_supply(w: WorldModel, code: str) -> InventorySupply | None:
@@ -225,16 +225,16 @@ def pick_supply_for_capability(
     """The held or armed supply to use for ``capability``: one a break does not
     use up first, the armed one on a tie, then by code.
 
-    The armed supply wins a tie, so a break arms its tool once and keeps it.
-    An armed supply is not in ``held``: without the tie-break, two weapons
-    that both cut would each pick the other and flip the arm forever.
+    The armed supply wins a tie, held copies of its code included, so a break
+    arms its tool once and keeps it: without the tie-break, two weapons that
+    both cut would each pick the other and flip the arm forever.
     """
     cands: list[tuple[tuple[int, int, str], InventorySupply]] = []
     for s in held_supplies(w):
         if capability not in capabilities_for_code(s.code, kb):
             continue
         used_up = 0 if kept_on_break(s.code) else 1
-        armed = 0 if s.code == w.armed_code else 1
+        armed = 0 if s.id < 0 else 1
         cands.append(((used_up, armed, s.code), s))
     if not cands:
         return None

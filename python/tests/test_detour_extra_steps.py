@@ -10,7 +10,6 @@ from __future__ import annotations
 import unittest
 
 from agentrealm_adk.directives import PARAM_DEFAULTS
-from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
@@ -57,10 +56,8 @@ class PricedByStepsTest(unittest.TestCase):
 
     def test_a_life_is_worth_more_than_a_gem(self):
         w, m, plan = walking()
-        kb = KnowledgeBase.empty("sandbox")
-        kb.items["heart"] = {"life_on_pickup": True}
-        w.entities = [Entity("supply", 80, (6, 16), "heart")]
-        find = detour_find(w, ctx(m, plan, kb, pickup=True))
+        w.entities = [Entity("supply", 80, (6, 16), "heart")]  # class life in the Supplies reference (A156)
+        find = detour_find(w, ctx(m, plan, pickup=True))
         self.assertEqual(find.id if find else None, 80)
 
     def test_a_wall_between_the_route_and_the_find_counts(self):

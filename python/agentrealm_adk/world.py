@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list
+from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list, worn_ids_from_inventory
 from .supplies import afloat, chest_capacity, fords, worn_armor_defense
 from .threat import (
     ThreatTable,
@@ -19,7 +18,6 @@ from .threat import (
     hostile_type_from_event,
 )
 
-log = logging.getLogger(__name__)
 
 # block_types.traversal (migrations/00024_block_traversal.sql). Door types are
 # warp: never occupied, but stepping onto one warps.
@@ -344,6 +342,7 @@ class WorldModel:
     armed_code: str | None = None
     armed_id: int | None = None  # supply id in the armed slot, when the snapshot names it (A76)
     worn_codes: dict[str, str] = field(default_factory=dict)
+    worn_ids: dict[str, int] = field(default_factory=dict)  # worn slot -> supply id, when the snapshot names it (A154)
     worn_slots: dict[str, str] = field(default_factory=dict)  # subtype -> slot a snapshot served it worn in, for the run (A19)
     held_supplies: list[InventorySupply] = field(default_factory=list)  # inventory held[] (A10, A20)
     chest_supplies: list[InventorySupply] = field(default_factory=list)
@@ -529,17 +528,11 @@ class WorldModel:
         self.asleep = asleep
 
     def apply_position(self, p: dict) -> None:
-        # `level` belongs to the map (Manual §5.3) and comes from its minimap
-        # entry (`apply_minimap`, A145): the position read carries none. A new
-        # map takes the level the minimap gave it, else none until a read
-        # names it. A position read that ever names one still counts, a read
-        # that omits it keeps the map's level, and a non-integer `level` is
-        # logged and read as omitted (A37).
-        has_level = "level" in p
-        level = p.get("level")
-        if level is not None and (isinstance(level, bool) or not isinstance(level, int)):
-            log.warning("position level must be an integer, got %r; ignored", level)
-            has_level, level = False, None
+        # `level` belongs to the map and comes only from its minimap entry
+        # (`apply_minimap`, A145): the position read and the snapshot's
+        # `position` carry none (Manual §5.3, §11 Bosses and levels, A164), so
+        # nothing here reads one. A new map takes the level the minimap gave
+        # it, else none until a minimap read names it.
         map_id = int(p["map_id"])
         if map_id != self.map_id:
             self.snapshot_version = None  # entities no longer match its base
@@ -548,14 +541,12 @@ class WorldModel:
         self.pos = (int(p["x"]), int(p["y"]))
         self.asleep = False  # a sleeping character is off the map (GAME_NOTES Sleep)
         self.placed, self.woke = True, False
-        if has_level:
-            self.map_level = level
 
     def apply_minimap(self, body: dict) -> None:
         """Each revealed map's ``level`` from a minimap read (A145): a map inside
         a level carries it, one outside every level omits it. The position
-        read does not carry it, so this is where the current map's level comes
-        from; a position read that ever names one still counts."""
+        read carries none, so this is the only place the current map's level
+        comes from (A164)."""
         for m in body.get("maps") or []:
             if not isinstance(m, dict):
                 continue
@@ -932,6 +923,7 @@ class WorldModel:
         self.held_supplies, self.chest_supplies, self.armed_code, self.worn_codes = carried_from_inventory(inv)
         armed = inv.get("armed")
         self.armed_id = _opt_int(armed.get("id")) if isinstance(armed, dict) else None
+        self.worn_ids = worn_ids_from_inventory(inv)
         self.worn_slots.update((code, slot) for slot, code in self.worn_codes.items())
         self.sync_carry_capacity()
 
@@ -1092,6 +1084,14 @@ class WorldModel:
         self.snapshot_version = None
 
     # Queries.
+
+    def loadout_supplies(self) -> list[InventorySupply]:
+        """The armed and worn supplies whose ids a snapshot named. Each supply
+        is in exactly one place (Manual §11 Where your supplies are, A154), so
+        none of these is also in ``held_supplies``."""
+        armed = [InventorySupply(self.armed_id, self.armed_code)] if self.armed_id is not None and self.armed_code else []
+        worn = [InventorySupply(sid, self.worn_codes[slot]) for slot, sid in sorted(self.worn_ids.items()) if slot in self.worn_codes]
+        return armed + worn
 
     def slots_carried(self) -> int:
         """Slots the inventory fills: held, stowed, worn and armed (gems and

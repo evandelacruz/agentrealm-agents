@@ -421,7 +421,8 @@ class RunnerBreakResultTest(unittest.TestCase):
         self.assertEqual(self.kb.items, {"iron_axe": {"capabilities": ["chop"]}})
         # The block grows back and a later try fails: the item keeps what it proved.
         record_attempt(self.kb, map_id=7, pos=(2, 0), capability="chop", result="applied_no_effect")
-        self.assertEqual(pick_supply_for_capability(w, "chop", self.kb), InventorySupply(6, "iron_axe"))
+        # The armed axe wins over the held one of its code (id -1: no Arm needed, A154).
+        self.assertEqual(pick_supply_for_capability(w, "chop", self.kb), InventorySupply(-1, "iron_axe"))
         self.assertIsNone(pick_supply_for_capability(w, "cut", self.kb))
 
     def test_failed_break_files_no_capability(self):

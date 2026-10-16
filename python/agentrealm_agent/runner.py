@@ -41,7 +41,6 @@ from agentrealm_adk.level_order import note_door_step, settle_entry
 from agentrealm_adk.equip import note_equip_result, sync_refusals
 from agentrealm_adk.loot import (
     learn_chest_upgrade,
-    learn_life_code,
     learn_loot_rejection,
     load_carried_chest,
     save_carried_chest,
@@ -197,7 +196,7 @@ class Runner:
         self.knowledge = knowledge
         self._reach_seen: int | None = None  # A18: reach from a rejection, filed after the observation
         self._applied_uses: list[AppliedUse] = []  # A18: applied Uses this response, matched after observation
-        self._applied_take_codes: list[str | None] = []  # A47: codes of this response's applied Takes
+        self._applied_take_codes: list[str | None] = []  # codes of this response's applied Takes (a cut's gems, A88)
         self._loadout_verbs: list[str] = []  # A18: applied Wear/Remove/Drop this response
         self._supply_refused: list[SupplyRefused] = []  # A80: refused heal intents, filed at the next decision
         self._applied_self_use: AppliedSelfUse | None = None  # A76: an applied Use on yourself, checked at the next decision
@@ -724,7 +723,6 @@ class Runner:
             m.queue_sent_tick = w.tick
             if qid := r.get("queue_id"):
                 m.pending_queue = qid
-        lives_before = w.lives
         rejected = self.apply_intent_results(r.get("intent_results") or [])
         self._forget_replaced_self_use(intents)
         earlier = w.entities
@@ -733,7 +731,6 @@ class Runner:
         if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
             self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))
-        self._learn_life_code(lives_before)
         ceremony = r.get("level_clear_ceremony")
         w.note_level_clear(ceremony)
         if ceremony and self.acceptance is not None:
@@ -1192,16 +1189,6 @@ class Runner:
         if (result.get("rejection") or {}).get("category") == "state":
             m.need_self = True
         return True
-
-    def _learn_life_code(self, lives_before: int) -> None:
-        """After the observation, file a life's ground code if one Take raised lives (A47)."""
-        code = learn_life_code(self.knowledge, self._applied_take_codes, lives_before, self.world.lives)
-        if code is not None:
-            self.log(
-                "loot",
-                f"learned life ground code {code!r} (promote to LIFE_SUPPLY_CODES once confirmed)",
-                {"life_supply_code": code, "lives_before": lives_before, "lives": self.world.lives},
-            )
 
     def _forget_replaced_self_use(self, intents: list[dict] | None) -> None:
         """A sent queue with no self-``Use`` replaced the self-``Use``'s queue, if any:

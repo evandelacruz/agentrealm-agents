@@ -578,7 +578,9 @@ class LiveLevelMapTest(unittest.TestCase):
 
     def live(self, at, level, rows) -> WorldModel:
         w = WorldModel(character_id=1, map_id=44, pos=at, perception=25)
-        w.apply_position({"map_id": 44, "x": at[0], "y": at[1], **({"level": level} if level is not None else {})})
+        if level is not None:
+            w.apply_minimap({"maps": [{"map_id": 44, "level": level}]})
+        w.apply_position({"map_id": 44, "x": at[0], "y": at[1]})
         w.apply_terrain({"map_id": 44, "x0": 0, "y0": 0, "width": 16, "height": 12, "rows": rows,
                          "legend": self.LEGEND, "map_width": 16, "map_height": 12})
         w.armed_code, w.armed_id = "raft", RAFT

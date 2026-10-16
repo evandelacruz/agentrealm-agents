@@ -34,49 +34,53 @@ def ctx_for(m: Memory, kb: KnowledgeBase | None = None, plan: Plan | None = None
     return PlayContext(m, Policy(kind="scripted", goals=["explore"]), random.Random(0), knowledge=kb, plan=plan)
 
 
+def read_level(w: WorldModel, map_id: int, level: int) -> None:
+    """A minimap read naming ``map_id``'s level: the only read that numbers a map (A164)."""
+    w.apply_minimap({"maps": [{"map_id": map_id, "level": level}]})
+
+
 class InsideLevelTest(unittest.TestCase):
-    def test_map_level_from_position(self):
+    def test_map_level_from_the_minimap(self):
         w = grid(["."], map_id=9)
-        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        read_level(w, 9, 2)
+        w.apply_minimap({"maps": [{"map_id": 1}]})
+        w.apply_position({"map_id": 9, "x": 0, "y": 0})
         self.assertTrue(inside_level(w))
-        w.apply_position({"map_id": 1, "x": 0, "y": 0, "level": 0})
+        w.apply_position({"map_id": 1, "x": 0, "y": 0})
         self.assertFalse(inside_level(w))
 
-    def test_without_level_field_not_inside(self):
+    def test_without_a_minimap_read_not_inside(self):
         w = grid(["."], map_id=8)
         w.apply_position({"map_id": 8, "x": 0, "y": 0})
         self.assertFalse(inside_level(w))
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": None})
-        self.assertFalse(inside_level(w))
 
-    def test_delta_without_level_stays_inside(self):
+    def test_a_step_on_the_same_map_stays_inside(self):
         w = grid(["."], map_id=9)
-        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        read_level(w, 9, 2)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0})
         w.apply_position({"map_id": 9, "x": 1, "y": 0})
         self.assertEqual(w.map_level, 2)
         self.assertTrue(inside_level(w))
 
-    def test_new_map_without_level_resets_it(self):
+    def test_new_map_without_a_read_resets_it(self):
         w = grid(["."], map_id=9)
-        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
+        read_level(w, 9, 2)
+        w.apply_position({"map_id": 9, "x": 0, "y": 0})
         w.apply_position({"map_id": 1, "x": 5, "y": 5})
         self.assertIsNone(w.map_level)
         self.assertFalse(inside_level(w))
 
-    def test_non_integer_level_ignored(self):
+    def test_a_level_on_the_position_read_is_never_read(self):
+        # Manual §5.3: the position read and the snapshot's position carry no level (A164).
         w = grid(["."], map_id=9)
         w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
-        for bad in ("2", "deep", 1.5, True, [1]):
-            with self.subTest(level=bad):
-                with self.assertLogs("agentrealm_adk.world", level="WARNING"):
-                    w.apply_position({"map_id": 9, "x": 3, "y": 3, "level": bad})
-                self.assertEqual((w.map_id, w.pos, w.map_level), (9, (3, 3), 2), "keeps the last good level")
-
-    def test_malformed_level_in_delta_does_not_raise(self):
-        w = grid(["."], map_id=9)
-        w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
-        with self.assertLogs("agentrealm_adk.world", level="WARNING"):
-            w.apply_observation({"version": 11, "delta": {"position": {"map_id": 9, "x": 2, "y": 2, "level": "deep"}}})
+        self.assertIsNone(w.map_level, "no minimap read has named map 9")
+        read_level(w, 9, 2)
+        for stray in (5, 0, None, "deep"):
+            with self.subTest(level=stray):
+                w.apply_position({"map_id": 9, "x": 3, "y": 3, "level": stray})
+                self.assertEqual((w.pos, w.map_level), ((3, 3), 2), "the minimap's level stands")
+        w.apply_observation({"version": 11, "delta": {"position": {"map_id": 9, "x": 2, "y": 2, "level": 0}}})
         self.assertEqual((w.pos, w.map_level), ((2, 2), 2))
 
 
@@ -86,7 +90,8 @@ class LevelStateTest(unittest.TestCase):
     def test_level_runs_for_enter_level_op_on_interior_map(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         plan = level_plan()
         out = dispatch(w, ctx_for(Memory(), kb, plan))
         self.assertEqual(out.state, "Level")
@@ -96,13 +101,15 @@ class LevelStateTest(unittest.TestCase):
     def test_no_enter_level_op_means_no_level(self):
         # Inside a level with no plan op: the safe default explores, Level never self-starts.
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         out = dispatch(w, ctx_for(Memory(), KnowledgeBase.empty("sandbox")))
         self.assertEqual(out.state, "Explore")
 
     def test_walks_to_the_entrance_from_outside(self):
         w = grid(["....D"], at=(0, 0), map_id=1)
-        w.apply_position({"map_id": 1, "x": 0, "y": 0, "level": 0})
+        read_level(w, 1, 0)
+        w.apply_position({"map_id": 1, "x": 0, "y": 0})
         m = Memory()
         out = dispatch(w, ctx_for(m, KnowledgeBase.empty("sandbox"), level_plan({"op": "enter_level", "x": 4, "y": 0})))
         self.assertEqual(out.state, "Level")
@@ -113,7 +120,8 @@ class LevelStateTest(unittest.TestCase):
     def test_prefers_unvisited_door(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["..D.D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         sync_map_from_view(kb, 8, w.view)
         record_warp(kb, 8, (2, 0), "framed_door", 9, (0, 0))
         m = Memory()
@@ -124,7 +132,8 @@ class LevelStateTest(unittest.TestCase):
     def test_travel_op_on_top_outranks_level(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         plan = level_plan({"op": "travel", "to": "point", "x": 3, "y": 0}, {"op": "enter_level", "x": 0, "y": 0})
         out = dispatch(w, ctx_for(Memory(), kb, plan))
         self.assertEqual(out.state, "Travel")
@@ -132,7 +141,8 @@ class LevelStateTest(unittest.TestCase):
     def test_level_takes_over_once_travel_arrives(self):
         kb = KnowledgeBase.empty("sandbox")
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         plan = level_plan({"op": "travel", "to": "point", "x": 0, "y": 0}, {"op": "enter_level", "x": 0, "y": 0})
         m = Memory()
         out = dispatch(w, ctx_for(m, kb, plan))  # arrival pops the travel op
@@ -142,7 +152,8 @@ class LevelStateTest(unittest.TestCase):
         # Walled in with nothing unexplored in reach: Level finishes its op,
         # sends nothing and does not hold the round, so a lower state gets it (A44).
         w = grid(["###", "#.#", "###"], at=(1, 1), map_id=8)
-        w.apply_position({"map_id": 8, "x": 1, "y": 1, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 1, "y": 1})
         plan = level_plan()
         ctx = PlayContext(
             Memory(), Policy(kind="scripted", goals=[]), random.Random(0),
@@ -157,7 +168,8 @@ class LevelStateTest(unittest.TestCase):
         # A door or frontier dropped by stuck detection stays out of Level's
         # choice until its backoff ends, as it does for the goals (A15).
         w = grid(["....D"], at=(0, 0), map_id=8)
-        w.apply_position({"map_id": 8, "x": 0, "y": 0, "level": 1})
+        read_level(w, 8, 1)
+        w.apply_position({"map_id": 8, "x": 0, "y": 0})
         m = Memory()
         nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key("level:door", 8, (4, 0)), "level:door", w.tick)
         for p in w.view.frontier(fords=False):

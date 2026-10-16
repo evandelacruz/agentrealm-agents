@@ -36,9 +36,6 @@ A row holds only facts the API serves for that subtype (PLAN.md A18):
   response's observation (A28, A46). Only ever grows. A failed break proves
   nothing about the item (the block decides, docs/GAME_NOTES.md Breaking
   blocks), so it removes nothing.
-- ``life_on_pickup``: ``True`` once ``lives`` rose in a response whose only
-  applied ``Take`` was this subtype (A47, ``loot.learn_life_code``). Loot then
-  scores it as a life.
 """
 
 from __future__ import annotations
@@ -205,6 +202,20 @@ def carried_from_inventory(
             if code:
                 worn[str(slot)] = code
     return supplies_from_list(inv.get("held")), supplies_from_list(inv.get("chest")), armed, worn
+
+
+def worn_ids_from_inventory(inv: dict | None) -> dict[str, int]:
+    """Worn slot -> supply id from a snapshot ``inventory``: what a ``Drop`` of
+    a worn supply names (Manual §11 Where your supplies are, A154)."""
+    raw = (inv or {}).get("worn")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for slot, entry in raw.items():
+        sid = _positive_int(entry.get("id")) if isinstance(entry, dict) else None
+        if sid is not None and _supply_code(entry):
+            out[str(slot)] = sid
+    return out
 
 
 def loadout_from_inventory(inv: dict | None) -> tuple[str | None, dict[str, str]]:

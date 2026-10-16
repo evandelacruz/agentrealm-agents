@@ -32,7 +32,7 @@ from .break_memory import capabilities_for_code
 from .fragments import compose_supply_ids
 from .healing import supply_matches
 from .item_table import InventorySupply
-from .knowledge_base import KnowledgeBase, knowledge_items
+from .knowledge_base import KnowledgeBase
 from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
 from .supplies import eaten_on_pickup, kept_on_break
 from .travel.knowledge import iter_shop_cells
@@ -59,13 +59,13 @@ class Room:
 
 
 def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: KnowledgeBase | None) -> list[InventorySupply]:
-    """Held and stowed supplies the plan will use, one per op that needs one:
+    """Carried supplies (held, stowed, armed and worn) the plan will use, one per op that needs one:
     ``use_block``'s, ``equip``'s and ``use_item``'s ``code``, ``fight_boss``'s ``armed``
     and ``worn``, ``compose``'s held fragments (one per slot, from what is held,
     as Solve composes them), and ``break_block``'s tool for its ``capability`` (none when the
     armed supply has it, one kept for every break when a break does not use it
     up, else one per op). An op is matched to the lowest id not yet reserved."""
-    pool = sorted(w.held_supplies + w.chest_supplies, key=lambda s: s.id)
+    pool = sorted(w.held_supplies + w.chest_supplies + w.loadout_supplies(), key=lambda s: s.id)
     out: list[InventorySupply] = []
 
     def claim(fits) -> None:
@@ -122,8 +122,7 @@ def make_room(
 
     ``plan_ops`` are the ops left on the stack, which reserve what they use;
     ``named`` is the code a ``buy`` or ``fetch_item`` op said to drop."""
-    items = knowledge_items(knowledge)
-    if (p.chest_id is None and is_counter_supply(p.code, items)) or eaten_on_pickup(p.code) or not inventory_full(w):
+    if (p.chest_id is None and is_counter_supply(p.code)) or eaten_on_pickup(p.code) or not inventory_full(w):
         return Room(TAKE)
     reserved = {s.id for s in reserved_supplies(w, plan_ops, knowledge)}
     free = [s for s in droppable_supplies(w) if s.id not in reserved]

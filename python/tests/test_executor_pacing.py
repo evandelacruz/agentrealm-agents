@@ -8,9 +8,11 @@ from agentrealm_adk.executor import (
     arm_then_use,
     attack_cooldown_ticks,
     build_attack_queue,
+    is_weapon_swing,
     pace_speech,
     pace_uses,
     queue_horizon_intents,
+    use_cooldown_ticks,
     wait,
 )
 
@@ -88,6 +90,47 @@ class ArmThenUseTest(unittest.TestCase):
     def test_a_use_past_the_horizon_sends_no_arm_alone(self):
         # Free-play run 3: an Arm sent without its Use left the potion armed.
         self.assertEqual(arm_then_use(self.ARM, use_block(0, 0), cooldown_ticks=DEFAULT_WEAPON_COOLDOWN_TICKS, horizon_ticks=3, ticks_since_last_use=1), [])
+
+
+class WhatWaitsOnACooldownTest(unittest.TestCase):
+    """A153: only a weapon's swing or break waits on the attack cooldown
+    (Manual §11 What waits on a cooldown)."""
+
+    SELF = {"verb": "Use", "target": {"kind": "self"}}
+    NPC = {"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}
+    CHARACTER = {"verb": "Use", "target": {"kind": "character", "character_id": 5}}
+
+    def test_a_weapon_on_a_character_an_npc_or_a_block_swings(self):
+        for use in (self.NPC, self.CHARACTER, use_block(1, 0)):
+            self.assertTrue(is_weapon_swing(use, "bronze_sword"), use)
+            self.assertEqual(use_cooldown_ticks(use, "bronze_mallet"), 13)
+
+    def test_a_use_on_yourself_is_no_swing(self):
+        for code in ("small_potion", "middle_chest", "bronze_sword", None):
+            self.assertFalse(is_weapon_swing(self.SELF, code), code)
+            self.assertEqual(use_cooldown_ticks(self.SELF, code), 0, code)
+
+    def test_a_tool_or_trap_use_is_no_swing(self):
+        for code in ("matches", "bomb", "torch", "trap_grade_2"):
+            self.assertFalse(is_weapon_swing(use_block(1, 0), code), code)
+            self.assertEqual(use_cooldown_ticks(use_block(1, 0), code), 0, code)
+
+    def test_nothing_or_an_unlisted_code_in_hand_waits_as_a_weapon(self):
+        for code in (None, "unlisted"):
+            self.assertEqual(use_cooldown_ticks(self.NPC, code), DEFAULT_WEAPON_COOLDOWN_TICKS, code)
+
+    def test_only_a_use_is_a_swing(self):
+        self.assertFalse(is_weapon_swing({"verb": "Arm", "supply_id": 4}, "bronze_sword"))
+
+    def test_a_drink_and_its_arm_go_out_on_the_next_ticks(self):
+        arm = {"verb": "Arm", "supply_id": 4}
+        cooldown = use_cooldown_ticks(self.SELF, "small_potion")
+        queue = arm_then_use(arm, self.SELF, cooldown_ticks=cooldown, horizon_ticks=HORIZON, ticks_since_last_use=1)
+        self.assertEqual(queue, [arm, self.SELF])
+
+    def test_a_tool_use_right_after_a_swing_waits_on_nothing(self):
+        cooldown = use_cooldown_ticks(use_block(0, 0), "matches")
+        self.assertEqual(pace_uses([use_block(0, 0)], cooldown_ticks=cooldown, ticks_since_last=1), [use_block(0, 0)])
 
 
 class PaceSpeechTest(unittest.TestCase):

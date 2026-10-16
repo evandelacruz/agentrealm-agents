@@ -240,6 +240,38 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(r.mem.last_speech_tick, 21)
         self.assertEqual(r.mem.last_use_tick, 20)
 
+    def test_a_use_that_is_no_swing_goes_out_on_the_next_tick(self):
+        # A153: a drink, a chest, a tool or a trap waits on no attack cooldown.
+        r = self.runner(FakeClient([]), Policy(goals=[]))
+        r.mem.last_use_tick, r.world.tick = 10, 11
+        drink = {"verb": "Use", "target": {"kind": "self"}}
+        burn = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}
+        r.world.armed_code = "bronze_sword"
+        self.assertEqual(r.intents_for(Decision(drink, "test")), [drink])
+        r.world.armed_code = "matches"
+        self.assertEqual(r.intents_for(Decision(burn, "test")), [burn])
+
+    def test_only_an_applied_weapon_use_starts_the_cooldown(self):
+        # A153: a drink, a tool's Use and a swing that changed nothing spend
+        # no attack cooldown; a swing that applied does.
+        r = self.runner(FakeClient([]), Policy(goals=[]))
+        swing = {"verb": "Use", "target": {"kind": "npc", "npc_id": 5}}
+        drink = {"verb": "Use", "target": {"kind": "self"}}
+        burn = {"verb": "Use", "target": {"kind": "block", "x": 1, "y": 0}}
+        r.world.armed_code = "bronze_sword"
+        for intent, outcome in ((drink, "applied"), (swing, "applied_no_effect")):
+            r.mem.pending = intent
+            self.assertFalse(r.on_result({"tick": 20, "outcome": outcome}, 0))
+            self.assertIsNone(r.mem.last_use_tick, intent)
+        r.world.armed_code = "matches"
+        r.mem.pending = burn
+        self.assertFalse(r.on_result({"tick": 21, "outcome": "applied"}, 0))
+        self.assertIsNone(r.mem.last_use_tick)
+        r.world.armed_code = "bronze_sword"
+        r.mem.pending = swing
+        self.assertFalse(r.on_result({"tick": 22, "outcome": "applied"}, 0))
+        self.assertEqual(r.mem.last_use_tick, 22)
+
     def test_npc_out_of_range_drops_the_swings_and_replans(self):
         # A45: an NPC that left sight, died or moved out of reach answers the
         # queued npc-target swing target_out_of_range; the rest is dropped and

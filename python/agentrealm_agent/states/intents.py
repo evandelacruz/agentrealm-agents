@@ -6,7 +6,7 @@ Field names match https://agentrealm.gg/docs/api — wrong shapes are rejected a
 
 from __future__ import annotations
 
-from agentrealm_adk.executor import arm_then_use, attack_cooldown_ticks, queue_horizon_intents
+from agentrealm_adk.executor import arm_then_use, queue_horizon_intents, use_cooldown_ticks
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.world import Entity, Pos, WorldModel
 
@@ -100,8 +100,9 @@ def is_self_use(intent: dict | None) -> bool:
 def arm_and_use(w: WorldModel, m: Memory, supply_id: int, use: dict, tick_hz: int) -> list[dict]:
     """``Arm`` ``supply_id``, then ``use`` behind its cooldown Waits: a paced
     queue (``StateOutcome.paced``), so the ``Use`` is sent with the ``Arm``.
-    The Waits are the armed supply's attack cooldown at ``tick_hz``, the
-    world's tick rate (A123)."""
+    Only a weapon's swing or break waits, on its attack cooldown at
+    ``tick_hz``, the world's tick rate (A123); a drink, a chest, a tool or a
+    trap goes out on the tick after its ``Arm`` (A153)."""
     since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
     code = next((s.code for s in w.held_supplies if s.id == supply_id), None)
     if code is None and supply_id == w.armed_id:
@@ -109,7 +110,7 @@ def arm_and_use(w: WorldModel, m: Memory, supply_id: int, use: dict, tick_hz: in
     return arm_then_use(
         arm(supply_id),
         use,
-        cooldown_ticks=attack_cooldown_ticks(code, tick_hz),
+        cooldown_ticks=use_cooldown_ticks(use, code, tick_hz),
         horizon_ticks=queue_horizon_intents(),
         ticks_since_last_use=since,
     )

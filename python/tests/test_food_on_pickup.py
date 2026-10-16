@@ -207,6 +207,8 @@ class ContractTest(unittest.TestCase):
         self.assertIn("Food is eaten the moment it is taken, even at full health, and never carried", prompt)
         self.assertIn("leave it lying until the character is hurt by at least its heal", prompt)
         self.assertNotIn("Pick up food along the way", prompt)
+        self.assertIn("or food, eaten on pickup once the character is hurt by at least its heal", prompt)
+        self.assertNotIn("whenever hurt", prompt)
         self.assertIn("none is drunk at full health", POTION_RULE)
 
 

@@ -5,7 +5,7 @@ is a test mode: triggers are drained and logged, and the built-in plan from
 ``policy.goals`` plus the no-LLM clue rules (A32) stay in charge; it answers
 an op's ``no_way_on`` itself by exploring (``plan.builtin_way_on``, A120). With the
 planner on and no key, :meth:`Strategist.from_env` raises
-:class:`PlannerConfigError` with one line, and the CLI stops before it plays.
+``llm.PlannerConfigError`` with one line, and the CLI stops before it plays.
 
 Two threads, one rule: everything that reads or writes the world, the plan,
 ``Memory`` or the trace runs on the tick thread, in :meth:`Strategist.on_window`.
@@ -87,9 +87,9 @@ planner (:func:`default_tokens_per_min`).
 
 Failures: :meth:`Strategist.check` makes one call before play, and a key
 the provider refuses (401 or 403) stops the run with one line
-(:class:`PlannerAuthError`). A call that fails mid-run backs off: the next
-waits :data:`BACKOFF_BASE_S`, doubling with each failure in a row up to
-:data:`BACKOFF_CAP_S`. Acceptance runs count every failure and every
+(``llm.PlannerAuthError``). A call that fails mid-run backs off: the next
+waits :data:`llm.BACKOFF_BASE_S`, doubling with each failure in a row up to
+:data:`llm.BACKOFF_CAP_S`. Acceptance runs count every failure and every
 accepted plan (``acceptance.PlannerHealth``).
 
 Another provider is a class with the same ``complete(messages)`` and
@@ -109,32 +109,20 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Callable, Collection, Mapping
 
-# The planner call plumbing shared with Lorraine (A140); the names Gary's
-# command line, scripts and tests read stay importable from here.
-from agentrealm_adk.llm import (  # noqa: F401
+# The planner call plumbing, shared with Lorraine (A140).
+from agentrealm_adk.llm import (
     AUTH_STATUSES,
-    BACKOFF_BASE_S,
-    BACKOFF_CAP_S,
-    DEFAULT_ANTHROPIC_MODEL,
     DEFAULT_CALLS_PER_MIN,
     DEFAULT_EFFORT,
-    DEFAULT_TOKENS_PER_MIN,
-    AnthropicClient,
     Backoff,
     CallBudget,
     LLMClient,
-    OpenAIChatClient,
-    PlannerAuthError,
-    PlannerConfigError,
     ProviderConfig,
-    ProviderHTTPError,
     check_client,
     connect,
     env_number,
     error_status,
-    estimate_tokens,
     planner_disabled_by_env,
-    tokens_used,
     trace_messages,
 )
 from agentrealm_adk.llm import default_tokens_per_min as llm_default_tokens_per_min
@@ -349,7 +337,7 @@ class StrategistConfig:
 
     @classmethod
     def from_env(cls) -> StrategistConfig:
-        """Read the planner settings. Raises :class:`PlannerConfigError` when one is missing."""
+        """Read the planner settings. Raises ``llm.PlannerConfigError`` when one is missing."""
         p = ProviderConfig.from_env()
         return cls(
             provider=p.provider,
@@ -1432,7 +1420,7 @@ class Strategist:
     def from_env(cls) -> Strategist:
         """The planner for a live run; off only with ``AGENTREALM_NO_PLANNER``.
 
-        Raises :class:`PlannerConfigError` when it is on and cannot run.
+        Raises ``llm.PlannerConfigError`` when it is on and cannot run.
         """
         if planner_disabled_by_env():
             return cls.off()
@@ -1457,8 +1445,8 @@ class Strategist:
         return self.budget.spent
 
     def check(self) -> None:
-        """One call before play. Raises :class:`PlannerAuthError` when the
-        provider refuses the key (401 or 403), and :class:`PlannerConfigError`
+        """One call before play. Raises ``llm.PlannerAuthError`` when the
+        provider refuses the key (401 or 403), and ``llm.PlannerConfigError``
         on any other 4xx but 429 (a typo'd model is a 404). Rate limits,
         server errors and the network are left to the run, which counts them
         and backs off."""

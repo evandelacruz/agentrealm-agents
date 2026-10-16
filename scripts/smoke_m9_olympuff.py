@@ -37,7 +37,8 @@ from agentrealm_adk.directives import Directives, default_directives, load_direc
 from agentrealm_adk.knowledge_base import KnowledgeBase  # noqa: E402
 from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics, clear_entrance_looks  # noqa: E402
 from agentrealm_adk.park import DEFAULT_PARK_SECONDS  # noqa: E402
-from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
+from agentrealm_adk.llm import PlannerConfigError  # noqa: E402
+from agentrealm_agent.strategist import Strategist  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m9.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"

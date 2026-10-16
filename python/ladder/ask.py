@@ -7,16 +7,20 @@ as the cached prefix, the game reference and the measured facts. It is asked
 one thing, and answers with one JSON object::
 
     {"op": {"op": "gather_gems", "count": 12, "x": 40, "y": 7}, "why": "..."}
-    {"cannot": "no seller of sandals is known", "until": "held"}
+    {"cannot": "no seller of sandals is known", "until": "sellers"}
 
 No stack and no stage prose: the tree is the plan, and the question is
 about the node the walk reached.
 
 A ``cannot`` marks the node blocked in ``goals.Blocks`` with its reason, for
 ``goals.BLOCK_TICKS``, and the next walk descends past it (A139). ``until``
-names the part of the node's state whose change would let it be worked;
-once that part reads otherwise the block lifts early (``lift_changed``).
-With no part named, or one the state does not have, it is ``readiness``.
+names what would let it be worked, and only a line that changes when the
+situation does (``UNTIL_LINES``, read by ``watch_lines``): what is carried,
+the levels cleared, the items a seller is known for, the next entrance's
+unmet need; ``gems N``, lifted once N gems are held; or ``ticks N``, a
+shorter expiry. Where she stands, her health and the readiness text change
+every step or hit, so they are never watched. Anything else is dropped, and
+the block holds to its expiry (``lift_changed``).
 
 The call itself is the ADK's (``agentrealm_adk.llm``): the provider, the
 call budget and backoff Gary's planner has, and its reply parsing.
@@ -44,16 +48,20 @@ from agentrealm_adk.llm import (
     planner_disabled_by_env,
 )
 from agentrealm_adk.planner_reference import game_notes_text, reference_text
+from agentrealm_adk.sellers import codes_with_sellers
+from agentrealm_adk.supplies import sold_codes
 from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.world import WorldModel
 
-from .goals import Blocks, Node, Reading, find
+from . import readiness as r
+from .goals import BLOCK_TICKS, Block, Blocks, Node, Reading
 
 if TYPE_CHECKING:
     from agentrealm_adk.knowledge_base import KnowledgeBase
 
-# The part of a node's state a block watches when its reason names none.
-DEFAULT_UNTIL = "readiness"
+# The state lines a ``cannot`` may wait on (``watch_lines``), and the two with a number.
+UNTIL_LINES = ("held", "levels_cleared", "sellers", "entrance_needs")
+GEMS, TICKS = "gems", "ticks"
 
 CONTRACT = """# The question
 
@@ -62,7 +70,7 @@ You answer one question about one goal of an Agent Realm character: how to work 
 You are shown the goal, the state its readiness reads, the ops that can work it, and the op the goal tree would run, as an example of an op's shape. Answer with one JSON object and nothing else:
 
 - {"op": {"op": "<one of the ops>", ...its fields}, "why": "<one line>"} to run that op now. Name a cell only by an x and y the state gives.
-- {"cannot": "<why no op can work it now, in game terms>", "until": "<the state line whose change would let it be worked>"} when none can. The goal is then set aside, and the character works on what is under it, until that state line changes."""
+- {"cannot": "<why no op can work it now, in game terms>", "until": "<what would let it be worked>"} when none can. The goal is then set aside, and the character works on what is under it, until then. until is one of: "held" (what is carried changes), "levels_cleared", "sellers" (a seller becomes known for another item), "entrance_needs" (the next level's entrance needs something else), "gems N" (N gems are held), or "ticks N" (N ticks pass, at most 3000). Anything else, or none, sets the goal aside for 3000 ticks."""
 
 
 def node_state(node: Node, rd: Reading) -> dict[str, str]:
@@ -80,21 +88,37 @@ def node_state(node: Node, rd: Reading) -> dict[str, str]:
     }
 
 
-def question(node: Node, rd: Reading, reference_sections: str = "") -> list[dict[str, Any]]:
-    """The messages for the one question about ``node``: the game reference,
-    the measured facts and the contract (cached), then the node."""
+def watch_lines(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, str]:
+    """The state lines a block may wait on: each changes only when the situation does."""
+    carried = sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values())
+    return {
+        "held": ", ".join(carried),
+        "levels_cleared": ", ".join(str(n) for n in sorted(w.levels_cleared or ())),
+        "sellers": ", ".join(sorted(codes_with_sellers(w, kb, sold_codes()))),
+        "entrance_needs": r.need_of_next_level(w, kb) or "",
+    }
+
+
+def question_prefix(reference_sections: str = "") -> str:
+    """The cached prefix: the game reference, the measured facts, the contract."""
     parts = [reference_text(reference_sections).strip()]
     notes = game_notes_text().strip()
     if notes:
         parts.append("# Measured facts (docs/GAME_NOTES.md)\n\n" + notes)
     parts.append(CONTRACT)
+    return "\n\n".join(p for p in parts if p) + "\n"
+
+
+def question(node: Node, rd: Reading, reference_sections: str = "") -> list[dict[str, Any]]:
+    """The messages for the one question about ``node``: the game reference,
+    the measured facts and the contract (cached), then the node."""
     own = node.op(node, rd)
     lines = [f"goal: {node.title}", "state:"]
     lines += [f"- {k}: {v}" for k, v in node_state(node, rd).items()]
     lines.append(f"ops: {', '.join(node.ops)}")
     lines.append(f"the tree's op: {json.dumps(own, sort_keys=True) if own else 'none'}")
     return [
-        {"role": "system", "content": "\n\n".join(p for p in parts if p) + "\n", "cache": True},
+        {"role": "system", "content": question_prefix(reference_sections), "cache": True},
         {"role": "user", "content": "\n".join(lines)},
     ]
 
@@ -133,27 +157,47 @@ def read_reply(raw: str, ops: tuple[str, ...]) -> Reply:
     return Reply(op=op, why=why)
 
 
+def _count(text: str) -> int | None:
+    try:
+        n = int(text)
+    except ValueError:
+        return None
+    return n if n > 0 else None
+
+
 def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading) -> GoalOp | None:
     """Carry a reply out on the tree: an op is returned to run; a ``cannot``
-    blocks the node with its reason and the part of its state it waits on."""
+    blocks the node with its reason and what it waits on (``UNTIL_LINES``,
+    ``gems N``, ``ticks N``); anything else it names is dropped."""
     if reply.op is not None:
         return reply.op
-    state = node_state(node, rd)
-    named = reply.until if reply.until in state else DEFAULT_UNTIL
-    blocks.mark(node.key, reply.cannot, rd.world.tick, named=named, was=state[named])
+    name, _, arg = reply.until.partition(" ")
+    now, ticks, named, was = rd.world.tick, BLOCK_TICKS, "", ""
+    if name in UNTIL_LINES and not arg:
+        named, was = name, watch_lines(rd.world, rd.kb)[name]
+    elif name == GEMS and _count(arg) is not None:
+        named, was = GEMS, arg
+    elif name == TICKS and _count(arg) is not None:
+        ticks = min(BLOCK_TICKS, _count(arg))
+    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was)
     return None
 
 
-def lift_changed(blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None, root: Node) -> list[str]:
-    """Lift every block whose named state reads otherwise now; the keys lifted."""
-    rd = Reading(world, kb)
-    lifted = []
+def lifts(block: Block, w: WorldModel, lines: dict[str, str]) -> bool:
+    """Whether what ``block`` waits on has come: its line reads otherwise, or the gems are held."""
+    if block.named == GEMS:
+        return (w.gems or 0) >= int(block.was)
+    return block.named in lines and lines[block.named] != block.was
+
+
+def lift_changed(blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None) -> list[str]:
+    """Lift every block whose awaited state has come; the keys lifted."""
+    lifted, lines = [], None
     for key, block in list(blocks.items()):
-        try:
-            node = find(key, root)
-        except KeyError:
+        if not block.named:
             continue
-        if block.named and node_state(node, rd).get(block.named) != block.was:
+        lines = lines if lines is not None else watch_lines(world, kb)
+        if lifts(block, world, lines):
             blocks.lift(key)
             lifted.append(key)
     return lifted
@@ -176,6 +220,7 @@ class Planner:
     backoff: Backoff = field(default_factory=Backoff)
     calls: int = 0
     last_error: str = ""
+    _tokens: int = 0  # the resolved tokens_per_min
 
     @classmethod
     def off(cls) -> Planner:
@@ -207,14 +252,20 @@ class Planner:
             return None
         return check_client(self.client, self.provider)
 
-    def ask(self, node: Node, rd: Reading) -> Reply | None:
+    def ready(self) -> bool:
+        """A call may go out now: a planner, no backoff, budget left."""
         if self.client is None:
+            return False
+        now = self.clock()
+        if not self._tokens:
+            self._tokens = self.tokens_per_min or default_tokens_per_min(question_prefix(self.reference_sections))
+        return not self.backoff.waiting(now) and not self.budget.limit_reached(now, self.calls_per_min, self._tokens)
+
+    def ask(self, node: Node, rd: Reading) -> Reply | None:
+        if self.client is None or not self.ready():
             return None
         messages = question(node, rd, self.reference_sections)
         now = self.clock()
-        tokens = self.tokens_per_min or default_tokens_per_min(messages[0]["content"])
-        if self.backoff.waiting(now) or self.budget.limit_reached(now, self.calls_per_min, tokens):
-            return None
         self.calls += 1
         self.budget.charge(now, messages)
         try:

@@ -9,6 +9,7 @@ from unittest import mock
 from agentrealm_adk import config, llm
 from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.travel.knowledge import record_shop_cell
 from agentrealm_agent.strategist import Strategist, StrategistConfig
 from ladder import goals
 from ladder.ask import CONTRACT, Planner, Reply, answer, lift_changed, node_state, question, read_reply
@@ -129,28 +130,47 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(answer(turn.goal, Reply(op={"op": "travel", "to": "town"}), blocks, turn.reading), {"op": "travel", "to": "town"})
         self.assertEqual(blocks, {})
 
-    def test_a_block_lifts_when_the_state_it_named_changes(self):
+    def block(self, until: str):
         w, kb = short_of_a_raft()
-        blocks, root = Blocks(), goals.tree()
-        turn = walk(w, kb, blocks, root)
-        answer(turn.goal, Reply(cannot="not enough gems for the raft and a potion", until="gems"), blocks, turn.reading)
-        w.pos = (6, 6)  # another part of the state changing lifts nothing
-        self.assertEqual(lift_changed(blocks, w, kb, root), [])
-        self.assertIn("requires", blocks)
-        w.gems = 70
-        self.assertEqual(lift_changed(blocks, w, kb, root), ["requires"])
-        self.assertEqual(walk(w, kb, blocks, root).goal.key, "requires")
+        blocks = Blocks()
+        turn = walk(w, kb, blocks)
+        answer(turn.goal, Reply(cannot="not now", until=until), blocks, turn.reading)
+        return w, kb, blocks
 
-    def test_a_block_naming_no_state_watches_the_nodes_readiness(self):
-        w, kb = short_of_a_raft()
-        blocks, root = Blocks(), goals.tree()
-        turn = walk(w, kb, blocks, root)
-        answer(turn.goal, Reply(cannot="no way to the shop", until="the weather"), blocks, turn.reading)
-        self.assertEqual(blocks["requires"].named, "readiness")
-        w.gems = 70  # the need is the same
-        self.assertEqual(lift_changed(blocks, w, kb, root), [])
-        w.held_supplies = [InventorySupply(9, "raft")]  # the need is met: its readiness reads otherwise
-        self.assertEqual(lift_changed(blocks, w, kb, root), ["requires"])
+    def test_a_block_lifts_when_what_is_held_changes(self):
+        w, kb, blocks = self.block("held")
+        self.assertEqual(blocks["requires"].named, "held")
+        w.held_supplies = [InventorySupply(9, "raft")]
+        self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+        self.assertEqual(blocks, {})
+
+    def test_a_block_on_gems_lifts_once_that_many_are_held(self):
+        w, kb, blocks = self.block("gems 70")
+        w.gems = 69
+        self.assertEqual(lift_changed(blocks, w, kb), [])
+        w.gems = 70
+        self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+
+    def test_a_block_lifts_when_a_seller_becomes_known(self):
+        w, kb, blocks = self.block("sellers")
+        record_shop_cell(kb, 1, (30, 30), "small_potion", 5)
+        self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+
+    def test_a_block_never_waits_on_a_line_that_changes_every_step_or_hit(self):
+        for until in ("where", "health", "readiness", "the weather", "gems", "gems lots", ""):
+            with self.subTest(until=until):
+                w, kb, blocks = self.block(until)
+                self.assertEqual((blocks["requires"].named, blocks["requires"].until), ("", w.tick + goals.BLOCK_TICKS))
+                w.pos, w.health, w.gems = (9, 9), 1, 500
+                w.held_supplies = [InventorySupply(9, "raft")]
+                self.assertEqual(lift_changed(blocks, w, kb), [])  # held to its expiry
+                self.assertIn("requires", blocks)
+
+    def test_a_block_on_ticks_is_a_shorter_expiry(self):
+        w, kb, blocks = self.block("ticks 50")
+        self.assertEqual(blocks["requires"].until, w.tick + 50)
+        _, _, longer = self.block("ticks 99999")
+        self.assertEqual(longer["requires"].until, w.tick + goals.BLOCK_TICKS)
 
 
 class SharedPlumbingTest(unittest.TestCase):
@@ -234,7 +254,8 @@ class PlayTest(unittest.TestCase):
         r = self.runner(p, w, kb)
         self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
         self.assertIn("goal: hold what it requires", fake.messages[0][1]["content"])
-        r.goal_op()  # the same goal: not asked again
+        for _ in range(5):
+            r.goal_op()  # the same goal and state: not asked again
         self.assertEqual(len(fake.messages), 1)
 
     def test_a_cannot_moves_the_next_walk_on(self):
@@ -245,21 +266,70 @@ class PlayTest(unittest.TestCase):
         self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
         self.assertIn("goal: stay alive", fake.messages[1][1]["content"])
 
+    def test_a_cannot_is_not_asked_again_on_the_next_tick(self):
+        w = geared()  # the level is the goal, and nothing under it to work
+        p, fake = planner('{"cannot": "the door will not open"}')
+        r = self.runner(p, w, knowledge())
+        for _ in range(5):
+            self.assertIsNone(r.goal_op())
+            w.tick += 1
+        self.assertEqual(len(fake.messages), 1)
+
+    def test_a_new_state_asks_again(self):
+        w, kb = short_of_a_raft()
+        p, fake = planner('{"op": {"op": "travel", "to": "town"}}', '{"op": {"op": "buy", "code": "raft"}}')
+        r = self.runner(p, w, kb)
+        r.goal_op()
+        record_shop_cell(kb, 1, (30, 30), "small_potion", 5)  # a seller known for another item
+        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertEqual(len(fake.messages), 2)
+
+    def test_after_a_failed_ask_it_asks_again_only_past_the_backoff(self):
+        w, kb = short_of_a_raft()
+        p, fake = planner(RuntimeError("down"), '{"op": {"op": "travel", "to": "town"}}')
+        r = self.runner(p, w, kb)
+        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})  # the tree's op meanwhile
+        r.goal_op()
+        self.assertEqual(len(fake.messages), 1)
+        p.clock.now = p.backoff.retry_at
+        self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
+
     def test_with_no_answer_the_trees_op_runs(self):
         w, kb = short_of_a_raft()
         r = self.runner(Planner.off(), w, kb)
         self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
 
-    def test_an_op_naming_a_cell_is_walked_to(self):
-        w = geared()
+    def open_ground(self, w):
         for x in range(0, 15):
             for y in range(0, 10):
                 w.view.tiles[(x, y)] = "grass"
+        return w
+
+    def test_an_op_naming_a_cell_is_walked_to(self):
+        w = self.open_ground(geared())
         r = self.runner(Planner.off(), w, knowledge())  # the tree's op: enter the level at its door
         d = r.decide()
         self.assertEqual(d.mode, "Goal")
         self.assertEqual(d.intents, [{"verb": "SetPosition", "x": 6, "y": 4}])
         self.assertEqual(path_to(w, (10, 4), set())[-1], (10, 4))
+
+    def test_an_op_reached_is_done_and_never_walked_back_to(self):
+        w = self.open_ground(geared(pos=(9, 4)))  # beside the level's door
+        r = self.runner(Planner.off(), w, knowledge())
+        self.assertEqual(r.decide().intents, [{"verb": "SetPosition", "x": 10, "y": 4}])
+        w.pos = (10, 4)
+        self.assertNotEqual(r.decide().mode, "Goal")  # done there: Stan explores
+        w.pos = (11, 4)  # explore stepped her off it
+        for _ in range(3):
+            self.assertNotEqual(r.decide().mode, "Goal")
+
+    def test_explore_areas_point_is_a_region_not_a_cell_to_walk_back_to(self):
+        w = self.open_ground(geared(pos=(3, 3)))
+        r = self.runner(Planner.off(), w, None)  # no entrance known: the tree explores from where she stands
+        self.assertEqual(r.goal_op()["op"], "explore_area")
+        for pos in ((4, 3), (5, 3)):
+            w.pos = pos
+            self.assertNotEqual(r.decide().mode, "Goal")
 
 
 if __name__ == "__main__":

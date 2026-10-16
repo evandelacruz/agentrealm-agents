@@ -23,16 +23,16 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import DetourState, detour_find
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.hostile_ground import danger, known_reach
+from agentrealm_adk.hostile_ground import danger, known_reach
 from agentrealm_agent.states.gather_safe import gather_ground, route_clear
-from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
+from agentrealm_adk.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
 GUARD = ("npc", "fake_guard")
@@ -295,7 +295,7 @@ class DetourKeepsClearTest(unittest.TestCase):
         m.goal, m.path = "travel", [(x, 10) for x in range(13, 36)]
         c = self.ctx(m, [{"op": "travel", "to": "point", "x": 35, "y": 10}])
         # Only the route is under test: ground near the post is not priced here.
-        with mock.patch("agentrealm_agent.hostile_ground.near_reach", return_value=[]):
+        with mock.patch("agentrealm_adk.hostile_ground.near_reach", return_value=[]):
             self.assertEqual(detour_find(w, c), find)  # its ground is clear
             DetourState().act(w, c)
         self.assertIsNone(m.detour)

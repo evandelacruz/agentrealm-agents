@@ -3,14 +3,14 @@
 import json
 import unittest
 
-from agentrealm_agent.break_memory import record_attempt
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.oddities import ODDITIES_KEY, RETURN_SECONDS, find, oddities_line
+from agentrealm_adk.break_memory import record_attempt
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.oddities import ODDITIES_KEY, RETURN_SECONDS, find, oddities_line
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.strategist import build_prompt, system_prompt
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 TICK_HZ = 10
 

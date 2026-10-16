@@ -23,14 +23,14 @@ REPO = Path(__file__).resolve().parents[1]
 PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
-from agentrealm_agent import config  # noqa: E402
-from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
-from agentrealm_agent.client import Client  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
-from agentrealm_agent.supplies import load_for_run as load_supplies  # noqa: E402
+from agentrealm_adk import config  # noqa: E402
+from agentrealm_adk.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
+from agentrealm_adk.client import Client  # noqa: E402
+from agentrealm_adk.knowledge_base import KnowledgeBase, load as load_knowledge, save as save_knowledge  # noqa: E402
+from agentrealm_adk.supplies import load_for_run as load_supplies  # noqa: E402
 from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # noqa: E402
 from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, add_park_argument, planner_for  # noqa: E402
-from agentrealm_agent.park import ABORT_JOIN_SECONDS, install_stop_signals  # noqa: E402
+from agentrealm_adk.park import ABORT_JOIN_SECONDS, install_stop_signals  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 

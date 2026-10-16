@@ -13,13 +13,13 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_warp
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_warp
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.world import Entity, Sighting, WorldModel
+from agentrealm_adk.world import Entity, Sighting, WorldModel
 from tests.test_fording import LiveLevelMapTest
 from tests.test_hostile_reach import POLICY, step_to
 from tests.test_level_order import kb_with
@@ -35,7 +35,7 @@ def live(health: int = 10, seen: bool = True, held=("bronze_sword",)) -> WorldMo
     (4–6, 3–5), (11–12, 4–6) and (6–8, 8–10), tile at (7, 1), doors at (7, 0)
     and (7, 11); the raft armed, a bogmaw at its post (6, 5) that has come
     out 4 cells for us, so the ground it holds covers every way to (7, 0)."""
-    from agentrealm_agent.item_table import InventorySupply
+    from agentrealm_adk.item_table import InventorySupply
 
     w = LiveLevelMapTest().live(START, 4, LiveLevelMapTest.ROWS)
     w.worn_codes = {}
@@ -124,11 +124,11 @@ class LandsToFightTest(unittest.TestCase):
         within its range on water, and never asks."""
         from unittest import mock
 
-        from agentrealm_agent.fording import on_water
+        from agentrealm_adk.fording import on_water
 
         w = live()
         c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
-        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+        with mock.patch("agentrealm_adk.pathing.covers_pass", return_value=False):
             out = dispatch(w, c)
             self.assertIn("land at", out.reason)
             for _ in range(30):
@@ -150,14 +150,14 @@ class LandsToFightTest(unittest.TestCase):
         the sword (A133) and closes."""
         from unittest import mock
 
-        from agentrealm_agent.fording import on_water
+        from agentrealm_adk.fording import on_water
         from agentrealm_agent.states.base import op_walk
         from agentrealm_agent.states.way import land_to_fight
 
         w = live()
         w.pos = (3, 6)  # on water, 3 from the bogmaw: out of its range
         c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
-        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+        with mock.patch("agentrealm_adk.pathing.covers_pass", return_value=False):
             out = land_to_fight(w, c, EXIT, "Travel", op_walk(w, c)[2])
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 4, "y": 5}], out.reason)
         step_to(w, c.memory, (4, 5))
@@ -171,7 +171,7 @@ class LandsToFightTest(unittest.TestCase):
 
         w = live()
         c = ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
-        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False), mock.patch(
+        with mock.patch("agentrealm_adk.pathing.covers_pass", return_value=False), mock.patch(
             "agentrealm_agent.states.way.would_fight", return_value=False
         ):
             self.assertFalse(dispatch(w, c).intents)
@@ -190,7 +190,7 @@ class LandToFightExitsTest(unittest.TestCase):
         from agentrealm_agent.states.way import land_to_fight
 
         c = c or ctx({"op": "travel", "to": "point", "x": EXIT[0], "y": EXIT[1]})
-        with mock.patch("agentrealm_agent.pathing.covers_pass", return_value=False):
+        with mock.patch("agentrealm_adk.pathing.covers_pass", return_value=False):
             return land_to_fight(w, c, EXIT, "Travel", op_walk(w, c)[2])
 
     def test_it_lands_for_the_one_hostile_in_view(self):
@@ -229,7 +229,7 @@ class WhatBlocksTest(unittest.TestCase):
 
         w = live()
         c = ctx({"op": "travel", "to": "point", "x": 4, "y": 3})
-        with mock.patch("agentrealm_agent.pathing.would_fight", return_value=True):
+        with mock.patch("agentrealm_adk.pathing.would_fight", return_value=True):
             self.assertIn("hostile bogmaw 200 at 6,5", what_blocks(w, c, (4, 3)))
 
     def test_a_remembered_hostile_is_named_with_where_it_was_last_seen(self):
@@ -245,7 +245,7 @@ class RememberedGroundStillBarsTest(unittest.TestCase):
     def test_with_a_way_round_the_walk_keeps_out_of_it(self):
         """A remembered hostile's ground is passed only when it is the only
         way: a walk with a way round keeps to it, as before."""
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.pathing import op_walk_sets
 
         w = live(seen=False)
         w.sightings[HOSTILE].reach = 0  # its post's ground alone: (3..9, 2..8)

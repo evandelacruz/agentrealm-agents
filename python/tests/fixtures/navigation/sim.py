@@ -13,18 +13,18 @@ import random
 from dataclasses import dataclass, field
 
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import view_from_kb
-from agentrealm_agent.navigation import learn_step_rejection
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.navigation.stuck import active as nav_active
-from agentrealm_agent.navigation.stuck import on_break_opened
-from agentrealm_agent.break_memory import capabilities_for_code, record_attempt
-from agentrealm_agent.item_table import use_target_block
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import view_from_kb
+from agentrealm_adk.navigation import learn_step_rejection
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.navigation.stuck import active as nav_active
+from agentrealm_adk.navigation.stuck import on_break_opened
+from agentrealm_adk.break_memory import capabilities_for_code, record_attempt
+from agentrealm_adk.item_table import use_target_block
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.world import DOORS, WALKABLE, Entity, MapView, Passage, Pos, WorldModel, chebyshev
+from agentrealm_adk.world import DOORS, WALKABLE, Entity, MapView, Passage, Pos, WorldModel, chebyshev
 
 from .grids import GLYPHS, Scenario
 

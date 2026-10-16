@@ -19,14 +19,14 @@ from __future__ import annotations
 import json
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.hostile_ground import POST_REACH_CAP, danger, hostiles_within, known_reach
-from agentrealm_agent.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.hostile_ground import POST_REACH_CAP, danger, hostiles_within, known_reach
+from agentrealm_adk.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.states.gather import gather_outcome
-from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_FORGET_STRENGTH, POST_HOLD_STRENGTH, Entity, WorldModel
+from agentrealm_adk.world import EMPTY_POST_HALF_LIFE_TICKS, POST_FORGET_STRENGTH, POST_HOLD_STRENGTH, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"
@@ -39,8 +39,8 @@ def loses(w, policy, params) -> bool:
     """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
     import dataclasses
 
-    from agentrealm_agent.engagement import would_fight
-    from agentrealm_agent.survival import combat_group
+    from agentrealm_adk.engagement import would_fight
+    from agentrealm_adk.survival import combat_group
 
     fight = dataclasses.replace(policy, on_hostile="fight")
     return bool(combat_group(w, fight)) and not would_fight(w, fight, params)

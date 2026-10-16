@@ -2,14 +2,14 @@
 
 import unittest
 
-from agentrealm_agent.threat import (
+from agentrealm_adk.threat import (
     UNMEASURED_DEFAULT,
     ThreatTable,
     absorb_damaged,
     type_key_for_entity,
     type_key_from_damaged,
 )
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def hit(kind, sid, amount):

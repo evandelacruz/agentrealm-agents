@@ -12,13 +12,14 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import __main__ as cli
-from agentrealm_agent import acceptance_smoke, config, runner
+from agentrealm_adk import config
+from agentrealm_agent import acceptance_smoke, runner
 from agentrealm_agent.acceptance import ParkSplit
 from agentrealm_agent.brain import Memory
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.executor.movement import step_landing
-from agentrealm_agent.park import (
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.executor.movement import step_landing
+from agentrealm_adk.park import (
     PARK_ABORTED,
     PARK_DIED,
     PARK_DOWNED,
@@ -29,8 +30,8 @@ from agentrealm_agent.park import (
     install_stop_signals,
 )
 from agentrealm_agent.states.dispatch import PARK_STATES
-from agentrealm_agent.world import WorldModel
-from agentrealm_agent.zone_discovery import ZoneFact
+from agentrealm_adk.world import WorldModel
+from agentrealm_adk.zone_discovery import ZoneFact
 
 MAP = 7
 SAFE = (6, 0)

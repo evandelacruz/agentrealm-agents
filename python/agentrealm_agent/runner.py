@@ -9,35 +9,21 @@ import time
 from dataclasses import dataclass
 from functools import partial
 
-from .break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
-from .gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
-from .brain import (
-    Decision,
-    Memory,
-    choose_call,
-    cornered_decision,
-    decide,
-    path_blockers,
-    path_threats,
-    play_context,
-    remaining_path_stale,
-    remaining_walk_cells,
-    walkable_prefix,
-)
-from .navigation.rejection import learn_step_rejection, on_block_changed
-from .navigation.stuck import active as nav_active
-from .navigation.stuck import lapsed as lapsed_give_ups
-from .stalled import lapse as lapse_stalled, retry_basis
-from .navigation.stuck import on_break_opened, on_break_tried
-from .navigation.stuck import on_rejection as nav_on_rejection
-from .navigation.stuck import on_step as nav_on_step
-from .client import ApiError, Client
-from .pacer import WINDOW_MARGIN, Pacer, pacer_of
-from .config import CharacterConfig
-from .directives import DirectivesWatch, use_blocked_by_never_attack
-from .pathing import goto_satisfied
-from .plan import Plan, parse_directives_goal
-from .item_table import (
+from agentrealm_adk.break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
+from agentrealm_adk.gem_yield import CUT_BLOCKS, GemYieldTracker, take_raises_gems
+from agentrealm_adk.navigation.rejection import learn_step_rejection, on_block_changed
+from agentrealm_adk.navigation.stuck import active as nav_active
+from agentrealm_adk.navigation.stuck import lapsed as lapsed_give_ups
+from agentrealm_adk.stalled import lapse as lapse_stalled, retry_basis
+from agentrealm_adk.navigation.stuck import on_break_opened, on_break_tried
+from agentrealm_adk.navigation.stuck import on_rejection as nav_on_rejection
+from agentrealm_adk.navigation.stuck import on_step as nav_on_step
+from agentrealm_adk.client import ApiError, Client
+from agentrealm_adk.pacer import WINDOW_MARGIN, Pacer, pacer_of
+from agentrealm_adk.config import CharacterConfig
+from agentrealm_adk.directives import DirectivesWatch, use_blocked_by_never_attack
+from agentrealm_adk.pathing import goto_satisfied
+from agentrealm_adk.item_table import (
     AppliedUse,
     absorb_attack_range,
     absorb_damaged_worn,
@@ -47,13 +33,13 @@ from .item_table import (
     use_npc_type,
     use_target_block,
 )
-from .knowledge_base.death_chests import load_death_chests, save_death_chests
-from .knowledge_base.hostiles import load_hostiles, save_hostiles
-from .knowledge_base import KnowledgeBase
-from .knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
-from .level_order import note_door_step, settle_entry
-from .equip import note_equip_result, sync_refusals
-from .loot import (
+from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
+from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
+from agentrealm_adk.level_order import note_door_step, settle_entry
+from agentrealm_adk.equip import note_equip_result, sync_refusals
+from agentrealm_adk.loot import (
     learn_chest_upgrade,
     learn_life_code,
     learn_loot_rejection,
@@ -61,7 +47,7 @@ from .loot import (
     save_carried_chest,
     supply_code_for_take,
 )
-from .executor.supply_refusals import (
+from agentrealm_adk.executor.supply_refusals import (
     AppliedSelfUse,
     NoopUse,
     Refusal,
@@ -77,14 +63,13 @@ from .executor.supply_refusals import (
     refusal_situation,
     used_up,
 )
-from .fording import ford_gate, loadout_memory, note_would_strand
-from .healing import absorb_heal_pending, note_heal_pending
-from .shop import note_shop_result
-from .supplies import heals, is_food
-from .travel.resolve import given_up_travel, travel_given_up
-from .travel.knowledge import record_shop_cell, sync_entrances, sync_town
-from .travel.strength import loadout_key
-from .executor import (
+from agentrealm_adk.fording import ford_gate, loadout_memory, note_would_strand
+from agentrealm_adk.healing import absorb_heal_pending, note_heal_pending
+from agentrealm_adk.supplies import heals, is_food
+from agentrealm_adk.travel.resolve import given_up_travel, travel_given_up
+from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from agentrealm_adk.travel.strength import loadout_key
+from agentrealm_adk.executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
@@ -97,17 +82,13 @@ from .executor import (
     trim_to_horizon,
     wait,
 )
-from .executor.held_queue import STEP_DOUBT, held_queue_matches, open_step, possible_positions, unconfirmed_send
-from .acceptance import AcceptanceHooks
-from .poll_cadence import calm_poll_interval, is_urgent
-from .run_metrics import LevelTimer, tick_trace_extras
-from .world import DOORS, Passage, Pos, WorldModel, terrain_cells
-from .clues import note_read_clue, note_scroll_clue, note_spoken_clue
-from .sellers import lapse_not_sold
-from .states.dispatch import probe_held_queue
-from .states.greet import GREET_STATE
-from .states.intents import is_self_use
-from .investigation import (
+from agentrealm_adk.executor.held_queue import STEP_DOUBT, held_queue_matches, open_step, possible_positions, unconfirmed_send
+from agentrealm_adk.poll_cadence import calm_poll_interval, is_urgent
+from agentrealm_adk.run_metrics import LevelTimer, tick_trace_extras
+from agentrealm_adk.world import DOORS, Passage, Pos, WorldModel, terrain_cells
+from agentrealm_adk.clues import note_read_clue, note_scroll_clue, note_spoken_clue
+from agentrealm_adk.sellers import lapse_not_sold
+from agentrealm_adk.investigation import (
     mark_cell_read,
     mark_npc_greeted,
     mark_npc_spoken,
@@ -115,7 +96,7 @@ from .investigation import (
     read_supply_key,
     say_key,
 )
-from .scroll_investigation import (
+from agentrealm_adk.scroll_investigation import (
     codes_from_entities_payload,
     codes_from_inventory_supplies,
     log_supply_codes_seen,
@@ -125,8 +106,8 @@ from .scroll_investigation import (
     scroll_subtype_codes,
     supply_code_on_world,
 )
-from .zone_discovery import apply_town, apply_zone, zone_failed
-from .park import (
+from agentrealm_adk.zone_discovery import apply_town, apply_zone, zone_failed
+from agentrealm_adk.park import (
     PARK_ABORTED,
     PARK_DIED,
     PARK_DOWNED,
@@ -138,10 +119,30 @@ from .park import (
     no_path_left,
     parked,
 )
-from .survival import flee_from, recently_attacked, retreat_goal
-from .memory import queue_signal
+from agentrealm_adk.survival import flee_from, recently_attacked, retreat_goal
+from agentrealm_adk.memory import queue_signal
+from agentrealm_adk.trace import Trace, fmt_intent, oscillation_detail, tick_detail
+
+from .brain import (
+    Decision,
+    Memory,
+    choose_call,
+    cornered_decision,
+    decide,
+    path_blockers,
+    path_threats,
+    play_context,
+    remaining_path_stale,
+    remaining_walk_cells,
+    walkable_prefix,
+)
+from .plan import Plan, parse_directives_goal
+from .shop import note_shop_result
+from .acceptance import AcceptanceHooks
+from .states.dispatch import probe_held_queue
+from .states.greet import GREET_STATE
+from .states.intents import is_self_use
 from .strategist import Strategist, same_ops
-from .trace import Trace, fmt_intent, oscillation_detail, tick_detail
 
 # Ticks past a queue's own length to wait for its finished_queue before giving up.
 QUEUE_RESULT_SLACK = 2

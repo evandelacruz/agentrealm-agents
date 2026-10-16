@@ -3,17 +3,17 @@
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import CostGridParams
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import CostGridParams
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.level import inside_level
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 
 def grid(rows: list[str], at=(0, 0), map_id=1, perception=5) -> WorldModel:
@@ -68,14 +68,14 @@ class InsideLevelTest(unittest.TestCase):
         w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
         for bad in ("2", "deep", 1.5, True, [1]):
             with self.subTest(level=bad):
-                with self.assertLogs("agentrealm_agent.world", level="WARNING"):
+                with self.assertLogs("agentrealm_adk.world", level="WARNING"):
                     w.apply_position({"map_id": 9, "x": 3, "y": 3, "level": bad})
                 self.assertEqual((w.map_id, w.pos, w.map_level), (9, (3, 3), 2), "keeps the last good level")
 
     def test_malformed_level_in_delta_does_not_raise(self):
         w = grid(["."], map_id=9)
         w.apply_position({"map_id": 9, "x": 0, "y": 0, "level": 2})
-        with self.assertLogs("agentrealm_agent.world", level="WARNING"):
+        with self.assertLogs("agentrealm_adk.world", level="WARNING"):
             w.apply_observation({"version": 11, "delta": {"position": {"map_id": 9, "x": 2, "y": 2, "level": "deep"}}})
         self.assertEqual((w.pos, w.map_level), ((2, 2), 2))
 

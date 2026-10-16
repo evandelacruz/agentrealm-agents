@@ -12,23 +12,23 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import choose_call
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import cost_path
-from agentrealm_agent.pathing import grid_params, nav_search
-from agentrealm_agent.survival import LOSING_NAV, RETREAT_NAV
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.pathing import grid_params, nav_search
+from agentrealm_adk.survival import LOSING_NAV, RETREAT_NAV
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.retreat import RETREAT_PROBE_TICKS
-from agentrealm_agent.travel import sync_town
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact, chebyshev
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.travel import sync_town
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact, chebyshev
+from agentrealm_adk.zone_discovery import apply_zone
 
 MAP = 1
 
@@ -178,7 +178,7 @@ class RetreatCorridorTest(unittest.TestCase):
 
     def test_a_long_retreat_does_not_take_a_corridor_another_plan_kept(self):
         self.stale_corridor_via_the_far_gap("safe")
-        with mock.patch("agentrealm_agent.navigation.planner.FINE_NODE_BUDGET", 50):
+        with mock.patch("agentrealm_adk.navigation.planner.FINE_NODE_BUDGET", 50):
             self.assertEqual(dispatch(self.w, self.c).state, "Retreat")
         path = self.c.memory.path
         self.assertTrue(path and all(p[1] <= 3 for p in path), path)
@@ -186,7 +186,7 @@ class RetreatCorridorTest(unittest.TestCase):
     def test_losing_ground_plans_its_own_corridor(self):
         self.stale_corridor_via_the_far_gap(RETREAT_NAV)
         m = self.c.memory
-        with mock.patch("agentrealm_agent.navigation.planner.FINE_NODE_BUDGET", 50):
+        with mock.patch("agentrealm_adk.navigation.planner.FINE_NODE_BUDGET", 50):
             dispatch(self.w, self.c)
             self.w.tick += RETREAT_PROBE_TICKS
             hit(self.w)

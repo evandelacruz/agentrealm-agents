@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import random
 
-from ..config import Policy
-from ..healing import hurt
-from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
-from ..navigation import stuck as nav_stuck
-from ..pathing import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.healing import hurt
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import (
     plan_sets,
     attempt_plan,
     clue_redirects,
@@ -36,13 +36,14 @@ from ..pathing import (
     path_owned_by,
     replan,
 )
+from agentrealm_adk.navigation.planner import HOSTILE_DANGER_RADIUS
+from agentrealm_adk.survival import approaching, is_hostile
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+from agentrealm_adk.hostile_ground import is_safe_ish
+
 from ..plan import OP_STATE, GoalOp
-from ..navigation.planner import HOSTILE_DANGER_RADIUS
-from ..survival import approaching, is_hostile
-from ..world import Pos, WorldModel, chebyshev
 from .ask import ask_the_planner, op_key
 from .base import PlayContext, State, StateOutcome, my_op, top_executor, top_op
-from ..hostile_ground import is_safe_ish
 from .intents import set_position
 from .way import break_due
 

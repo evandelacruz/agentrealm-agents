@@ -10,7 +10,7 @@ What the agent needs to know to play Agent Realm. Every fact names its source:
 | **SM** | [State machine agent guide](https://agentrealm.gg/guides/state-machine) |
 | **Tick** | The `tick` tool's description and intent schema on the Agent Realm MCP server (one call to `POST /characters/{id}/tick`) |
 | **Obs** | Observed in play, on a point the published docs are silent on (the Manual, the API page, the guides, the Supplies reference). Unless it names a run, by the observer character (Olympuff) on 2026-10-04, ticks 1835171–1839533. An observation the docs now state is cited to them instead (A152) |
-| **SR** | The Manual's Supplies reference (M §11 Supplies reference), also served as [`supplies.json`](https://agentrealm.gg/docs/supplies.json) and bundled as `python/agentrealm_agent/reference/supplies.json` |
+| **SR** | The Manual's Supplies reference (M §11 Supplies reference), also served as [`supplies.json`](https://agentrealm.gg/docs/supplies.json) and bundled as `python/agentrealm_adk/reference/supplies.json` |
 | **CL** | [Changelog](https://agentrealm.gg/docs/changelog), and the server's change notes behind it (saims B136, B137, B139: the update live on 2026-10-10; B138 capabilities, live on 2026-10-11; the Manual's core play rules, 2026-10-12) |
 
 Checked against the published docs on 2026-10-12 (A152): every fact the Manual states is cited to it, and what it contradicted is corrected. Where the agent's code still contradicts or works around a stated rule, [`observations/A152_manual_sync.md`](observations/A152_manual_sync.md) lists it.

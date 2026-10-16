@@ -3,24 +3,24 @@
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.fragments import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.fragments import (
     compose_supply_ids,
     fragment_set_complete,
     holds_whole,
 )
-from agentrealm_agent.item_table import (
+from agentrealm_adk.item_table import (
     FragmentMeta,
     InventorySupply,
     parse_fragment,
     supplies_from_list,
 )
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan, goal_done
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.solve import SolveState, solve_outcome
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 
 def grid(rows: list[str], at=(0, 0)) -> WorldModel:

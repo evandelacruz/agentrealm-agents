@@ -21,15 +21,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agentrealm_adk.break_memory import attempt_failed, attempt_open
+from agentrealm_adk.config import Policy
+from agentrealm_adk.investigation import SPEECH_RANGE, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
+from agentrealm_adk.item_table import use_target_block
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+
 from .acceptance_run import FULL_RUN_FRACTION, TimedRunHooks  # FULL_RUN_FRACTION: re-exported for the smoke script
-from .break_memory import attempt_failed, attempt_open
-from .config import Policy
-from .investigation import SPEECH_RANGE, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
-from .item_table import use_target_block
-from .knowledge_base import KnowledgeBase
-from .memory import Memory
 from .plan import CAPABILITIES
-from .world import Pos, WorldModel, chebyshev
 
 TARGET_SECONDS = 3600.0
 

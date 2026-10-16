@@ -108,18 +108,18 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Collection, Mapping, Protocol
 
-from .directives import Directives
-from .travel.resolve import given_up_travel, travel_dest, travel_given_up
-from .travel.strength import StrengthBracket
-from .discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
-from .sellers import codes_with_sellers, refuse_unsold, sellers_line
-from .level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, level_pending, order_line, refuse_barred
-from .entrance_needs import CLUE_NEEDS, CLUE_WHY, NEEDS, record_needs, refuse_unmet, unmet_need
-from .knowledge_base import KnowledgeBase
-from .memory import Memory
-from .navigation import entrance_routes
-from .gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
-from .healing import (
+from agentrealm_adk.directives import Directives
+from agentrealm_adk.travel.resolve import given_up_travel, travel_dest, travel_given_up
+from agentrealm_adk.travel.strength import StrengthBracket
+from agentrealm_adk.discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
+from agentrealm_adk.sellers import codes_with_sellers, refuse_unsold, sellers_line
+from agentrealm_adk.level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, level_pending, order_line, refuse_barred
+from agentrealm_adk.entrance_needs import CLUE_NEEDS, CLUE_WHY, NEEDS, record_needs, refuse_unmet, unmet_need
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import entrance_routes
+from agentrealm_adk.gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
+from agentrealm_adk.healing import (
     FOOD_REACH,
     POTION_RULE,
     food_near,
@@ -130,8 +130,8 @@ from .healing import (
     supply_matches,
     walk_seconds,
 )
-from .equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
-from .supplies import (
+from agentrealm_adk.equip import CUT, damage_per_second, does_job, hunting_ceiling, loadout_strength, weapon_rank
+from agentrealm_adk.supplies import (
     BLOCK_FOOD,
     armor_defense,
     chest_applied,
@@ -146,7 +146,30 @@ from .supplies import (
     worn_slot,
     what_it_does,
 )
-from .planner_reference import game_notes_text, reference_text
+from agentrealm_adk.planner_reference import game_notes_text, reference_text
+from agentrealm_adk.loot import carry_slots_used
+from agentrealm_adk.oddities import oddities_line
+from agentrealm_adk.break_memory import capabilities_for_code
+from agentrealm_adk.pack import reserved_supplies
+from agentrealm_adk.investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
+from agentrealm_adk.stalled import StalledOp, below_progress, find as find_stalled, target_of
+from agentrealm_adk.survival import (
+    HOSTILE_ATTACK_INTERVAL_TICKS,
+    STARTING_WEAPON,
+    UNKILLED_HOSTILE_HEALTH,
+    attack_interval_ticks,
+    hostile_swing_damage,
+    known_hostile,
+    retreat_goal,
+    swing_damage,
+    worn_defense,
+)
+from agentrealm_adk.threat import type_key_for_entity
+from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
+from agentrealm_adk.travel.ops import travel_op_from_plan_goal
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import known_safe
+
 from .plan import (
     OP_FIELDS,
     MAX_WAIT_SECONDS,
@@ -158,29 +181,7 @@ from .plan import (
     collect_rejections,
     parse_plan_payload,
 )
-from .loot import carry_slots_used
-from .oddities import oddities_line
-from .break_memory import capabilities_for_code
 from .cells import doors_here, refuse_bad_cells, step_from
-from .pack import reserved_supplies
-from .investigation import HELPER_STILL_TICKS, cell_was_read, greeted_npc_ids, in_sight, spoken_npc_ids
-from .stalled import StalledOp, below_progress, find as find_stalled, target_of
-from .survival import (
-    HOSTILE_ATTACK_INTERVAL_TICKS,
-    STARTING_WEAPON,
-    UNKILLED_HOSTILE_HEALTH,
-    attack_interval_ticks,
-    hostile_swing_damage,
-    known_hostile,
-    retreat_goal,
-    swing_damage,
-    worn_defense,
-)
-from .threat import type_key_for_entity
-from .travel.knowledge import iter_entrances, iter_shop_cells, town_from_kb
-from .travel.ops import travel_op_from_plan_goal
-from .world import Pos, WorldModel, chebyshev
-from .zone_discovery import known_safe
 
 log = logging.getLogger(__name__)
 

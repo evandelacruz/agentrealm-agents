@@ -8,11 +8,11 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.item_table import DEFAULT_CARRY_CAPACITY
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.loot import (
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.item_table import DEFAULT_CARRY_CAPACITY
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.loot import (
     CARRIED_CHESTS_KEY,
     learn_chest_upgrade,
     learn_loot_rejection,
@@ -20,7 +20,7 @@ from agentrealm_agent.loot import (
     save_carried_chest,
 )
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 
 def inventory(n_held: int) -> dict:

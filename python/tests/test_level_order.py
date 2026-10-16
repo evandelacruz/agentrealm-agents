@@ -3,27 +3,27 @@
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.level_order import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.level_order import (
     LEVEL,
     entrance_rank,
     record_entrance_level,
     refuse_barred,
     target_level,
 )
-from agentrealm_agent.knowledge_maps import record_warp
-from agentrealm_agent.level_order import LEAVE_OP, sync_leave, way_out
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.stalled import RetryBasis, remember
-from agentrealm_agent.navigation import CostGridParams
-from agentrealm_agent.navigation.door_graph import doors_goal_path
+from agentrealm_adk.knowledge_maps import record_warp
+from agentrealm_adk.level_order import LEAVE_OP, sync_leave, way_out
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.stalled import RetryBasis, remember
+from agentrealm_adk.navigation import CostGridParams
+from agentrealm_adk.navigation.door_graph import doors_goal_path
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.strategist import entrance_lines
-from agentrealm_agent.travel.knowledge import entrance_key, sync_entrances
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.travel.knowledge import entrance_key, sync_entrances
+from agentrealm_adk.world import WorldModel
 
 
 def grid(rows: list[str], at=(0, 0), map_id=1) -> WorldModel:

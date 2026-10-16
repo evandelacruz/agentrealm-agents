@@ -15,17 +15,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
+from agentrealm_adk import config
 from agentrealm_agent.brain import UNPLACED_SELF_REFRESH, choose_call
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.flee import FLEE_PROBE_TICKS
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import apply_zone
 
 SURVIVAL = {"Escape", "Retreat", "Heal", "Fight", "Flee"}
 STEP_TICKS = 4  # default movement_speed 2500: one step about every 4 ticks

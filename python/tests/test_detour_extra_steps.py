@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.detour import GEM_PILE_STEPS, detour_find, extra_steps
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 from tests.test_freeplay_run4 import ctx, open_field
 

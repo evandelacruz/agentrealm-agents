@@ -13,24 +13,24 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import Directives, PARAM_DEFAULTS
-from agentrealm_agent.gem_yield import GemYieldTracker
-from agentrealm_agent.memory import Memory, queue_signal
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import Directives, PARAM_DEFAULTS
+from agentrealm_adk.gem_yield import GemYieldTracker
+from agentrealm_adk.memory import Memory, queue_signal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent import __main__ as cli
-from agentrealm_agent.pathing import path_owned_by, plan_op_goal
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.navigation.walk import Walk
+from agentrealm_adk.pathing import path_owned_by, plan_op_goal
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.navigation.walk import Walk
 from agentrealm_agent.plan import INTERNAL_OPS, OP_FIELDS, OP_STATE, validate_goal_op
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.supplies import row as supply_row
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_hunting_zone
-from agentrealm_agent.travel.knowledge import entrance_key, record_shop_cell, sync_town
-from agentrealm_agent.gem_yield import RATE_MIN_SECONDS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.supplies import row as supply_row
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_hunting_zone
+from agentrealm_adk.travel.knowledge import entrance_key, record_shop_cell, sync_town
+from agentrealm_adk.gem_yield import RATE_MIN_SECONDS
 from agentrealm_agent.strategist import (
     NO_GEMS_EARNED,
     READY_HEALTH_FRACTION,
@@ -57,8 +57,8 @@ from agentrealm_agent.strategist import (
     parse_reply,
     tokens_used,
 )
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 WAIT_ANSWER = {"goals": [{"op": "wait", "seconds": 1, "why": "test"}], "notes": "from model"}
 
@@ -925,7 +925,7 @@ class PlannerViewTest(unittest.TestCase):
         # shows food lying in sight and the walk to it, and a potion to buy
         # with its time and the walk to the shop; never a rest, whatever an
         # old knowledge base saved. A132: held heals count, so no drink.
-        from agentrealm_agent.travel.knowledge import record_shop_cell
+        from agentrealm_adk.travel.knowledge import record_shop_cell
 
         self.w.health, self.w.max_health, self.w.gems = 5, 10, 4
         health = lambda **kw: self.readiness(**kw)["stage_2"]["to_close"]["health_at_bar"]
@@ -955,7 +955,7 @@ class PlannerViewTest(unittest.TestCase):
     def test_eat_shows_only_food_heal_would_take(self):
         # A130 review: food the refusal table holds, or whose walk Heal gave
         # up, is no way to close the bar, so State never offers it.
-        from agentrealm_agent.executor.supply_refusals import Refusal, note_refusal, refusal_situation
+        from agentrealm_adk.executor.supply_refusals import Refusal, note_refusal, refusal_situation
 
         self.w.health, self.w.max_health = 5, 10
         self.w.entities = [Entity("supply", 9, (12, 10), "apple")]
@@ -1808,7 +1808,7 @@ class SafetyStateTest(unittest.TestCase):
         return messages[1]["content"].split("State:\n", 1)[1].split("\n\n", 1)[0]
 
     def test_off_safe_ground_with_distance_and_direction(self):
-        from agentrealm_agent.zone_discovery import apply_zone
+        from agentrealm_adk.zone_discovery import apply_zone
 
         w = WorldModel(character_id=1, map_id=7, pos=(405, 351), tick=5)
         apply_zone(w, 7, 405, 351, {"safe": False})
@@ -1820,7 +1820,7 @@ class SafetyStateTest(unittest.TestCase):
         self.assertIn("town=7:381,377 (26 cells south-west)", state)
 
     def test_on_safe_ground(self):
-        from agentrealm_agent.zone_discovery import apply_zone
+        from agentrealm_adk.zone_discovery import apply_zone
 
         w = WorldModel(character_id=1, map_id=7, pos=(4, 4), tick=5)
         apply_zone(w, 7, 4, 4, {"safe": True})

@@ -11,20 +11,22 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import acceptance_smoke, config
+from agentrealm_adk import config
+
+from agentrealm_agent import acceptance_smoke
 from agentrealm_agent.acceptance import AcceptanceHooks
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_agent.acceptance_survival import LOOP_STEP_LIMIT, OSCILLATION_ABORT_COUNT, OSCILLATION_ABORT_TICKS
 from agentrealm_agent.m7_acceptance import TARGET_DISTANCE, M7AcceptanceMetrics
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.strategist import Strategist
-from agentrealm_agent.travel.resolve import given_up_travel
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.travel.resolve import given_up_travel
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 from tests.fixtures.navigation import grids, sim
 from tests.test_m6_acceptance import FakeMovementServer, RunnerCase
 
@@ -609,7 +611,7 @@ class SmokeScriptTest(unittest.TestCase):
 
     @staticmethod
     def _give_up_on_target(r, goal="travel:point", cell=(5, 6)):
-        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_adk.navigation import stuck as nav_stuck
 
         att = nav_stuck.track(r.mem, r.world, goal, cell)
         nav_stuck.give_up(r.mem, r.world, att, "moves")
@@ -635,10 +637,10 @@ class SmokeScriptTest(unittest.TestCase):
     def test_a_nearest_shop_op_walks_on_to_the_next_shop_and_leaves_when_none_is_left(self):
         # Review on #115: a `shop` with no cell resolves to the nearest known
         # shop; a give-up on it dropped the op though another shop was known.
-        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_adk.knowledge_base import KnowledgeBase
         from agentrealm_agent.plan import Plan as PlanCls
-        from agentrealm_agent.travel.knowledge import record_shop_cell
-        from agentrealm_agent.travel.resolve import travel_dest
+        from agentrealm_adk.travel.knowledge import record_shop_cell
+        from agentrealm_adk.travel.resolve import travel_dest
 
         r, _, _ = self._pinned_runner()
         r.knowledge = KnowledgeBase.empty("sandbox")

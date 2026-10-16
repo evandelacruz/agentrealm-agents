@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .healing import supply_matches
-from .memory import Memory
+from agentrealm_adk.healing import supply_matches
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.travel.strength import loadout_key
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
+
 from .plan import Plan, goal_done
-from .travel.strength import loadout_key
-from .world import Entity, WorldModel, chebyshev
 
 if TYPE_CHECKING:
     from .states.base import PlayContext

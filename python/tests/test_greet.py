@@ -7,11 +7,11 @@ import threading
 import unittest
 from pathlib import Path
 
-from agentrealm_agent.clues import note_spoken_clue
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.executor.pacing import SPEECH_INTERVAL_TICKS
-from agentrealm_agent.investigation import (
+from agentrealm_adk.clues import note_spoken_clue
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.executor.pacing import SPEECH_INTERVAL_TICKS
+from agentrealm_adk.investigation import (
     HELPER_STILL_TICKS,
     MAX_REJECTIONS,
     greeted_npc_ids,
@@ -20,15 +20,15 @@ from agentrealm_agent.investigation import (
     say_key,
     spoken_npc_ids,
 )
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.greet import GREET_RETRY_TICKS
 from agentrealm_agent.strategist import NEARBY_NPCS_SHOWN, build_prompt
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 def field(width: int = 15, height: int = 9, at=(2, 4), perception: int = 8, safe: bool = True) -> WorldModel:

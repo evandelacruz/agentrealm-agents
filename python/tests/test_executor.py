@@ -2,8 +2,8 @@
 
 import unittest
 
-from agentrealm_agent.client import _tick_body
-from agentrealm_agent.executor import (
+from agentrealm_adk.client import _tick_body
+from agentrealm_adk.executor import (
     QUEUE_HORIZON_INTENTS,
     queue_horizon_intents,
     step,

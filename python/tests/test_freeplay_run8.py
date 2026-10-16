@@ -18,14 +18,14 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import RISK_RADIUS, DetourState, detour_find, risk_allowed
-from agentrealm_agent.hostile_ground import danger
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.hostile_ground import danger
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
 
 MAP = 1
 PACK = ("npc", "fake_pack_beast")

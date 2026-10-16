@@ -8,8 +8,9 @@ boxed in.
 
 from __future__ import annotations
 
-from ..navigation.rejection import navigation_avoid_costly
-from ..world import WorldModel
+from agentrealm_adk.navigation.rejection import navigation_avoid_costly
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome
 from .intents import set_position
 

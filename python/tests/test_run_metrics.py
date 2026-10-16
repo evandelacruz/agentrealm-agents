@@ -6,8 +6,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import __main__ as cli, config
-from agentrealm_agent.run_metrics import (
+from agentrealm_adk import config
+
+from agentrealm_agent import __main__ as cli
+from agentrealm_adk.run_metrics import (
     LevelTimer,
     RunMetrics,
     compare_run_metrics,

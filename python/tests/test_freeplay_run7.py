@@ -22,19 +22,19 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import Directives, PARAM_DEFAULTS
-from agentrealm_agent.gem_yield import GemYieldTracker
-from agentrealm_agent.hostile_ground import ground_by_hostile
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.pathing import RETREAT_TARGET, committed_safe, grid_params, reachable_safe_goal
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import Directives, PARAM_DEFAULTS
+from agentrealm_adk.gem_yield import GemYieldTracker
+from agentrealm_adk.hostile_ground import ground_by_hostile
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pathing import RETREAT_TARGET, committed_safe, grid_params, reachable_safe_goal
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.retreat import retreat_step
 from agentrealm_agent.strategist import Asked, Strategist, StrategistConfig
-from agentrealm_agent.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import apply_zone
 from tests.test_strategist import SOLD_HERE, shop_selling
 
 MAP = 1

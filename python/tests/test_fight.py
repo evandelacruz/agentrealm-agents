@@ -5,22 +5,22 @@ import unittest
 from unittest import mock
 
 from agentrealm_agent.brain import decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.fight import attack_intent, fight_target, should_fight
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 def loses(w, policy, params) -> bool:
     """With hostiles in range, an engagement under ``on_hostile = fight`` would not start as a fight."""
     import dataclasses
 
-    from agentrealm_agent.engagement import would_fight
-    from agentrealm_agent.survival import combat_group
+    from agentrealm_adk.engagement import would_fight
+    from agentrealm_adk.survival import combat_group
 
     fight = dataclasses.replace(policy, on_hostile="fight")
     return bool(combat_group(w, fight)) and not would_fight(w, fight, params)

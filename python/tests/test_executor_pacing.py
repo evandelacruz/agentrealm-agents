@@ -2,7 +2,7 @@
 
 import unittest
 
-from agentrealm_agent.executor import (
+from agentrealm_adk.executor import (
     DEFAULT_WEAPON_COOLDOWN_TICKS,
     SPEECH_INTERVAL_TICKS,
     arm_then_use,

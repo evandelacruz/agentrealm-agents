@@ -14,10 +14,12 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import acceptance_smoke, config
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, load_directives
-from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_adk import config
+
+from agentrealm_agent import acceptance_smoke
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, load_directives
+from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_agent.m9_acceptance import (
     M9AcceptanceMetrics,
     clear_entrance_looks,
@@ -25,10 +27,10 @@ from agentrealm_agent.m9_acceptance import (
     missing_entrance_marks,
     required_entrance_marks,
 )
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.travel.knowledge import sync_entrances, sync_town
-from agentrealm_agent.travel.strength import StrengthBracket
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.travel.knowledge import sync_entrances, sync_town
+from agentrealm_adk.travel.strength import StrengthBracket
+from agentrealm_adk.world import WorldModel
 from tests.test_m7_acceptance import FakeSleeper, STEP
 
 REPO = Path(__file__).resolve().parents[2]

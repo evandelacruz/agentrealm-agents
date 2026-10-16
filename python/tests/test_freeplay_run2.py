@@ -12,16 +12,16 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.pathing import SAFE_GOAL_CHECKS, SAFE_THREATENED_TICKS, grid_params, reachable_safe_goal
+from agentrealm_adk.config import Policy
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pathing import SAFE_GOAL_CHECKS, SAFE_THREATENED_TICKS, grid_params, reachable_safe_goal
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.fight import retreat_tail
 from agentrealm_agent.states.retreat import retreat_step
-from agentrealm_agent.travel import sync_town
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.travel import sync_town
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 from tests.test_survival_runs import MAP, ctx, hit, world
 
 

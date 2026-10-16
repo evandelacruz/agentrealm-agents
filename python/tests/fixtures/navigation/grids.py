@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agentrealm_agent.world import Pos
+from agentrealm_adk.world import Pos
 
 GLYPHS = {".": "dirt", "#": "wall", "b": "bush", "~": "water", "S": "dirt", "G": "dirt", "N": "dirt", "D": "framed_door"}
 

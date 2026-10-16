@@ -4,17 +4,17 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.healing import carried_heal, food_near, in_combat, spend_potion
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.healing import carried_heal, food_near, in_combat, spend_potion
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.heal import use_carried_heal
 from agentrealm_agent.states.use_item import fight_ahead, potion_refused
 from agentrealm_agent.strategist import POTION_RULE, food_line
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 
 POTION = InventorySupply(9, "potion")
 KNIFE = InventorySupply(3, "pocket_knife")
@@ -209,7 +209,7 @@ class PlannerPotionRefusedTest(unittest.TestCase):
         self.assertEqual(rule.call_args.kwargs, {"food": True, "ordered": True, "fight_ahead": False})
 
     def test_the_refusal_leaves_heals_targets_as_they_were(self):
-        from agentrealm_agent import targets
+        from agentrealm_adk import targets
 
         w = world(7)
         w.entities = [berry(), berry((3, 5))]
@@ -243,11 +243,11 @@ class StateShowsFoodNearTest(unittest.TestCase):
         w = world(7)
         w.view.tiles[(6, 5)] = "bush"
         m = Memory()
-        with mock.patch("agentrealm_agent.healing.given_up_blocks", return_value=frozenset({(6, 5)})):
+        with mock.patch("agentrealm_adk.healing.given_up_blocks", return_value=frozenset({(6, 5)})):
             self.assertTrue(food_line(w, None, m).startswith("food_near=none"))
 
     def test_no_line_without_the_runs_memory(self):
-        from agentrealm_agent.directives import Directives
+        from agentrealm_adk.directives import Directives
         from agentrealm_agent.strategist import build_prompt
 
         w = world(7)

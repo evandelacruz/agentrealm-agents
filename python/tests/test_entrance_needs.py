@@ -4,21 +4,21 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent import supplies
-from agentrealm_agent.clues import record_clue
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.entrance_needs import refuse_unmet, unmet_need
-from agentrealm_agent.fording import ford_queue
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_adk import supplies
+from agentrealm_adk.clues import record_clue
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.entrance_needs import refuse_unmet, unmet_need
+from agentrealm_adk.fording import ford_queue
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_agent.m9_acceptance import clear_entrance_looks, entrance_row_recorded
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.strategist import build_prompt
-from agentrealm_agent.travel.knowledge import entrance_key
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.travel.knowledge import entrance_key
+from agentrealm_adk.world import Entity, WorldModel
 from tests.test_fording import RAFT, SWORD, lake
 from tests.test_strategist import FakeLLM, fake_runner, make, round_trip
 

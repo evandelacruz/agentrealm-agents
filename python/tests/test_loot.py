@@ -8,18 +8,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, knowledge_base
+from agentrealm_adk import config, knowledge_base
 from agentrealm_agent.brain import Decision, Memory, decide
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import (
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import (
     DEFAULT_CARRY_CAPACITY,
     InventorySupply,
     carried_from_inventory,
 )
-from agentrealm_agent.executor.supply_refusals import AppliedSelfUse
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.loot import (
+from agentrealm_adk.executor.supply_refusals import AppliedSelfUse
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.loot import (
     LIFE_SCORE,
     UNKNOWN_SCORE,
     carry_slots_used,
@@ -35,7 +35,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def world(rows: list[str], at=(0, 0), perception=5) -> WorldModel:
@@ -100,7 +100,7 @@ class LootPriorityTest(unittest.TestCase):
     def test_heart_beats_sword_once_the_life_code_is_known(self):
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("supply", 2, (1, 2), "bronze_sword"), Entity("supply", 3, (2, 1), "heart")]
-        with mock.patch("agentrealm_agent.loot.LIFE_SUPPLY_CODES", frozenset({"heart"})):
+        with mock.patch("agentrealm_adk.loot.LIFE_SUPPLY_CODES", frozenset({"heart"})):
             d = decide(w, Memory(), scripted(), random.Random(0), knowledge=priced(bronze_sword=15))
         self.assertEqual(d.intent, {"verb": "Take", "supply_id": 3})
 
@@ -421,7 +421,7 @@ class LifeCodeTest(unittest.TestCase):
         self.assertFalse(is_counter_supply("berry", items))
 
     def test_a_learned_life_survives_a_save_and_load(self):
-        with tempfile.TemporaryDirectory() as tmp, mock.patch("agentrealm_agent.knowledge_base.WORLDS_DIR", Path(tmp)):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch("agentrealm_adk.knowledge_base.WORLDS_DIR", Path(tmp)):
             kb = KnowledgeBase("sandbox")
             learn_life_code(kb, ["heart"], 10, 11)
             knowledge_base.save(kb)

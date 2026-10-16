@@ -28,15 +28,15 @@ REPO = Path(__file__).resolve().parents[1]
 PYTHON = REPO / "python"
 sys.path.insert(0, str(PYTHON))
 
-from agentrealm_agent import config  # noqa: E402
+from agentrealm_adk import config  # noqa: E402
 from agentrealm_agent.acceptance_run import FULL_RUN_FRACTION  # noqa: E402
 from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, STOP_ON_DEATH_HELP, add_park_argument, alive_at_end_failures, navigation_start, planner_for, run_acceptance_smoke, wake  # noqa: E402
-from agentrealm_agent.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
-from agentrealm_agent.client import ApiError, Client  # noqa: E402
-from agentrealm_agent.directives import Directives, default_directives, load_directives  # noqa: E402
-from agentrealm_agent.knowledge_base import KnowledgeBase  # noqa: E402
+from agentrealm_adk.character_select import CharacterSelectionError, resolve_character_id  # noqa: E402
+from agentrealm_adk.client import ApiError, Client  # noqa: E402
+from agentrealm_adk.directives import Directives, default_directives, load_directives  # noqa: E402
+from agentrealm_adk.knowledge_base import KnowledgeBase  # noqa: E402
 from agentrealm_agent.m9_acceptance import TARGET_SECONDS, M9AcceptanceMetrics, clear_entrance_looks  # noqa: E402
-from agentrealm_agent.park import DEFAULT_PARK_SECONDS  # noqa: E402
+from agentrealm_adk.park import DEFAULT_PARK_SECONDS  # noqa: E402
 from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_m9.toml"

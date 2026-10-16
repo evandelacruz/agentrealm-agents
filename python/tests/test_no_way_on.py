@@ -12,14 +12,14 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives, default_directives
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives, default_directives
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.strategist import MAP_RADIUS, build_prompt, map_lines, system_prompt
-from agentrealm_agent.world import VOID, Entity, WorldModel
+from agentrealm_adk.world import VOID, Entity, WorldModel
 
 GLYPHS = {".": "dirt", "#": "wall", "T": "tree", "_": VOID}
 

@@ -12,13 +12,14 @@ table allows it (``supply_refusals.can_try``, A80).
 
 from __future__ import annotations
 
-from ..executor.supply_refusals import can_try
-from ..knowledge_base import knowledge_items
-from ..loot import Pickup, pickups
-from ..navigation import stuck as nav_stuck
-from ..pack import TAKE
-from ..reach import NEAR
-from ..world import WorldModel, chebyshev
+from agentrealm_adk.executor.supply_refusals import can_try
+from agentrealm_adk.knowledge_base import knowledge_items
+from agentrealm_adk.loot import Pickup, pickups
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pack import TAKE
+from agentrealm_adk.reach import NEAR
+from agentrealm_adk.world import WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .intents import take, withdraw
 from .room import room_for

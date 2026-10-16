@@ -19,13 +19,13 @@ import sys
 import unittest
 from pathlib import Path
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
 from agentrealm_agent.states import PlayContext, StateOutcome, dispatch
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 # Spelled out here, not imported, so the test reads the spec rather than the code.
 REFLEXES = {"Sync", "Downed", "Escape", "Retreat", "Heal", "Fight", "Flee", "Pickup", "Recover", "Detour", "Greet"}
@@ -270,7 +270,11 @@ RUN_CITATION_CEILING = 63
 # ``run 4``, ``Run 4``, ``runs 3, 4``: any form that names a live run.
 RUN_CITATION = re.compile(r"\bruns? \d+\b", re.IGNORECASE)
 PYTHON_DIR = Path(__file__).resolve().parents[1]
-AGENT_SOURCE = [*(PYTHON_DIR / "agentrealm_agent").rglob("*.py"), PYTHON_DIR / "starter_agent.py"]
+AGENT_SOURCE = [
+    *(PYTHON_DIR / "agentrealm_agent").rglob("*.py"),
+    *(PYTHON_DIR / "agentrealm_adk").rglob("*.py"),
+    PYTHON_DIR / "starter_agent.py",
+]
 
 
 class RulesNotRunPatchesTest(unittest.TestCase):
@@ -323,22 +327,31 @@ class NoConflictMarkersTest(unittest.TestCase):
         self.assertEqual(hits, [], "conflict markers left by a merge")
 
 
-# Gary's planner and states (A138). Everything else in ``agentrealm_agent`` is
-# plumbing Lorraine may use.
-GARY_ONLY = ("agentrealm_agent.strategist", "agentrealm_agent.plan", "agentrealm_agent.brain", "agentrealm_agent.runner")
-GARY_STATES = "agentrealm_agent.states"
+# The agents in this repo (A149): Gary, Lorraine and Stan. The ADK imports none of them.
+AGENTS = ("agentrealm_agent", "ladder", "starter_agent")
+ADK_DIR = PYTHON_DIR / "agentrealm_adk"
+
+
+def is_agent(module: str) -> bool:
+    return any(module == a or module.startswith(a + ".") for a in AGENTS)
 
 
 class ImportLineTest(unittest.TestCase):
-    """Lorraine imports nothing from Gary's planner or states (A138).
+    """The ADK imports neither agent (A149).
 
-    The line is the import closure, not a list of imports: her package is
-    imported in a fresh interpreter, with everything it runs, and no module
-    of Gary's planner or states may have been loaded on the way."""
+    The line is the import closure, not a list of imports: every ADK module is
+    imported in a fresh interpreter, with everything it runs, and no agent
+    module may have been loaded on the way. No ADK source names an agent in an
+    import either, even one only a type checker reads."""
 
-    def test_ladder_loads_none_of_garys_planner_or_states(self):
+    def test_the_adk_imports_neither_agent(self):
+        names = sorted(
+            ".".join(("agentrealm_adk", *f.relative_to(ADK_DIR).with_suffix("").parts)).removesuffix(".__init__")
+            for f in ADK_DIR.rglob("*.py")
+        )
+        load = f"import importlib, json, sys\nfor m in {names!r}: importlib.import_module(m)\nprint(json.dumps(sorted(sys.modules)))"
         out = subprocess.run(
-            [sys.executable, "-c", "import json, sys, ladder, ladder.__main__; print(json.dumps(sorted(sys.modules)))"],
+            [sys.executable, "-c", load],
             cwd=PYTHON_DIR,
             env=os.environ.copy(),
             capture_output=True,
@@ -346,9 +359,16 @@ class ImportLineTest(unittest.TestCase):
             check=True,
         )
         loaded = json.loads(out.stdout)
-        crossed = [m for m in loaded if m in GARY_ONLY or m == GARY_STATES or m.startswith(GARY_STATES + ".")]
-        self.assertEqual(crossed, [], "Lorraine reached into Gary's planner or states")
-        self.assertIn("agentrealm_agent.pathing", loaded, "the closure should include the plumbing she plays on")
+        self.assertEqual([m for m in loaded if is_agent(m)], [], "the ADK loaded an agent")
+        self.assertIn("agentrealm_adk.pathing", loaded)
+        named = []
+        for f in ADK_DIR.rglob("*.py"):
+            for node in ast.walk(ast.parse(f.read_text())):
+                mods = [a.name for a in node.names] if isinstance(node, ast.Import) else []
+                if isinstance(node, ast.ImportFrom) and not node.level:
+                    mods = [node.module or ""]
+                named += [f"{f.relative_to(PYTHON_DIR)}:{node.lineno} {m}" for m in mods if is_agent(m)]
+        self.assertEqual(named, [], "an ADK module imports an agent")
 
 
 class OneWaterTestTest(unittest.TestCase):
@@ -359,9 +379,9 @@ class OneWaterTestTest(unittest.TestCase):
     so any call of them outside ``world.py`` shows as a ``fords`` passed."""
 
     def test_only_world_model_walkable_decides_whether_water_is_ground(self):
-        world = PYTHON_DIR / "agentrealm_agent" / "world.py"
+        world = ADK_DIR / "world.py"
         hits = []
-        for f in (PYTHON_DIR / "agentrealm_agent").rglob("*.py"):
+        for f in [*(PYTHON_DIR / "agentrealm_agent").rglob("*.py"), *ADK_DIR.rglob("*.py")]:
             if f == world:
                 continue
             for node in ast.walk(ast.parse(f.read_text())):

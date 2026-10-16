@@ -14,16 +14,16 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent import engagement
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.engagement import Engagement, sync_engagement
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import oscillation
+from agentrealm_adk import engagement
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.engagement import Engagement, sync_engagement
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import oscillation
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.fight import close_step, held_target
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
 
 MAP = 1
 CODE = "fake_biter"
@@ -93,7 +93,7 @@ class StandingHostileTest(unittest.TestCase):
     def test_a_walk_in_crosses_water_only_with_a_fording_supply_worn(self):
         """The walk in is over ground Fight can swing from (A146): a raft held
         or armed leaves no weapon on water, so only one worn opens it (A133)."""
-        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_adk.item_table import InventorySupply
 
         w = world(at=(5, 10))
         for y in range(30):

@@ -17,17 +17,19 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.executor import step_landing
-from agentrealm_agent.knowledge_base import KnowledgeBase
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.executor import step_landing
+from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_agent.m4_acceptance import M4AcceptanceMetrics, op_key
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.strategist import Strategist, StrategistConfig
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 MAP = 7
 X0, Y0, X1, Y1 = 100, 34, 124, 46  # walls on the border, grass inside

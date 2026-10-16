@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from ..break_memory import (
+from agentrealm_adk.break_memory import (
     BLOCK_OPENERS,
     BREAK_GOAL,
     BreakChoice,
@@ -27,12 +27,13 @@ from ..break_memory import (
     nominate_on_path,
     pick_supply_for_capability,
 )
-from ..navigation import cost_path
-from ..navigation import stuck as nav_stuck
-from ..pathing import HostileReach, enters_reach, grid_params, nav_search, next_step, plan_sets
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import HostileReach, enters_reach, grid_params, nav_search, next_step, plan_sets
+from agentrealm_adk.reach import supply_reach
+from agentrealm_adk.world import VOID, Pos, WorldModel, chebyshev
+
 from ..plan import GoalOp
-from ..reach import supply_reach
-from ..world import VOID, Pos, WorldModel, chebyshev
 from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .ask import ask_key, ask_the_planner, what_blocks
 from .intents import arm, set_position, use_block

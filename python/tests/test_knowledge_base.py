@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent import __main__ as cli
-from agentrealm_agent import knowledge_base as kb
+from agentrealm_adk import knowledge_base as kb
 
 
 class KnowledgeBaseTest(unittest.TestCase):

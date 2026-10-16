@@ -15,10 +15,11 @@ from __future__ import annotations
 import json
 from typing import Any, Sequence
 
-from .level_order import LEAVE_OP, too_high
+from agentrealm_adk.level_order import LEAVE_OP, too_high
+from agentrealm_adk.stalled import StalledOp, find as find_stalled
+from agentrealm_adk.world import DOORS, Pos, WorldModel
+
 from .plan import TRAVEL_SYMBOLIC
-from .stalled import StalledOp, find as find_stalled
-from .world import DOORS, Pos, WorldModel
 
 # Ops whose x, y is a cell the character walks onto, so it cannot be a wall.
 # Any other op's cell may be a block it acts on (a break, a sign, a door).

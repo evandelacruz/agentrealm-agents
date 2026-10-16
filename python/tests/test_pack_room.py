@@ -10,21 +10,21 @@ import json
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.item_table import FragmentMeta, InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.loot import Pickup
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.pack import ASK, DROP, MOVE, TAKE, drop_makes_stock, make_room, reserved_supplies
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.item_table import FragmentMeta, InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.loot import Pickup
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pack import ASK, DROP, MOVE, TAKE, drop_makes_stock, make_room, reserved_supplies
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_agent.states.detour import valuable
 from agentrealm_agent.strategist import build_prompt, upgrade_line
-from agentrealm_agent.supplies import chest_capacity
-from agentrealm_agent.travel import record_shop_cell
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.supplies import chest_capacity
+from agentrealm_adk.travel import record_shop_cell
+from agentrealm_adk.world import Entity, WorldModel
 
 PRICES = {"bronze_mallet": 25, "matches": 5, "small_potion": 3, "bronze_sword": 15, "rope": 4}
 MALLET, MATCHES_A, MATCHES_B = 1, 2, 3

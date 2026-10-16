@@ -18,17 +18,17 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.navigation import CostGridParams, nearest_target
-from agentrealm_agent.navigation.planner import HOSTILE_DANGER, _Grid, _nearest_target_one_by_one, danger_map
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.navigation import CostGridParams, nearest_target
+from agentrealm_adk.navigation.planner import HOSTILE_DANGER, _Grid, _nearest_target_one_by_one, danger_map
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import EXECUTORS, PlayContext
 from agentrealm_agent.states.dispatch import PARK_STATES
 from agentrealm_agent.states.dispatch import _states as dispatch_states
-from agentrealm_agent.threat import type_key_for_entity
-from agentrealm_agent.world import Entity, MapView, Tiles, WorldModel
+from agentrealm_adk.threat import type_key_for_entity
+from agentrealm_adk.world import Entity, MapView, Tiles, WorldModel
 
 from tests.fixtures.navigation.big_map import RADIUS, START, big_world
 from tests.test_runner import FakeClient

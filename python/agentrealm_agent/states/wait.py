@@ -6,7 +6,8 @@ The planner's ``wait`` always says why and is short (``MAX_WAIT_SECONDS``);
 
 from __future__ import annotations
 
-from ..world import WorldModel
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome, my_op
 
 

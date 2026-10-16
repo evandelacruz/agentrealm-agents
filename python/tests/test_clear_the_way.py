@@ -15,15 +15,15 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import OP_STATE, Plan
 from agentrealm_agent.states import PlayContext, break_state, dispatch
 from agentrealm_agent.states.explore import HOLD_THEIR_WALK
 from agentrealm_agent.states.fight import FightState
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 GLYPHS = {".": "dirt", "#": "wall", "T": "tree"}
 LENGTH = 30  # past speech range, so a say op has to walk
@@ -234,7 +234,7 @@ class OnlyTheOpsOwnWalkTest(unittest.TestCase):
     def test_another_walks_step_two_never_stands_in_for_the_ask(self):
         # A stuck attempt at step 2 left by another walk (the safe default's) is not the op's way:
         # Loot asks rather than leave the round to Break, which would open that walk's block.
-        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_adk.navigation import stuck as nav_stuck
 
         w = corridor("#")
         c = ctx(fetch(w))
@@ -324,8 +324,8 @@ class ShutWayIsNotSearchedAgainTest(unittest.TestCase):
 
     def test_a_block_backed_off_is_tried_again_once_its_backoff_lapses(self):
         # A way shut only because its block was given up (A90) opens again on time alone.
-        from agentrealm_agent.break_memory import BREAK_GOAL
-        from agentrealm_agent.navigation import stuck as nav_stuck
+        from agentrealm_adk.break_memory import BREAK_GOAL
+        from agentrealm_adk.navigation import stuck as nav_stuck
 
         w = corridor("T")
         w.pos = (2, 1)  # beside the tree

@@ -4,23 +4,23 @@ import json
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_base.death_chests import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_base.death_chests import (
     DEATH_CHESTS_GONE_KEY,
     DEATH_CHESTS_KEY,
     GONE_KEPT,
     load_death_chests,
     save_death_chests,
 )
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.strategist import DEATH_CHESTS_SHOWN, death_chests_line
-from agentrealm_agent.world import WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 MAP = 7
 

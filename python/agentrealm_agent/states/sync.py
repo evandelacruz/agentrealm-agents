@@ -6,8 +6,9 @@ position first. Sends ``Wait`` to wake from sleep, else ``wait=True``.
 
 from __future__ import annotations
 
-from ..executor import wait
-from ..world import WorldModel
+from agentrealm_adk.executor import wait
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome
 
 

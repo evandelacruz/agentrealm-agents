@@ -8,21 +8,21 @@ from pathlib import Path
 from unittest import mock
 from types import SimpleNamespace
 
-from agentrealm_agent import config, gem_yield
+from agentrealm_adk import config, gem_yield
 from agentrealm_agent.brain import Decision
-from agentrealm_agent.config import CharacterConfig
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, Directives
-from agentrealm_agent.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, RATE_MIN_SECONDS, GemYieldTracker, record_cut
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import CharacterConfig
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives
+from agentrealm_adk.gem_yield import BARREN_MIN_CUTS, GEM_WINDOW_TICKS, RATE_MIN_SECONDS, GemYieldTracker, record_cut
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan, validate_goal_op
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_agent.strategist import build_prompt
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 from tests.test_loot import FakeClient as LootFakeClient, scripted, world as loot_world
 
 MAP = 7

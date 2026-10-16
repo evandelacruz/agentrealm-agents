@@ -14,15 +14,15 @@ import random
 import unittest
 
 from agentrealm_agent.brain import Memory
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.knowledge_maps import record_warp, sync_map_from_view
-from agentrealm_agent.navigation import CostGridParams, way_off_map
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.passage import entrance_of, went_through
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
+from agentrealm_adk.navigation import CostGridParams, way_off_map
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.passage import entrance_of, went_through
 from agentrealm_agent.plan import Plan, goal_done
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.world import MapView, Passage, WorldModel
+from agentrealm_adk.world import MapView, Passage, WorldModel
 from tests.fixtures.navigation import grids, sim
 from tests.test_navigation_stuck import _cross_map_run, run_plan
 

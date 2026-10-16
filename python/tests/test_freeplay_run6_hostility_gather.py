@@ -20,20 +20,20 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base.hostiles import SIGHTINGS_KEY, load_hostiles, save_hostiles
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext
 from agentrealm_agent.states.detour import detour_find
-from agentrealm_agent.hostile_ground import known_reach
+from agentrealm_adk.hostile_ground import known_reach
 from agentrealm_agent.states.gather_safe import gather_ground
-from agentrealm_agent.survival import hostiles_in_range, known_hostile
-from agentrealm_agent.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
+from agentrealm_adk.survival import hostiles_in_range, known_hostile
+from agentrealm_adk.world import EMPTY_POST_HALF_LIFE_TICKS, POST_STILL_TICKS, SIGHTING_TICKS, Entity, WorldModel
 
 MAP = 1
 CODE = "fake_gnasher"

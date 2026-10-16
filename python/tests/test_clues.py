@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.clues import (
+from agentrealm_adk import config
+from agentrealm_adk.clues import (
     DIRECTION_TICKS,
     direction_hint,
     nearest_explore_target,
@@ -16,14 +16,14 @@ from agentrealm_agent.clues import (
     note_spoken_clue,
     record_clue,
 )
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import planner
-from agentrealm_agent.navigation.planner import CostGridParams
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import planner
+from agentrealm_adk.navigation.planner import CostGridParams
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states.intents import read_block
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 
 def world(rows: list[str], at=(1, 1), perception=3) -> WorldModel:

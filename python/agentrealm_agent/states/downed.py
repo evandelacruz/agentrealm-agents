@@ -6,7 +6,8 @@ respawn (A11).
 
 from __future__ import annotations
 
-from ..world import WorldModel
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome
 
 

@@ -14,9 +14,10 @@ runner ends the park (``park.PARK_NO_PATH``).
 
 from __future__ import annotations
 
-from ..park import parked
-from ..survival import retreat_goal
-from ..world import WorldModel
+from agentrealm_adk.park import parked
+from agentrealm_adk.survival import retreat_goal
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome
 from .retreat import retreat_step
 

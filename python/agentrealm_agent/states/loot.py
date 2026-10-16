@@ -10,14 +10,15 @@ the pack rule's (``pack.make_room``, A102), with the op's optional ``drop``.
 
 from __future__ import annotations
 
-from .. import targets as targets_mod
-from ..healing import supply_matches
-from ..knowledge_base import knowledge_items
-from ..loot import Pickup, loot_score
-from ..navigation import cost_path
-from ..navigation import stuck as nav_stuck
-from ..pathing import bounded_step, grid_params, nav_search
-from ..world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk import targets as targets_mod
+from agentrealm_adk.healing import supply_matches
+from agentrealm_adk.knowledge_base import knowledge_items
+from agentrealm_adk.loot import Pickup, loot_score
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import bounded_step, grid_params, nav_search
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome, my_op, op_walk
 from .intents import set_position
 from .room import planned_take

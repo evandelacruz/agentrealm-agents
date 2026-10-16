@@ -36,17 +36,18 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Collection
 
-from ..break_memory import attempts_at, breakable_block, choice_at, given_up_blocks, straight_route
-from ..navigation import cost_path
-from ..navigation.planner import CostGridParams
-from ..navigation import stuck as nav_stuck
-from ..directives import attack_forbidden
-from ..engagement import would_fight
-from ..fording import on_water
-from ..memory import Memory
-from ..pathing import HostileReach, bounded_step, grid_params, plan_sets
+from agentrealm_adk.break_memory import attempts_at, breakable_block, choice_at, given_up_blocks, straight_route
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation.planner import CostGridParams
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.directives import attack_forbidden
+from agentrealm_adk.engagement import would_fight
+from agentrealm_adk.fording import on_water
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pathing import HostileReach, bounded_step, grid_params, plan_sets
+from agentrealm_adk.world import Pos, WorldModel, chebyshev
+
 from ..plan import GoalOp
-from ..world import Pos, WorldModel, chebyshev
 from .intents import set_position
 from .ask import ask_key, ask_the_planner, op_key, what_blocks
 from .base import PlayContext, StateOutcome, op_walk

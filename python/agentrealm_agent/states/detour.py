@@ -48,19 +48,20 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from ..healing import hurt
-from ..supplies import is_food
-from ..hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
-from ..knowledge_base import knowledge_items
-from ..memory import Memory
-from ..loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score
-from ..pack import TAKE
-from ..navigation import cost_path
-from ..navigation.rejection import navigation_avoid_costly
-from ..pathing import bounded_step, grid_params, nav_search, route_ahead
-from ..survival import health_floor, hit_damage, worn_defense
-from ..threat import type_key_for_entity
-from ..world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.healing import hurt
+from agentrealm_adk.supplies import is_food
+from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
+from agentrealm_adk.knowledge_base import knowledge_items
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.loot import GEM_PILE_STEPS, GEM_SUPPLY_CODES, Pickup, is_life_supply, loot_score
+from agentrealm_adk.pack import TAKE
+from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.navigation.rejection import navigation_avoid_costly
+from agentrealm_adk.pathing import bounded_step, grid_params, nav_search, route_ahead
+from agentrealm_adk.survival import health_floor, hit_damage, worn_defense
+from agentrealm_adk.threat import type_key_for_entity
+from agentrealm_adk.world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import gather_ground, route_clear
 from .intents import set_position

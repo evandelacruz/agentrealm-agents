@@ -6,13 +6,13 @@ import unittest
 from unittest import mock
 
 from agentrealm_agent.brain import decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation.rejection import NavMemory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation.rejection import NavMemory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import STATES, PlayContext, State, StateOutcome, dispatch
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 # The safe default with nothing to explore and nothing to open (A114).
 NO_WAY_ON = "nothing left to explore: asked the planner"
@@ -227,7 +227,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
 
     def test_heal_in_safe_zone_with_nothing_to_heal_with_yields(self):
         # A130: no natural regeneration, so Heal never rests or waits on safe ground.
-        from agentrealm_agent.world import ZoneFact
+        from agentrealm_adk.world import ZoneFact
 
         w = world(["...", "...", "..."], at=(0, 0))
         w.health, w.max_health = 5, 10
@@ -238,7 +238,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         self.assertIn("Heal: nothing to heal with", out.yielded)
 
     def test_recover_waits_to_open_chest(self):
-        from agentrealm_agent.zone_discovery import apply_zone
+        from agentrealm_adk.zone_discovery import apply_zone
 
         w = world(["....."], at=(1, 0))
         here = w.pos
@@ -260,8 +260,8 @@ class DispatcherFallThroughTest(unittest.TestCase):
         self.assertEqual((out.state, out.intents, out.reason, out.wait), ("Explore", None, NO_WAY_ON, True))
 
     def test_retreat_with_safe_tile_walled_off_falls_through(self):
-        from agentrealm_agent.directives import PARAM_DEFAULTS
-        from agentrealm_agent.zone_discovery import apply_zone
+        from agentrealm_adk.directives import PARAM_DEFAULTS
+        from agentrealm_adk.zone_discovery import apply_zone
 
         # Safe tile at (4, 0) behind a wall; open ground to the south for Flee.
         w = world(["..#..", "..###", "....."], at=(0, 0))
@@ -277,7 +277,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
         self.assertIsNotNone(out.intents)
 
     def test_fight_whose_target_vanishes_falls_through(self):
-        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_adk.directives import PARAM_DEFAULTS
 
         fight_module = importlib.import_module("agentrealm_agent.states.fight")
         w = world(["...", "...", "..."], at=(0, 0))
@@ -316,7 +316,7 @@ class DispatcherFallThroughTest(unittest.TestCase):
 
     def test_an_executor_that_yields_leaves_explore_holding(self):
         # Equip waits while the armed slot is busy, sending nothing: the safe default holds for the op.
-        from agentrealm_agent.item_table import InventorySupply
+        from agentrealm_adk.item_table import InventorySupply
 
         w = world(["....", "....", "...."], at=(1, 1))
         w.held_supplies = [InventorySupply(3, "pocket_knife")]
@@ -365,7 +365,7 @@ class SafeDefaultPushesTheBoundaryTest(unittest.TestCase):
     to the nearest frontier outside safe ground."""
 
     def hurt_in_a_small_safe_zone(self) -> WorldModel:
-        from agentrealm_agent.world import ZoneFact
+        from agentrealm_adk.world import ZoneFact
 
         # A walled corridor whose only unknown edge is its east end (x=12).
         w = world(["############", "#...........", "############"], at=(1, 1))
@@ -450,7 +450,7 @@ class DecideShimTest(unittest.TestCase):
         self.assertEqual((d.reason, d.reflex), ("downed", False))
 
     def test_decide_passes_never_attack_through(self):
-        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_adk.directives import PARAM_DEFAULTS
 
         w = world(["...", "...", "..."], at=(1, 1))
         w.entities = [Entity("character", 9, (2, 1), code="peer")]
@@ -469,7 +469,7 @@ class DecideShimTest(unittest.TestCase):
         w.threat.record(("character", "peer"), 1)
         m = Memory(path=[(0, 0)], goal="explore")
         pol = Policy(kind="scripted", on_hostile="fight", hostile=["character"])
-        from agentrealm_agent.directives import PARAM_DEFAULTS
+        from agentrealm_adk.directives import PARAM_DEFAULTS
 
         decide(w, m, pol, random.Random(0), params={**PARAM_DEFAULTS, "risk": 1.0, "lives_floor": 1})
         self.assertEqual(m.path, [])

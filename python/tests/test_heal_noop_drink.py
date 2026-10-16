@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import unittest
 
-from agentrealm_agent.executor.supply_refusals import used_up
-from agentrealm_agent.healing import potion_count
-from agentrealm_agent.item_table import InventorySupply
+from agentrealm_adk.executor.supply_refusals import used_up
+from agentrealm_adk.healing import potion_count
+from agentrealm_adk.item_table import InventorySupply
 
 from tests.test_heal_refusal import KNIFE, POTION_A, USE_SELF, RefusalTest
 

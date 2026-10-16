@@ -7,10 +7,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from ladder.__main__ import DEFAULT_CREATE_MODEL, main, run, status
+from agentrealm_adk import config
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.cli import DEFAULT_CREATE_MODEL
+from ladder.__main__ import main, run, status
 from tests.test_starter_agent import FakeClient
 
 PROFILE = "characters/starter.toml"

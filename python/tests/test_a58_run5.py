@@ -17,21 +17,21 @@ that commits waits for its own route to be seen, then walks it.
 import random
 import unittest
 
-from agentrealm_agent.clues import record_clue
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import CostGridParams, learn_step_rejection
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.navigation import walk as nav_walk
-from agentrealm_agent.navigation.planner import hostile_cost, path_cost
-from agentrealm_agent.navigation.walk import Walk
+from agentrealm_adk.clues import record_clue
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import CostGridParams, learn_step_rejection
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.navigation import walk as nav_walk
+from agentrealm_adk.navigation.planner import hostile_cost, path_cost
+from agentrealm_adk.navigation.walk import Walk
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.pathing import bounded_step, clue_redirects, commit_walk, guided_step
+from agentrealm_adk.pathing import bounded_step, clue_redirects, commit_walk, guided_step
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 START = (0, 0)
 GOTO = (6, 0)

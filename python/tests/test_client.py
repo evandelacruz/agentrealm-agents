@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from agentrealm_agent.client import Client, _tick_body
+from agentrealm_adk.client import Client, _tick_body
 
 
 class TickBodyTest(unittest.TestCase):

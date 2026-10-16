@@ -6,12 +6,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
 from agentrealm_agent.brain import Memory, choose_call
-from agentrealm_agent.client import ApiError
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.world import Entity, WorldModel, chebyshev
-from agentrealm_agent.zone_discovery import (
+from agentrealm_adk.client import ApiError
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import (
     RESPAWN_PROBE_RADIUS,
     apply_town,
     apply_zone,
@@ -241,7 +243,7 @@ class ClientZoneTest(unittest.TestCase):
         import json
         from unittest.mock import MagicMock, patch
 
-        from agentrealm_agent.client import Client
+        from agentrealm_adk.client import Client
 
         client = Client("https://example.test", "key")
         mock_resp = MagicMock()
@@ -268,8 +270,8 @@ class HuntProbeTest(unittest.TestCase):
     sparse grid of cells in view, ahead of path cells."""
 
     def test_grid_cells_in_view_come_before_path_cells(self):
-        from agentrealm_agent.memory import HuntSearch
-        from agentrealm_agent.zone_discovery import HUNT_PROBE_SPACING
+        from agentrealm_adk.memory import HuntSearch
+        from agentrealm_adk.zone_discovery import HUNT_PROBE_SPACING
 
         w = filled_world(at=(5, 5), perception=5)
         w.tick = 100
@@ -284,7 +286,7 @@ class HuntProbeTest(unittest.TestCase):
         self.assertNotEqual(next_zone_probe(w, m)[1], (4, 4), "read once")
 
     def test_a_stale_search_probes_nothing(self):
-        from agentrealm_agent.memory import HuntSearch
+        from agentrealm_adk.memory import HuntSearch
         w = filled_world(at=(5, 5), perception=5)
         w.tick = 151
         m = calm_mem()
@@ -298,7 +300,7 @@ class HuntSearchOutwardTest(unittest.TestCase):
     hunting-ground search. The search now ranges outward from the character."""
 
     def searching(self, at=(40, 40), revealed=30, anchor=None):
-        from agentrealm_agent.memory import HuntSearch
+        from agentrealm_adk.memory import HuntSearch
 
         w = WorldModel(character_id=1, map_id=7, pos=at, perception=5)
         for dy in range(-revealed, revealed + 1):
@@ -329,7 +331,7 @@ class HuntSearchOutwardTest(unittest.TestCase):
         self.assertLessEqual(chebyshev(pos, w.pos), 2, "the grid cell under us")
 
     def test_rings_widen_outward_and_skip_cells_read(self):
-        from agentrealm_agent.zone_discovery import HUNT_PROBE_SPACING
+        from agentrealm_adk.zone_discovery import HUNT_PROBE_SPACING
 
         w, m = self.searching()
         picks = self.read_all(w, m, 60)
@@ -353,7 +355,7 @@ class HuntSearchOutwardTest(unittest.TestCase):
         self.assertLessEqual(chebyshev(nxt, (30, 40)), 8, "back to the respawn ring")
 
     def test_stops_when_the_budget_is_spent(self):
-        from agentrealm_agent.zone_discovery import HUNT_PROBE_BUDGET
+        from agentrealm_adk.zone_discovery import HUNT_PROBE_BUDGET
 
         w, m = self.searching()
         next_zone_probe(w, m)

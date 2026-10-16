@@ -17,15 +17,15 @@ from __future__ import annotations
 import random
 import unittest
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import CostGridParams, NavSearchState, cost_path
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import guided_step
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import CostGridParams, NavSearchState, cost_path
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import guided_step
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, WorldModel
 
 MAP = 7
 

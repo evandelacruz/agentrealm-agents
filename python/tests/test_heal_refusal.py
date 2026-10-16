@@ -14,15 +14,15 @@ import threading
 import unittest
 from pathlib import Path
 
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.executor.supply_refusals import REFUSAL_WAIT_TICKS, refusal_action
-from agentrealm_agent.healing import carried_heal
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.executor.supply_refusals import REFUSAL_WAIT_TICKS, refusal_action
+from agentrealm_adk.healing import carried_heal
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.runner import Runner
-from agentrealm_agent.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, WorldModel, ZoneFact
 
 KNIFE, POTION_A, POTION_B = InventorySupply(1, "pocket_knife"), InventorySupply(4, "small_potion"), InventorySupply(5, "small_potion")
 USE_SELF = {"verb": "Use", "target": {"kind": "self"}}

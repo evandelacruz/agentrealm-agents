@@ -22,24 +22,26 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
 from agentrealm_agent.brain import walkable_prefix
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation.stuck import PROGRESS_TICK_LIMIT
-from agentrealm_agent.navigation import planner
-from agentrealm_agent.navigation.planner import CostGridParams, NavSearchState, cost_path
-from agentrealm_agent.park import PARK_NO_PATH
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation.stuck import PROGRESS_TICK_LIMIT
+from agentrealm_adk.navigation import planner
+from agentrealm_adk.navigation.planner import CostGridParams, NavSearchState, cost_path
+from agentrealm_adk.park import PARK_NO_PATH
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.pathing import SAFE_UNREACHABLE_TICKS, retreat_safe_goal
+from agentrealm_adk.pathing import SAFE_UNREACHABLE_TICKS, retreat_safe_goal
 from agentrealm_agent.states.explore import KEEP_AWAY_HOLD_TICKS
 from agentrealm_agent.states.retreat import retreat_step
-from agentrealm_agent.travel import sync_town
-from agentrealm_agent.world import Entity, Pos, WorldModel
-from agentrealm_agent.zone_discovery import ZoneFact
+from agentrealm_adk.travel import sync_town
+from agentrealm_adk.world import Entity, Pos, WorldModel
+from agentrealm_adk.zone_discovery import ZoneFact
 from tests.test_park import WalkServer
 from tests.test_strategist import FakeLLM, fake_runner, make, round_trip
 

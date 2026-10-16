@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..equip import (
+from agentrealm_adk.equip import (
     ARMED,
     EquipUpgrade,
     best_equip_upgrade,
@@ -12,10 +12,11 @@ from ..equip import (
     named_equip,
     worn_ford,
 )
-from ..supplies import armed_in_hand, is_weapon
-from ..knowledge_base import knowledge_items
-from ..navigation import stuck as nav_stuck
-from ..world import WorldModel
+from agentrealm_adk.supplies import armed_in_hand, is_weapon
+from agentrealm_adk.knowledge_base import knowledge_items
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.world import WorldModel
+
 from .base import PlayContext, State, StateOutcome, my_op
 from .intents import arm, remove_slot, wear
 

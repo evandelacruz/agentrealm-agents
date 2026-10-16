@@ -9,12 +9,14 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
-from agentrealm_agent import config, runner
+from agentrealm_adk import config
+
+from agentrealm_agent import runner
 from agentrealm_agent.brain import Memory
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.executor import step_landing
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.executor import step_landing
 from agentrealm_agent.m6_acceptance import CALM_BUDGET_FRACTION, M6AcceptanceMetrics
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 REPO = Path(__file__).resolve().parents[2]
 SMOKE_PATH = REPO / "scripts" / "smoke_m6_olympuff.py"
@@ -74,7 +76,7 @@ class M6AcceptanceMetricsTest(unittest.TestCase):
     def test_api_errors_are_counted_and_fail_the_run(self):
         # An ingest refusal (400) or a 429 never reaches on_rejection, but it
         # spent a request and is a client or budget fault the run must show.
-        from agentrealm_agent.client import ApiError
+        from agentrealm_adk.client import ApiError
 
         class Failing(Reads):
             def tick(self, *a, **k):

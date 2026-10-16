@@ -22,21 +22,21 @@ from pathlib import Path
 from unittest import mock
 
 from agentrealm_agent.brain import Decision
-from agentrealm_agent.config import CharacterConfig, Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.engagement import decide
-from agentrealm_agent.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
-from agentrealm_agent.executor.movement import step_landing
-from agentrealm_agent.hostile_ground import WALK_REACH_MARGIN
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation import stuck as nav_stuck
-from agentrealm_agent.pathing import guided_step
+from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.engagement import decide
+from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
+from agentrealm_adk.executor.movement import step_landing
+from agentrealm_adk.hostile_ground import WALK_REACH_MARGIN
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import guided_step
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.runner import Runner
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.survival import win_ratio, worn_defense
-from agentrealm_agent.world import Entity, Sighting, WorldModel, chebyshev
+from agentrealm_adk.survival import win_ratio, worn_defense
+from agentrealm_adk.world import Entity, Sighting, WorldModel, chebyshev
 from tests.test_runner import FakeClient
 
 GLYPHS = {".": "dirt", "#": "wall"}
@@ -281,7 +281,7 @@ class OnlyWayPassTest(unittest.TestCase):
         self.assertEqual(w.pos, (21, 6), "and it gets there")
 
     def test_a_goal_inside_the_reach_is_no_only_way_while_a_way_round_reaches_it(self):
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.pathing import op_walk_sets
 
         w = world(["." * 23] * 9, at=(1, 4))
         w.max_health = w.health = 100
@@ -304,8 +304,8 @@ class OnlyWayPassTest(unittest.TestCase):
         self.assertEqual(len(asks(c)), 1)
 
     def test_no_pass_while_the_engagement_says_flee(self):
-        from agentrealm_agent.engagement import Engagement
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.engagement import Engagement
+        from agentrealm_adk.pathing import op_walk_sets
 
         w, _ = self.corridor(100)
         m = Memory()
@@ -319,7 +319,7 @@ class OnlyWayIsProvenTest(unittest.TestCase):
     its budget cuts off proves nothing, so the walk asks."""
 
     def test_a_cut_off_search_is_no_only_way(self):
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.pathing import op_walk_sets
 
         # Two rooms of 24 x 20 joined by one corridor along y 1 that passes a
         # pocket hostile's reach: each room alone is past the search budget.
@@ -340,8 +340,8 @@ class OnlyWayIsProvenTest(unittest.TestCase):
     def test_a_search_its_budget_cuts_off_proves_nothing(self):
         """The corridor's far side holds more cells than the search may
         expand: the search is cut off before it closes, so it is no proof."""
-        from agentrealm_agent.navigation import planner
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.navigation import planner
+        from agentrealm_adk.pathing import op_walk_sets
 
         w = world(OnlyWayPassTest.BAND, at=(1, 1))
         w.max_health = w.health = 100
@@ -351,7 +351,7 @@ class OnlyWayIsProvenTest(unittest.TestCase):
             self.assertFalse(reach.only_way((21, 1)))
 
     def test_a_search_that_closes_proves_it(self):
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.pathing import op_walk_sets
 
         w = world(OnlyWayPassTest.BAND, at=(1, 1))
         w.max_health = w.health = 100
@@ -372,13 +372,13 @@ class CoversPassTest(unittest.TestCase):
         self.reach = self.ground_reach()
 
     def ground_reach(self) -> set:
-        from agentrealm_agent.hostile_ground import walk_ground
+        from agentrealm_adk.hostile_ground import walk_ground
 
         self.ground = walk_ground(self.w, POLICY)
         return {p for g in self.ground.values() for p in g.cells}
 
     def covers(self) -> bool:
-        from agentrealm_agent.pathing import covers_pass
+        from agentrealm_adk.pathing import covers_pass
 
         return covers_pass(self.w, POLICY, dict(PARAM_DEFAULTS), self.PATH, self.reach, 10, self.ground)
 
@@ -394,13 +394,13 @@ class CoversPassTest(unittest.TestCase):
         self.assertFalse(self.covers(), "two hostiles' hits on the same pass")
 
     def test_health_left_must_be_above_the_floor(self):
-        from agentrealm_agent.survival import health_floor
+        from agentrealm_adk.survival import health_floor
 
         floor = health_floor(self.w, dict(PARAM_DEFAULTS), self.w.entities)
         inside = sum(1 for p in self.PATH if p in self.reach)
         # One tick a step, and 10 dealt over the whole pass.
-        with mock.patch("agentrealm_agent.pathing.ticks_per_step", return_value=1), mock.patch(
-            "agentrealm_agent.pathing.expected_damage", return_value=10.0 / inside
+        with mock.patch("agentrealm_adk.pathing.ticks_per_step", return_value=1), mock.patch(
+            "agentrealm_adk.pathing.expected_damage", return_value=10.0 / inside
         ):
             self.w.health = floor + 10
             self.assertFalse(self.covers(), "left exactly at the floor: Retreat's ground")
@@ -411,14 +411,14 @@ class CoversPassTest(unittest.TestCase):
         """A heal carried counts toward the pass on land, or on water with the
         fording supply worn; on water with it only armed, no drink can be
         sent (``would_strand``, A133), so none counts."""
-        from agentrealm_agent.item_table import InventorySupply
-        from agentrealm_agent.survival import health_floor
+        from agentrealm_adk.item_table import InventorySupply
+        from agentrealm_adk.survival import health_floor
 
         floor = health_floor(self.w, dict(PARAM_DEFAULTS), self.w.entities)
         self.w.held_supplies = [InventorySupply(9, "large_potion")]
         inside = sum(1 for p in self.PATH if p in self.reach)
-        with mock.patch("agentrealm_agent.pathing.ticks_per_step", return_value=1), mock.patch(
-            "agentrealm_agent.pathing.expected_damage", return_value=10.0 / inside
+        with mock.patch("agentrealm_adk.pathing.ticks_per_step", return_value=1), mock.patch(
+            "agentrealm_adk.pathing.expected_damage", return_value=10.0 / inside
         ):
             self.w.health = floor + 8
             self.assertTrue(self.covers(), "on land the potion is drunk on the way")
@@ -426,7 +426,7 @@ class CoversPassTest(unittest.TestCase):
                 self.w.view.tiles[p] = "water"
             self.w.armed_code = "raft"
             self.assertFalse(self.covers(), "on water with the raft only armed, nothing can be drunk")
-            with mock.patch("agentrealm_agent.pathing.afloat", return_value=True):  # a fording supply worn
+            with mock.patch("agentrealm_adk.pathing.afloat", return_value=True):  # a fording supply worn
                 self.assertTrue(self.covers(), "with the fording supply worn, it can")
 
 
@@ -547,9 +547,9 @@ class PrerequisiteWalkHoldsTest(unittest.TestCase):
         reach as the entrance walk does: no step into it, and the stop is held,
         not given up, while the entrance walk goes on."""
         from tests.test_commit_target import MAP, ctx as level_ctx, field
-        from agentrealm_agent.knowledge_base import KnowledgeBase
+        from agentrealm_adk.knowledge_base import KnowledgeBase
         from agentrealm_agent.states.level import ENTRANCE_GOAL
-        from agentrealm_agent.travel.knowledge import entrance_key
+        from agentrealm_adk.travel.knowledge import entrance_key
 
         kb = KnowledgeBase("sandbox")
         kb.entrances[entrance_key(MAP, (18, 4))] = {"map_id": MAP, "x": 18, "y": 4, "locked": True, "needs": "key"}

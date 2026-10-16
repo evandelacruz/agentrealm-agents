@@ -4,18 +4,18 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.fording import ford_queue, note_would_strand
-from agentrealm_agent.item_table import InventorySupply
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
-from agentrealm_agent.navigation.planner import CostGridParams, cost_path
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.fording import ford_queue, note_would_strand
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation.planner import CostGridParams, cost_path
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_agent.supplies import fords, what_it_does
+from agentrealm_adk.supplies import fords, what_it_does
 from agentrealm_agent.strategist import held_line
-from agentrealm_agent.world import WorldModel
+from agentrealm_adk.world import WorldModel
 
 RAFT, SWORD, POTION, MALLET = 7, 8, 9, 10
 
@@ -165,7 +165,7 @@ class OnWaterTest(unittest.TestCase):
 
 class CutMemoryTest(unittest.TestCase):
     def test_a_kept_arm_before_a_cut_step_keeps_its_memory(self):
-        from agentrealm_agent.fording import dropped_loadout
+        from agentrealm_adk.fording import dropped_loadout
         from agentrealm_agent.states.base import StateOutcome
 
         queue = [arm(SWORD), {"verb": "Step", "direction": "right"}]
@@ -188,7 +188,7 @@ class CutMemoryTest(unittest.TestCase):
 
         w, m = lake(at=(1, 1), armed="raft"), Memory()
         keep_the_arm = lambda w_, m_, q, kb=None, rearm=True: (q[:1], "Step cut")  # noqa: E731
-        with mock.patch("agentrealm_agent.fording.ford_queue", side_effect=keep_the_arm):
+        with mock.patch("agentrealm_adk.fording.ford_queue", side_effect=keep_the_arm):
             with mock.patch("agentrealm_agent.states.dispatch._states", return_value=(ArmsThenSteps(),)):
                 out = dispatch(w, ctx_for(m, None))
         self.assertEqual(out.intents, [arm(SWORD)])
@@ -203,9 +203,9 @@ class UnderAttackStepTest(unittest.TestCase):
         from pathlib import Path
 
         from agentrealm_agent.brain import Decision
-        from agentrealm_agent.config import CharacterConfig
+        from agentrealm_adk.config import CharacterConfig
         from agentrealm_agent.runner import Runner
-        from agentrealm_agent.world import Entity
+        from agentrealm_adk.world import Entity
         from tests.test_hostile_reach import POLICY
         from tests.test_runner import FakeClient
 
@@ -234,7 +234,7 @@ class UnderAttackStepTest(unittest.TestCase):
 
     def test_cornered_on_water_skips_the_drink_and_still_acts(self):
         from agentrealm_agent.states.flee import cornered
-        from agentrealm_agent.world import Entity
+        from agentrealm_adk.world import Entity
         from tests.test_hostile_reach import POLICY
 
         w = lake(at=(3, 1), held=("raft", "bronze_sword", "small_potion"), armed="raft")
@@ -251,7 +251,7 @@ class UnderAttackStepTest(unittest.TestCase):
         self.assertTrue(out.intents or (out.wait and any(s["trigger"] == "cornered" for s in m.strategist_signals)), out.reason)
 
     def test_a_lone_step_under_attack_is_open_on_water_only_afloat(self):
-        from agentrealm_agent.executor.held_queue import _lands_open
+        from agentrealm_adk.executor.held_queue import _lands_open
 
         held = lake(at=(1, 1), armed="bronze_sword")
         self.assertTrue(held.walkable((2, 1)), "a walk plans over it with the raft held")
@@ -340,8 +340,8 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
         self.assertTrue(view.walkable((3, 1), fords=True))
 
     def test_a_route_through_a_door_crosses_water(self):
-        from agentrealm_agent.knowledge_maps import record_warp
-        from agentrealm_agent.navigation.door_graph import route_first_leg
+        from agentrealm_adk.knowledge_maps import record_warp
+        from agentrealm_adk.navigation.door_graph import route_first_leg
 
         kb = KnowledgeBase.empty("sandbox")
         record_warp(kb, 1, (1, 1), "framed_door", 2, (0, 1))
@@ -368,7 +368,7 @@ class WaterIsGroundEverywhereTest(unittest.TestCase):
 
 class FightAshoreTest(unittest.TestCase):
     def test_landed_with_the_raft_in_hand_fight_arms_the_weapon_first(self):
-        from agentrealm_agent.executor import attack_cooldown_ticks
+        from agentrealm_adk.executor import attack_cooldown_ticks
         from tests.test_hostile_reach import POLICY, pack
 
         w = wide(at=(9, 5), held=("raft", "bronze_mallet"))  # a weapon slower than the 1 s default
@@ -404,7 +404,7 @@ class FightAshoreTest(unittest.TestCase):
         self.assertNotEqual(out.intents[0].get("verb"), "Arm", out.intents)
 
     def test_a_reflex_that_is_no_escape_gets_the_rearm(self):
-        from agentrealm_agent.world import Entity
+        from agentrealm_adk.world import Entity
 
         w = lake(at=(5, 1), armed="raft")
         w.entities = [Entity("supply", 77, (6, 1), code="small_potion")]
@@ -415,7 +415,7 @@ class FightAshoreTest(unittest.TestCase):
 
 class CrossingKeepsOffReachTest(unittest.TestCase):
     def test_a_crossing_keeps_off_water_in_a_seen_hostiles_reach(self):
-        from agentrealm_agent.pathing import op_walk_sets
+        from agentrealm_adk.pathing import op_walk_sets
         from tests.test_hostile_reach import BAR, POLICY, pack
 
         w = wide(at=(0, 3))
@@ -467,7 +467,7 @@ class LevelWalkTest(unittest.TestCase):
 
 class AfloatEngagementTest(unittest.TestCase):
     def engaged(self, w: WorldModel, m: Memory | None = None):
-        from agentrealm_agent.engagement import sync_engagement
+        from agentrealm_adk.engagement import sync_engagement
         from tests.test_hostile_reach import POLICY, pack
 
         if not w.entities:
@@ -520,7 +520,7 @@ class FightClosesOnlyOnLandTest(unittest.TestCase):
         c = PlayContext(Memory(), POLICY, random.Random(0), knowledge=KnowledgeBase.empty("sandbox"), plan=plan)
         out = dispatch(w, c)
         self.assertTrue(c.memory.engagement.fight, "the estimate would take it on, from land")
-        from agentrealm_agent.fording import ESCAPES
+        from agentrealm_adk.fording import ESCAPES
         from agentrealm_agent.states.fight import close_step
 
         self.assertIsNone(close_step(w, rat, set()), "no walk in over ground it can swing from")
@@ -533,7 +533,7 @@ class WaterCellsOnlyTest(unittest.TestCase):
     def test_a_cell_known_as_water_only_from_a_refusal_is_afloat_to_the_engagement(self):
         """A146: the engagement's afloat test is Ashore's (``on_water``), so a
         cell a ``would_strand`` marked counts though the map shows ground."""
-        from agentrealm_agent.engagement import sync_engagement
+        from agentrealm_adk.engagement import sync_engagement
         from tests.test_hostile_reach import POLICY, pack
 
         w = level_lake(at=(1, 1))  # dirt on the map

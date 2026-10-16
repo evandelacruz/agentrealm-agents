@@ -6,16 +6,17 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from ..client import Intent
-from ..config import Policy
-from ..directives import PARAM_DEFAULTS, Directives, default_directives
-from ..executor import DEFAULT_TICK_RATE_HZ
-from ..gem_yield import GemYieldTracker
-from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
+from agentrealm_adk.client import Intent
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, Directives, default_directives
+from agentrealm_adk.executor import DEFAULT_TICK_RATE_HZ
+from agentrealm_adk.gem_yield import GemYieldTracker
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.pathing import HostileReach, op_walk_sets
+from agentrealm_adk.world import Pos, WorldModel
+
 from ..plan import OP_STATE, GoalOp, Plan
-from ..pathing import HostileReach, op_walk_sets
-from ..world import Pos, WorldModel
 
 
 @dataclass

@@ -46,11 +46,11 @@ from dataclasses import dataclass
 from functools import cache
 from typing import Callable
 
-from .. import targets as targets_mod
-from ..break_memory import held_supply
-from ..config import Policy
-from ..executor import DEFAULT_TICK_RATE_HZ
-from ..gem_yield import (
+from agentrealm_adk import targets as targets_mod
+from agentrealm_adk.break_memory import held_supply
+from agentrealm_adk.config import Policy
+from agentrealm_adk.executor import DEFAULT_TICK_RATE_HZ
+from agentrealm_adk.gem_yield import (
     GATHER_BLOCKS,
     REGION_SIZE,
     STALL_SECONDS,
@@ -63,19 +63,20 @@ from ..gem_yield import (
     region_of,
     region_yields,
 )
-from ..supplies import heals
-from ..hostile_ground import Danger, danger, reach_cells
-from ..item_table import InventorySupply
-from ..knowledge_base import KnowledgeBase
-from ..memory import Memory
-from ..navigation import CostGridParams, cost_path, nearest_target
-from ..navigation import stuck as nav_stuck
-from ..pathing import grid_params, next_step, plan_sets
+from agentrealm_adk.supplies import heals
+from agentrealm_adk.hostile_ground import Danger, danger, reach_cells
+from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import CostGridParams, cost_path, nearest_target
+from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.pathing import grid_params, next_step, plan_sets
+from agentrealm_adk.equip import CUT, does_job, hunting_ceiling, weapon_to_arm
+from agentrealm_adk.survival import is_hostile
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.zone_discovery import safe_tiles
+
 from ..plan import GoalOp
-from ..equip import CUT, does_job, hunting_ceiling, weapon_to_arm
-from ..survival import is_hostile
-from ..world import Entity, Pos, WorldModel, chebyshev
-from ..zone_discovery import safe_tiles
 from .base import PlayContext, State, StateOutcome, my_op
 from .gather_safe import gather_ground, route_bar, route_clear
 from .intents import arm, arm_and_use, set_position, take, use_block

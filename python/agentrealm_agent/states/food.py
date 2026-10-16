@@ -13,17 +13,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..config import Policy
-from ..executor.supply_refusals import must_stand_on
-from ..healing import food_near
-from ..hostile_ground import reach_cells
-from ..memory import Memory
-from ..navigation import cost_path, path_cost
-from ..navigation.planner import CostGridParams
-from ..navigation.rejection import navigation_avoid_costly
-from .. import targets as targets_mod
-from ..pathing import grid_params
-from ..world import Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.config import Policy
+from agentrealm_adk.executor.supply_refusals import must_stand_on
+from agentrealm_adk.healing import food_near
+from agentrealm_adk.hostile_ground import reach_cells
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation import cost_path, path_cost
+from agentrealm_adk.navigation.planner import CostGridParams
+from agentrealm_adk.navigation.rejection import navigation_avoid_costly
+from agentrealm_adk import targets as targets_mod
+from agentrealm_adk.pathing import grid_params
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
+
 from .base import PlayContext
 
 

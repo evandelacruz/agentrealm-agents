@@ -5,9 +5,9 @@ import unittest
 from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS
-from agentrealm_agent.navigation import (
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.navigation import (
     CostGridParams,
     NavSearchState,
     cost_path,
@@ -16,11 +16,11 @@ from agentrealm_agent.navigation import (
     macro_cell,
     nearest_target,
 )
-from agentrealm_agent.navigation import planner
-from agentrealm_agent.navigation.planner import COSTLY_STEP, _coarse_search, _Grid, _MacroCosts
+from agentrealm_adk.navigation import planner
+from agentrealm_adk.navigation.planner import COSTLY_STEP, _coarse_search, _Grid, _MacroCosts
 from agentrealm_agent.plan import Plan
-from agentrealm_agent.world import Entity, WorldModel
-from agentrealm_agent.zone_discovery import apply_zone
+from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.zone_discovery import apply_zone
 
 
 def grid(rows: list[str], at=(0, 0), perception=5) -> WorldModel:

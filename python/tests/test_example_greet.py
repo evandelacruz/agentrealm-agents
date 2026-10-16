@@ -5,14 +5,14 @@ import random
 import unittest
 from unittest import mock
 
-from agentrealm_agent.config import Policy
-from agentrealm_agent.directives import PARAM_DEFAULTS, default_directives
-from agentrealm_agent.knowledge_base import KnowledgeBase
-from agentrealm_agent.memory import Memory
+from agentrealm_adk.config import Policy
+from agentrealm_adk.directives import PARAM_DEFAULTS, default_directives
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.example_greet import ExampleGreetState
-from agentrealm_agent.world import Entity
+from agentrealm_adk.world import Entity
 from tests.test_states import world
 
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")

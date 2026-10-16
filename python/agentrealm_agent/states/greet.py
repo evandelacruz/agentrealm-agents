@@ -17,8 +17,8 @@ count belong to the planner's ``say`` ops, so a hello never settles one.
 
 from __future__ import annotations
 
-from ..executor.pacing import SPEECH_INTERVAL_TICKS
-from ..investigation import (
+from agentrealm_adk.executor.pacing import SPEECH_INTERVAL_TICKS
+from agentrealm_adk.investigation import (
     GREET_TEXT,
     HELPER_STILL_TICKS,
     MAX_REJECTIONS,
@@ -27,10 +27,11 @@ from ..investigation import (
     in_sight,
     spoken_npc_ids,
 )
-from ..poll_cadence import THREAT_NEAR_BLOCKS
-from ..config import Policy
-from ..survival import hostiles_in_range, known_hostile, on_safe_tile, recently_attacked
-from ..world import Entity, WorldModel, chebyshev
+from agentrealm_adk.poll_cadence import THREAT_NEAR_BLOCKS
+from agentrealm_adk.config import Policy
+from agentrealm_adk.survival import hostiles_in_range, known_hostile, on_safe_tile, recently_attacked
+from agentrealm_adk.world import Entity, WorldModel, chebyshev
+
 from .base import PlayContext, State, StateOutcome
 from .intents import say_to
 

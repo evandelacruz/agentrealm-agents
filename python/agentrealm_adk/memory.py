@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from .engagement import Engagement
     from .executor.supply_refusals import NoopUse, Refusal
     from .stalled import StalledOp
-    from .states.detour import Detour
 from .travel.strength import StrengthBracket
 from .world import Pos
 
@@ -122,7 +121,8 @@ class Memory:
     # The fight-or-flee decision Fight, Flee and Retreat all read (A94).
     engagement: Engagement | None = None
     # Detour (A71): the find a detour walks to, and finds it gave up on this run.
-    detour: Detour | None = None
+    # The find is Gary's ``agentrealm_agent.states.detour.Detour``; the ADK imports no agent.
+    detour: object | None = None
     detour_skipped: set[int] = field(default_factory=set)
     # Retreat (A9): the goal of the walk queue it last sent, so a reflex probe
     # lets that queue run instead of replacing it; and (tick, distance to the

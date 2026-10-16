@@ -46,8 +46,14 @@ class FindTest(unittest.TestCase):
         self.assertEqual(find(w), {})
         self.assertEqual(oddities_line(w, None, TICK_HZ), "oddities=none seen")
 
-    def test_a_rock_with_no_held_opener_says_none_held(self):
+    def test_an_oddity_may_break_with_every_capability_held(self):
+        # A160: an odd block may need any of the five, whatever its type.
         w = _world(GARDEN, at=(1, 1), held=("bronze_sword",))
+        (row,) = _rows(oddities_line(w, None, TICK_HZ))
+        self.assertEqual(row["may_break_with"], ["chop", "cut"])
+
+    def test_an_oddity_with_no_capability_held_says_none_held(self):
+        w = _world(GARDEN, at=(1, 1), held=())
         (row,) = _rows(oddities_line(w, None, TICK_HZ))
         self.assertEqual(row["may_break_with"], "none held")
 

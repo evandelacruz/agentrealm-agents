@@ -30,6 +30,7 @@ from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.memory import Memory
+from agentrealm_adk.oddities import ODDITIES_KEY
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.pathing import grid_params
 from agentrealm_agent.plan import PLAN_STALL_SECONDS, Plan
@@ -286,6 +287,18 @@ class BreakOpRefusalTest(unittest.TestCase):
         record_attempt(kb, map_id=7, pos=(3, 0), capability="smash", result="applied_no_effect")
         reasons = self.run_op({"op": "break_block", "x": 3, "y": 0, "capability": "smash"}, kb)
         self.assertEqual(reasons, ["smash already failed on the rock at 3,0"])
+
+    def test_an_oddity_takes_any_held_capability(self):
+        # A160: an odd block may need any of the five, whatever its type.
+        kb = KnowledgeBase.empty("sandbox")
+        kb.extra[ODDITIES_KEY] = {"7,1,0": {"block": "bush", "seen": 0}}
+        w = _sword_world([".b.r."], at=(0, 0))
+        w.held_supplies = [InventorySupply(7, "bronze_mallet")]
+        plan = Plan([{"op": "break_block", "x": 1, "y": 0, "capability": "smash"}], dict(PARAM_DEFAULTS))
+        c = PlayContext(Memory(), Policy(kind="scripted", goals=[], pickup=False), random.Random(0), knowledge=kb, plan=plan)
+        out = BreakState().act(w, c)
+        self.assertEqual(out.intents, [arm(7), use_block((1, 0))])
+        self.assertEqual(plan.current()["capability"], "smash")
 
     def test_the_opener_is_walked_to(self):
         w = _sword_world([".b.r."], at=(1, 1))

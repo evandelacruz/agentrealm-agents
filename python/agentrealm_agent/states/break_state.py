@@ -7,7 +7,9 @@ way (A15), and re-arms the weapon a break swapped out.
 Either way a block is tried only with a capability known to open it: its
 type's rule or a past break of that cell (``break_memory.known_openers``,
 A103). A ``break_block`` op naming any other capability, or one that already
-failed there, is dropped with the reason, so the planner hears why.
+failed there, is dropped with the reason, so the planner hears why. An
+oddity State lists may need any of the five, so a ``break_block`` on one
+tries any capability held (A160).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from agentrealm_adk.break_memory import (
     pick_supply_for_capability,
 )
 from agentrealm_adk.navigation import cost_path
+from agentrealm_adk.oddities import is_oddity
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.pathing import HostileReach, enters_reach, grid_params, nav_search, next_step, plan_sets
 from agentrealm_adk.reach import supply_reach
@@ -70,7 +73,8 @@ def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
     Its capability failed on that cell before, nothing held has it, the
     cell in view holds no block at all (walkable ground, where a hostile may
     stand, or no ground, A114), the block is of a type whose openers are
-    known and that capability is not one of them (A103), or a walk to it was
+    known and that capability is not one of them (A103) and it is no oddity
+    (an odd block may need any of the five, A160), or a walk to it was
     given up and is still backed off (A90). A block of a type with no known
     openers may be tried with any capability, so its opener can be learned.
     A cell not yet in view is walked to first.
@@ -87,7 +91,7 @@ def _op_refusal(w: WorldModel, ctx: PlayContext, op: GoalOp) -> str | None:
     if block is not None and (block == VOID or w.walkable(pos)):
         return f"the {block or 'empty cell'} at {pos[0]},{pos[1]} holds no block to break"
     openers = known_openers(w, ctx.knowledge, pos)
-    if block in BLOCK_OPENERS and cap not in openers:
+    if block in BLOCK_OPENERS and cap not in openers and not is_oddity(w, ctx.knowledge, pos):
         return f"{cap} is not known to open {block} (opened by {', '.join(sorted(openers))})"
     return None
 

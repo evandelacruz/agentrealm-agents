@@ -38,7 +38,7 @@ import json
 from collections import Counter
 from typing import Any
 
-from .break_memory import BLOCK_OPENERS, BREAKABLE, FAILED_RESULTS, break_key, held_capabilities
+from .break_memory import BREAKABLE, FAILED_RESULTS, break_key, held_capabilities
 from .knowledge_base import KnowledgeBase
 from .supplies import CAPABILITIES
 from .world import Pos, WorldModel, chebyshev
@@ -127,15 +127,22 @@ def remembered_rows(rows: dict[str, Any], map_id: int) -> dict[Pos, str]:
     return out
 
 
+def is_oddity(w: WorldModel, kb: KnowledgeBase | None, pos: Pos) -> bool:
+    """Whether ``pos`` on this map is an oddity State ``oddities`` draws from
+    (remembered, :func:`remember`). An odd block may need any of the five
+    capabilities whatever its type (Manual §11 Breaking blocks, A160), so
+    Break tries one with any capability held."""
+    return pos in remembered(w, kb)
+
+
 def oddity_row(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, block: str, tick_hz: int) -> dict[str, Any]:
     """One oddity as State shows it: cell and distance, block, ``may_break_with``
-    (each held capability known to open its type, or that opened it before,
-    and that has not failed there; else ``none held``), ``failed``
+    (each held capability that has not failed there, since an odd block may
+    need any of the five, A160; else ``none held``), ``failed``
     capabilities, its ``last_try`` and, once opened, ``back_at_tick``."""
     tries = _tries(kb, w.map_id, pos)
     failed = sorted(c for c, result, _ in tries if result in FAILED_RESULTS)
-    openers = BLOCK_OPENERS[block] | {c for c, result, _ in tries if result == "opened"}
-    usable = sorted(c for c in openers & held_capabilities(w, kb) if c not in failed)
+    usable = sorted(c for c in held_capabilities(w, kb) if c not in failed)
     row: dict[str, Any] = {
         "x": pos[0],
         "y": pos[1],

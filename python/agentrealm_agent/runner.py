@@ -64,8 +64,7 @@ from agentrealm_adk.executor.supply_refusals import (
     used_up,
 )
 from agentrealm_adk.fording import ford_gate, loadout_memory, note_would_strand
-from agentrealm_adk.healing import absorb_heal_pending, note_heal_pending
-from agentrealm_adk.supplies import heals, is_food
+from agentrealm_adk.supplies import is_food
 from agentrealm_adk.travel.resolve import given_up_travel, travel_given_up
 from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
 from agentrealm_adk.travel.strength import loadout_key
@@ -734,7 +733,6 @@ class Runner:
         if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
             self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))
-        absorb_heal_pending(m, w, self.knowledge, events)
         self._learn_life_code(lives_before)
         ceremony = r.get("level_clear_ceremony")
         w.note_level_clear(ceremony)
@@ -1159,7 +1157,8 @@ class Runner:
                 clear_refusal(m, "take", intent.get("supply_id"))
                 if take_raises_gems(code):
                     self.gem_cuts.note_take()
-            self._note_heal_intent(intent, index)
+                if self.plan is not None:
+                    self.plan.note_taken(code)
             self._note_investigation(intent, result)
             if m.pending is not None and index == 0:
                 m.pending = None
@@ -1203,24 +1202,6 @@ class Runner:
                 f"learned life ground code {code!r} (promote to LIFE_SUPPLY_CODES once confirmed)",
                 {"life_supply_code": code, "lives_before": lives_before, "lives": self.world.lives},
             )
-
-    def _note_heal_intent(self, intent: dict | None, index: int) -> None:
-        """Remember health before a food ``Take`` or self-``Use`` for item-table learning (A24)."""
-        if not intent:
-            return
-        w, m = self.world, self.mem
-        verb = intent.get("verb")
-        if verb == "Take":
-            sid = intent.get("supply_id")
-            for e in w.entities:
-                if e.kind == "supply" and e.id == sid and is_food(e.code):
-                    note_heal_pending(m, w, e.code, "take")
-            return
-        if not is_self_use(intent):
-            return
-        code = code_in_hand(self.world, self._held_intents(), index)
-        if heals(code):
-            note_heal_pending(m, w, code, "use")
 
     def _forget_replaced_self_use(self, intents: list[dict] | None) -> None:
         """A sent queue with no self-``Use`` replaced the self-``Use``'s queue, if any:

@@ -7,7 +7,7 @@ import unittest.mock
 from agentrealm_adk import healing
 from agentrealm_agent.brain import decide
 from agentrealm_adk.config import Policy
-from agentrealm_adk.healing import absorb_heal_pending, hurt, note_heal_pending
+from agentrealm_adk.healing import hurt
 from agentrealm_adk.executor.supply_refusals import Refusal, note_refusal, refusal_situation
 from agentrealm_adk.item_table import InventorySupply, carried_from_inventory
 from agentrealm_adk.knowledge_base import KnowledgeBase
@@ -63,7 +63,7 @@ class HealStateTest(unittest.TestCase):
 
     def test_walks_one_step_toward_distant_food(self):
         w = grid(at=(1, 1))
-        w.entities = [Entity("supply", 8, (4, 4), "golden_cap")]
+        w.entities = [Entity("supply", 8, (4, 4), "mushroom")]
         out = dispatch(w, ctx())
         self.assertEqual(out.intents, [{"verb": "SetPosition", "x": 2, "y": 2}])
 
@@ -79,11 +79,12 @@ class HealStateTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(3, "bronze_sword")]
         self.assertEqual(verbs(dispatch(w, ctx(m))), ["Take"], "a new item: try again")
 
-    def test_carried_food_before_potion(self):
+    def test_food_is_never_used_from_the_pack(self):
+        # Food is eaten on pickup and never carried (A155): only a potion is drunk.
         w = grid()
         w.held_supplies = [InventorySupply(4, "small_potion"), InventorySupply(5, "berry")]
         out = dispatch(w, ctx())
-        self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 5})
+        self.assertEqual(out.intents[0], {"verb": "Arm", "supply_id": 4})
         self.assertEqual(verbs(out), ["Arm", "Use"])
 
     def test_drinks_carried_potion_and_holds_a_refused_one(self):
@@ -202,45 +203,19 @@ class HealStateTest(unittest.TestCase):
         self.assertNotEqual(dispatch(w, ctx(m)).state, "Heal")
         self.assertIsNone(m.self_use_rearm)
 
-    def test_takes_food_even_when_it_would_overheal(self):
-        # Free food beats a potion or a walk to town, whatever its heal.
+    def test_food_is_left_lying_until_hurt_by_its_heal(self):
+        # Food is eaten on pickup, even at full health (A155): an apple heals 2,
+        # so at 9/10 it stays lying and the potion is kept; at 8/10 it is taken.
         w = grid(at=(1, 1))
         w.health = 9
         w.entities = [Entity("supply", 8, (2, 1), "apple")]
         w.held_supplies = [InventorySupply(4, "small_potion")]
-        kb = KnowledgeBase.empty("sandbox")
-        kb.items["apple"] = {"heal_amount": 5}
-        out = dispatch(w, ctx(kb=kb))
-        self.assertEqual(out.intents, [{"verb": "Take", "supply_id": 8}])
-
-    def test_learns_heal_from_applied_take(self):
-        kb = KnowledgeBase.empty("sandbox")
-        m = Memory(heal_pending=(5, "apple", "take"))
-        w = grid()
+        out = dispatch(w, ctx())
+        self.assertNotEqual(out.state, "Heal")
+        self.assertNotIn("Take", verbs(out))
+        self.assertNotIn("Use", verbs(out))
         w.health = 8
-        absorb_heal_pending(m, w, kb, [])
-        self.assertEqual(kb.items["apple"]["heal_amount"], 3)
-        self.assertTrue(kb.items["apple"]["heal_on_pickup"])
-
-    def test_a_drink_behind_cooldown_waits_is_measured(self):
-        # The potion is named by the Arm before the Use, Waits aside.
-        from agentrealm_agent.runner import Runner
-
-        r = Runner.__new__(Runner)
-        r.world, r.mem = grid(), Memory()
-        r.world.armed_code = "pocket_knife"
-        r.world.held_supplies = [InventorySupply(4, "small_potion")]
-        use = {"verb": "Use", "target": {"kind": "self"}}
-        r.mem.pending_intents = [{"verb": "Arm", "supply_id": 4}, {"verb": "Wait"}, {"verb": "Wait"}, use]
-        r._note_heal_intent(use, 3)
-        self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
-
-    def test_nothing_learned_at_full_health(self):
-        # Loot also Takes food; at full health it cannot show a heal.
-        m, w = Memory(), grid()
-        w.health = 10
-        note_heal_pending(m, w, "apple", "take")
-        self.assertIsNone(m.heal_pending)
+        self.assertEqual(dispatch(w, ctx()).intents, [{"verb": "Take", "supply_id": 8}])
 
     def test_hostile_in_range_keeps_heal_out(self):
         # Retreat or Flee (A9) answers the hostile; Heal waits until none is in range.
@@ -357,17 +332,6 @@ class DrinkTargetsSelfTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(4, "small_potion")]
         out = dispatch(w, ctx())
         self.assertEqual(out.intents[-1], {"verb": "Use", "target": {"kind": "self"}})
-
-    def test_a_self_use_is_measured(self):
-        from agentrealm_agent.runner import Runner
-
-        r = Runner.__new__(Runner)
-        r.world, r.mem = grid(), Memory()
-        r.world.armed_code = "small_potion"
-        use = {"verb": "Use", "target": {"kind": "self"}}
-        r.mem.pending_intents = [use]
-        r._note_heal_intent(use, 0)
-        self.assertEqual(r.mem.heal_pending, (5, "small_potion", "use"))
 
 
 

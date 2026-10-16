@@ -6,7 +6,8 @@ Every "am I prepared" in Lorraine is computed here, once. The goal tree
 own (:func:`margin_now` is their hook).
 
 **One risk function.** :func:`risk_budget` compares what the character has
-to spend, health plus the heals carried (``healing.held_heal``, A132), with
+to spend, health plus the potions carried (``healing.held_heal``, A132;
+food is eaten on pickup, never carried, A155), with
 the expected cost of the goal being worked: the damage its hostiles are
 expected to deal while she kills them one by one. That cost is Gary's win
 estimate, reused, not copied: the threat table and the published rolls
@@ -32,11 +33,11 @@ from typing import TYPE_CHECKING, Protocol
 from agentrealm_adk.discovery import seen_prices
 from agentrealm_adk.entrance_needs import lying_in_sight, meets, unmet_need
 from agentrealm_adk.equip import hunting_ceiling, weapon_rank
-from agentrealm_adk.healing import held_heal
+from agentrealm_adk.healing import held_heal, worth_eating
 from agentrealm_adk.knowledge_maps import map_level_known
 from agentrealm_adk.level_order import CLEARED, entrance_rank, target_level
 from agentrealm_adk.sellers import sellers_of
-from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_weapon, sold_codes, worn_slot
+from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_potion, is_weapon, sold_codes, worn_slot
 from agentrealm_adk.survival import (
     FIGHT_REACH_RADIUS,
     estimate_health,
@@ -360,9 +361,16 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
 
 
 def food_in_sight(w: WorldModel) -> Entity | None:
-    """The nearest free heal lying in sight."""
+    """The nearest free heal lying in sight: a potion, which is carried, or
+    food she is hurt by at least the heal of (``healing.worth_eating``, A155):
+    food is eaten on pickup, even at full health, so it is left lying until
+    then."""
     here = w.pos
-    free = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and heals(e.code)]
+    free = [
+        e
+        for e in w.entities
+        if e.kind == "supply" and e.gem_price is None and (is_potion(e.code) or worth_eating(w, e.code))
+    ]
     if here is None or not free:
         return None
     return min(free, key=lambda e: (chebyshev(here, e.pos), e.pos))

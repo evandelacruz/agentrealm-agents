@@ -342,7 +342,7 @@ class RunnerTest(unittest.TestCase):
         # intent, still held as a queue until it runs (A63 run 3).
         fake = FakeClient([{"tick": 10, "window_remaining_ms": 0}])
         r = self.runner(fake, Policy(goals=[], pickup=True))
-        r.world.entities = [Entity("supply", 5, (1, 0), "apple")]
+        r.world.entities = [Entity("supply", 5, (1, 0), "small_potion")]
         r.tick()
         self.assertEqual(fake.sent[0][0], [{"verb": "Take", "supply_id": 5}])
         self.assertEqual(r.mem.pending, {"verb": "Take", "supply_id": 5})

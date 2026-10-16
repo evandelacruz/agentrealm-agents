@@ -263,14 +263,15 @@ class PickupRoomTest(unittest.TestCase):
 
 
 class DetourRoomTest(unittest.TestCase):
-    def test_food_is_worth_a_detour_only_when_it_fits(self):
+    def test_food_takes_no_room_so_a_full_pack_never_bars_it(self):
+        # Food is eaten on pickup, never carried (A155): it needs no slot.
         w = world()
         full_pack(w)
         w.health, w.max_health = 3, 10
         apple = Entity("supply", 70, (5, 5), "apple")
-        self.assertFalse(valuable(w, apple, {}, ctx(plan())))
-        w.held_supplies.pop()
         self.assertTrue(valuable(w, apple, {}, ctx(plan())))
+        self.assertEqual(make_room(w, Pickup(70, "apple", (5, 5), None, 200)).kind, TAKE)
+        w.held_supplies.pop()
         gem = Entity("supply", 71, (5, 4), "gem")
         w.held_supplies.append(InventorySupply(9, "rope"))
         self.assertTrue(valuable(w, gem, {}, ctx(plan())))

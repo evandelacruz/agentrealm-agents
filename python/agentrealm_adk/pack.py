@@ -5,7 +5,8 @@ Shop's ``buy``, Loot's ``fetch_item``, the Pickup reflex, Level's
 prerequisite and Detour's pick of what is worth a walk (Gather takes only
 gems, which take no slot; Recover withdraws only what fits). The rule:
 
-- A supply that fits, or a gem or life (counters, no slot), is taken.
+- A supply that fits, a gem or life (counters, no slot), or food (eaten on
+  pickup, never carried: Manual §11 Food and potions, A155) is taken.
 - A supply the plan reserves is never dropped (:func:`reserved_supplies`):
   one held supply for each op on the stack that will use it.
 - Nothing is dropped where a dropped supply becomes shop stock: on a known
@@ -33,7 +34,7 @@ from .healing import supply_matches
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase, knowledge_items
 from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
-from .supplies import kept_on_break
+from .supplies import eaten_on_pickup, kept_on_break
 from .travel.knowledge import iter_shop_cells
 from .world import NEIGHBOURS, Pos, WorldModel, chebyshev
 
@@ -122,7 +123,7 @@ def make_room(
     ``plan_ops`` are the ops left on the stack, which reserve what they use;
     ``named`` is the code a ``buy`` or ``fetch_item`` op said to drop."""
     items = knowledge_items(knowledge)
-    if (p.chest_id is None and is_counter_supply(p.code, items)) or not inventory_full(w):
+    if (p.chest_id is None and is_counter_supply(p.code, items)) or eaten_on_pickup(p.code) or not inventory_full(w):
         return Room(TAKE)
     reserved = {s.id for s in reserved_supplies(w, plan_ops, knowledge)}
     free = [s for s in droppable_supplies(w) if s.id not in reserved]

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from agentrealm_adk.equip import weapon_to_rearm
 from agentrealm_adk.executor.supply_refusals import can_try, carried_ids, in_hand, must_arm
-from agentrealm_adk.healing import in_combat, spend_potion, walk_seconds
+from agentrealm_adk.healing import hurt, in_combat, spend_potion, walk_seconds
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.supplies import BLOCK_FOOD, chest_capacity, chest_upgrade, heal_of, is_potion, used_on_self
@@ -100,8 +100,11 @@ def potion_refused(w: WorldModel, ctx: PlayContext, plan: Plan, code: str) -> st
     next on the plan (``fight_ahead``) and Heal's food route
     (``food.food_route``, the one food test). In combat or about to be the
     planner's call stands; out of combat the reason names the food Heal
-    eats instead, or the low line the potion is kept above."""
+    eats instead, or the low line the potion is kept above. At full health
+    none is drunk, ordered or not: it would be used up for nothing (A155)."""
     m, ahead = ctx.memory, fight_ahead(plan)
+    if not hurt(w):
+        return "a potion is used up even at full health, so none is drunk at full health"
     route = None if in_combat(w, m, ctx.policy, fight_ahead=ahead) else food_route(w, ctx)
     if spend_potion(w, m, ctx.policy, ctx.params, code, food=route is not None, ordered=True, fight_ahead=ahead):
         return None

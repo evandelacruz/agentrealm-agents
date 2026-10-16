@@ -161,7 +161,6 @@ class Memory:
     self_use: int | None = None  # supply id of the Use on yourself sent (a potion, food or a chest, A108), until its Use applies or is refused or another queue replaces it (A24)
     self_use_rearm: str | None = None  # weapon code armed before a Use on yourself; restored once, on Heal's next decision (A24)
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
-    heal_pending: tuple[int, str, str] | None = None  # (health before, supply code, "take"|"use") awaiting observation
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)

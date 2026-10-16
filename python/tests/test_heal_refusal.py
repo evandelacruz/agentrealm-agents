@@ -132,7 +132,7 @@ class DrinkRefusalTest(RefusalTest):
             self.assertNotIn(USE_SELF, self.decide(), "the same situation: not sent again")
         w.held_supplies = [KNIFE, POTION_A, InventorySupply(6, "apple")]  # a new item
         self.next_tick()
-        self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 6}, "carried food first")
+        self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 4}, "a new item held: the potion again, food never")
         w.held_supplies = [KNIFE, POTION_A]
         w.pos = (3, 4)  # it moved
         self.next_tick()

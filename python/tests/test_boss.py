@@ -1,17 +1,21 @@
-"""A38: Boss state, plan preconditions, fight clock, defeat from boss health."""
+"""A38: Boss state, plan preconditions, fight clock, defeat from boss health.
+A163: the clock is counted from the boss-door step, and Boss leaves by the exit door."""
 
 import random
 import unittest
 from unittest import mock
 
+from agentrealm_adk import boss_clock
 from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_adk.item_table import InventorySupply
-from agentrealm_adk.memory import BossFight, Memory
+from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.memory import BossClock, BossFight, Memory
+from agentrealm_adk.survival import health_left
 from agentrealm_agent.plan import Plan, goal_done, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_agent.states.boss import (
-    CLOCK_COMMIT_TICKS,
+    LEAVE_MARGIN_SECONDS,
     boss_attack_queue,
     fight_boss_preconditions_met,
     potion_count,
@@ -19,7 +23,7 @@ from agentrealm_agent.states.boss import (
 )
 from agentrealm_agent.states.fight import fight_target
 from agentrealm_agent.states.flee import should_flee
-from agentrealm_adk.world import Entity, WorldModel, ZoneFact
+from agentrealm_adk.world import Entity, Passage, WorldModel, ZoneFact
 
 
 def grid(rows: list[str], at=(0, 0), map_id=8) -> WorldModel:
@@ -52,6 +56,12 @@ def boss_plan(x=0, y=0, **fields) -> Plan:
 
 def boss(health=20, pos=(2, 0), eid=50) -> Entity:
     return Entity("npc", eid, pos, "cellar_boss", health=health, max_health=30)
+
+
+def in_room(w: WorldModel, m: Memory, landing=(1, 0), door_tick=None) -> Memory:
+    """The clock started on a step through the boss door that landed on ``landing``."""
+    m.boss_clock = BossClock(w.tick if door_tick is None else door_tick, w.map_id, landing)
+    return m
 
 
 class FightBossOpTest(unittest.TestCase):
@@ -159,10 +169,9 @@ class DefeatTest(unittest.TestCase):
 
     def test_boss_out_of_view_with_clock_stays_engaged(self):
         w = grid(["..."], at=(1, 0), map_id=9)
-        w.boss_fight_end_tick = w.tick + 500
         w.entities = [boss()]
         plan = boss_plan()
-        m = Memory()
+        m = in_room(w, Memory())
         sync_boss(w, m, plan)
         w.entities = []
         sync_boss(w, m, plan)
@@ -234,7 +243,7 @@ class RetreatCommitTest(unittest.TestCase):
         w.health = 1
         w.zones[9] = {(2, 1): ZoneFact(safe=True)}
         w.entities = [boss(pos=(3, 0))]
-        return w, Memory(), boss_plan(0, 0)
+        return w, in_room(w, Memory()), boss_plan(5, 5)
 
     def test_retreats_out_when_path_and_clock_allow(self):
         w, m, plan = self.hurt_in_fight()
@@ -247,18 +256,39 @@ class RetreatCommitTest(unittest.TestCase):
         """Review on #131: a boss two cells off and not moving is still one to leave."""
         w = grid(["D.....", "######"], at=(2, 0), map_id=9)
         w.entities = [boss(pos=(4, 0))]
-        out = dispatch(w, ctx(w, Memory(), boss_plan(0, 0), on_hostile="fight"))
+        out = dispatch(w, ctx(w, in_room(w, Memory()), boss_plan(5, 5), on_hostile="fight"))
         self.assertEqual(out.state, "Boss")
         self.assertIn("retreat out", out.reason)
         self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0))
 
-    def test_commits_when_clock_nearly_gone(self):
+    def test_leaves_by_the_exit_door_near_the_limit(self):
+        """Manual §11: before the limit, walk out through the room's exit door (A163)."""
         w, m, plan = self.hurt_in_fight()
-        w.boss_fight_end_tick = w.tick + CLOCK_COMMIT_TICKS
-        out = dispatch(w, ctx(w, m, plan, on_hostile="fight"))
+        w.health = 10  # not hurt, and a boss nearly beaten: only the clock sends it out
+        w.entities = [boss(health=2, pos=(3, 0))]
+        w.tick = 5000
+        c = ctx(w, m, plan, on_hostile="fight")
+        limit = boss_clock.DEFAULT_LIMIT_SECONDS * c.tick_hz
+        # Two steps to the exit door and the margin left: time to go.
+        m.boss_clock = BossClock(w.tick - limit + 2 * 4 + LEAVE_MARGIN_SECONDS * c.tick_hz, 9, (1, 0))
+        out = dispatch(w, c)
         self.assertEqual(out.state, "Boss")
-        self.assertTrue(out.paced)
+        self.assertIn("leave before the limit", out.reason)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0))
+        # A minute earlier it fights on.
+        m.boss_clock = BossClock(w.tick - limit + 600, 9, (1, 0))
+        out = dispatch(w, c)
         self.assertEqual(out.intents[0]["verb"], "Use")
+
+    def test_walks_to_the_rooms_exit_door_not_the_ops_boss_door(self):
+        """Finding 38: the op's boss door is on the map outside; out is by the room's door."""
+        w, m, plan = self.hurt_in_fight()
+        w.view.tiles[(4, 0)] = "framed_door"
+        w.entities = [boss(pos=(3, 0))]
+        in_room(w, m, landing=(1, 0))
+        self.assertEqual(boss_clock.exit_door(m, w, None), (0, 0))
+        in_room(w, m, landing=(4, 1))
+        self.assertEqual(boss_clock.exit_door(m, w, None), (4, 0))
 
     def test_commits_with_no_way_out(self):
         w, m, plan = self.hurt_in_fight()
@@ -309,21 +339,73 @@ class BossEntityParsingTest(unittest.TestCase):
 
 
 class BossClockTest(unittest.TestCase):
-    def test_in_boss_fight_from_served_clock(self):
-        w = WorldModel(character_id=1, tick=100)
-        w.apply_observation({"version": "1", "complete": True, "snapshot": {"boss_fight_end_tick": 250}})
-        self.assertTrue(w.in_boss_fight())
-        self.assertEqual(w.boss_fight_ticks_left(), 150)
-        w.tick = 260
-        self.assertFalse(w.in_boss_fight())
+    """A163: no read serves the limit or the time left; it is counted."""
 
-    def test_delta_keeps_clock_unless_named(self):
-        w = WorldModel(character_id=1, tick=100)
-        w.apply_observation({"version": "1", "complete": True, "snapshot": {"boss_fight_end_tick": 250}})
-        w.apply_observation({"version": "2", "delta": {"lives": 3}})
-        self.assertEqual(w.boss_fight_end_tick, 250)
-        w.apply_observation({"version": "3", "delta": {"boss_fight_end_tick": None}})
-        self.assertIsNone(w.boss_fight_end_tick)
+    def stepped_through(self, tick=400) -> tuple[WorldModel, Memory, Plan]:
+        w = grid(["D.."], at=(1, 0), map_id=9)
+        w.tick = tick
+        w.map_levels[9] = 2
+        w.passage = Passage(8, (5, 5), 9, tick, (1, 0))
+        plan = boss_plan(5, 5)
+        m = Memory()
+        sync_boss(w, m, plan)
+        return w, m, plan
+
+    def test_the_clock_starts_on_the_boss_door_step(self):
+        w, m, plan = self.stepped_through()
+        self.assertEqual(m.boss_clock, BossClock(400, 9, (1, 0)))
+        w.tick = 1000
+        sync_boss(w, m, plan)
+        self.assertEqual(m.boss_clock.door_tick, 400, "counted from the step, not restarted")
+        self.assertEqual(boss_clock.ticks_left(m, w, None, 10), 400 + 3000 - 1000, "5 minutes when the level sets none")
+        self.assertTrue(boss_clock.running(m, w))
+
+    def test_another_door_starts_no_clock(self):
+        w = grid(["D.."], at=(1, 0), map_id=9)
+        w.passage = Passage(8, (4, 4), 9, 400, (1, 0))
+        m = Memory()
+        sync_boss(w, m, boss_plan(5, 5))
+        self.assertIsNone(m.boss_clock)
+
+    def test_the_levels_limit_is_kept_in_the_knowledge_base(self):
+        w, m, _ = self.stepped_through()
+        kb = KnowledgeBase.empty("olympuff")
+        kb.levels["2"] = {boss_clock.LIMIT: 90}
+        self.assertEqual(boss_clock.ticks_left(m, w, kb, 10), 900)
+
+    def test_a_death_no_hit_explains_is_the_limit_and_is_kept(self):
+        w, m, _ = self.stepped_through()
+        kb = KnowledgeBase.empty("olympuff")
+        died = [{"kind": "Damaged", "amount": 2, "tick": 1600}, {"kind": "Died", "tick": 1600}]
+        self.assertEqual(boss_clock.note_death(m, w, kb, died, 9, 10), 120)
+        self.assertEqual(kb.levels["2"][boss_clock.LIMIT], 120)
+        killed = [{"kind": "Damaged", "amount": 9, "tick": 1700}, {"kind": "Died", "tick": 1700}]
+        self.assertIsNone(boss_clock.note_death(m, w, kb, killed, 9, 10), "the boss's hit killed: no limit learned")
+        self.assertEqual(kb.levels["2"][boss_clock.LIMIT], 120)
+
+    def test_the_clock_stops_off_the_rooms_map(self):
+        w, m, plan = self.stepped_through()
+        w.apply_position({"map_id": 8, "x": 5, "y": 6})
+        sync_boss(w, m, plan)
+        self.assertIsNone(m.boss_clock)
+
+    def test_a_return_restarts_the_clock_and_the_boss_keeps_its_damage(self):
+        """Manual §11: a boss keeps the damage it has taken; a new step is a new clock."""
+        w, m, plan = self.stepped_through()
+        w.entities = [boss(health=12)]
+        sync_boss(w, m, plan)
+        w.apply_position({"map_id": 8, "x": 5, "y": 6})
+        w.entities = []
+        sync_boss(w, m, plan)
+        self.assertIsNone(m.boss)
+        w.tick = 2000
+        w.apply_position({"map_id": 9, "x": 1, "y": 0})
+        w.passage = Passage(8, (5, 5), 9, 2000, (1, 0))
+        w.entities = [boss(health=12)]
+        sync_boss(w, m, plan)
+        self.assertEqual(m.boss_clock.door_tick, 2000)
+        self.assertEqual(m.boss.since_tick, 2000)
+        self.assertEqual(health_left(w.entities[0]), 12, "priced at its served health, damage kept")
 
 
 class BossSwingPacingTest(unittest.TestCase):

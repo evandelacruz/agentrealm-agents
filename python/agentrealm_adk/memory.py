@@ -36,6 +36,16 @@ class BossFight:
     since_tick: int  # tick the boss was first seen
 
 
+@dataclass(frozen=True)
+class BossClock:
+    """The boss fight's clock (A163): no read serves it, so it is counted
+    from the tick the step through the boss door applied (``boss_clock``)."""
+
+    door_tick: int  # tick the step through the boss door was read applied
+    room_map: int  # the boss room's map: the clock runs while the character is on it
+    landing: Pos | None  # where the boss door's warp landed: the exit door is the one by it
+
+
 @dataclass
 class HuntSearch:
     """Travel's search for a hunting ground (A27): the ``travel`` op it runs
@@ -163,6 +173,8 @@ class Memory:
     last_weapon: str | None = None  # the last weapon seen armed this run (equip.note_last_weapon): what a drink re-arms
     # Boss (A38): the fight under way, or None. Set and cleared only by states/boss.sync_boss.
     boss: BossFight | None = None
+    # The boss fight's clock (A163), or None. Set and cleared only by states/boss.sync_boss.
+    boss_clock: BossClock | None = None
     solve_rearm: str | None = None  # code armed before Solve armed a use_block supply, re-armed once no solve op is on top (A39)
     # (weapon, tool): Gather armed the cutting tool over the weapon, re-armed once no gather op is on top
     gather_rearm: tuple[str, str] | None = None

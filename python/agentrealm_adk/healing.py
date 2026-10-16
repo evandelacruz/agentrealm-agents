@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from . import boss_clock
 from .break_memory import choice_at, given_up_blocks
 from .directives import PARAM_DEFAULTS
 from .engagement import drink_turns_fight
@@ -134,7 +135,7 @@ def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = F
     more than food."""
     if (w.map_level or 0) > 0 or fight_ahead:
         return True
-    if m.boss is not None or w.in_boss_fight():
+    if m.boss is not None or boss_clock.running(m, w):
         return True
     return bool(hostiles_in_range(w, policy)) or recently_attacked(w)
 

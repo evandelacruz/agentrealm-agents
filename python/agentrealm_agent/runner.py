@@ -38,6 +38,7 @@ from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_maps import record_hunting_zone, record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from agentrealm_adk.level_order import note_door_step, settle_entry
+from agentrealm_adk import boss_clock
 from agentrealm_adk.equip import note_equip_result, sync_refusals
 from agentrealm_adk.loot import (
     learn_chest_upgrade,
@@ -502,7 +503,7 @@ class Runner:
         from_map, from_pos, block_type = warp
         if (w.map_id, w.pos) == (from_map, from_pos):
             return
-        w.passage = Passage(from_map, from_pos, w.map_id, w.tick)
+        w.passage = Passage(from_map, from_pos, w.map_id, w.tick, w.pos)
         if self.knowledge is not None:
             record_warp(self.knowledge, from_map, from_pos, block_type, w.map_id, w.pos)
             # An entrance's number once the landing map's level is read (A145).
@@ -729,7 +730,9 @@ class Runner:
         self._forget_replaced_self_use(intents)
         earlier = w.entities
         worn_before = dict(w.worn_codes)
+        health_before = w.health
         events = w.apply_events(r.get("events_by_tick") or [])
+        boss_clock.note_death(m, w, self.knowledge, events, health_before, self.tick_hz)  # the level's limit (A163)
         if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
             self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))

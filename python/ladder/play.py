@@ -481,7 +481,7 @@ class LadderRunner:
         if warp is None or w.map_id is None or w.pos is None or (w.map_id, w.pos) == warp[:2]:
             return
         from_map, from_pos, block_type = warp
-        w.passage = Passage(from_map, from_pos, w.map_id, w.tick)
+        w.passage = Passage(from_map, from_pos, w.map_id, w.tick, w.pos)
         if kb is not None:
             record_warp(kb, from_map, from_pos, block_type, w.map_id, w.pos)
             note_door_step(m, from_map, from_pos, w.map_id, w.pos)

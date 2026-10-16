@@ -230,6 +230,22 @@ class WayOutTest(unittest.TestCase):
         kb.maps["9"] = {"level": 2}
         self.assertEqual(way_out(kb, w), (0, 0), "the door by the landing leads deeper: the next nearest")
 
+    def test_a_way_out_that_spends_no_key_comes_first(self):
+        """Manual §11: a locked door uses up its key on every pass (A163)."""
+        w = self.level_map()
+        kb = kb_with(1, (5, 5))
+        record_warp(kb, 1, (5, 5), "framed_door", 8, (4, 1))
+        record_warp(kb, 8, (4, 0), "framed_door", 1, (5, 6))
+        record_warp(kb, 8, (0, 2), "framed_door", 1, (6, 6))
+        w.apply_minimap({"maps": [{"map_id": 1}]})
+        w.apply_position({"map_id": 8, "x": 3, "y": 1, "level": 2})
+        self.assertEqual(way_out(kb, w), (4, 0), "the nearest way out")
+        w.view.locked[(4, 0)] = True
+        self.assertEqual(way_out(kb, w), (0, 2), "the open one, though farther")
+        w.view.locked.clear()
+        kb.maps["8"]["doors"][[(d["x"], d["y"]) for d in kb.maps["8"]["doors"]].index((4, 0))]["locked"] = True
+        self.assertEqual(way_out(kb, w), (0, 2), "a lock the knowledge base keeps counts too")
+
     def test_no_known_way_in_or_out_asks_the_planner(self):
         w = self.level_map()
         kb = KnowledgeBase.empty("sandbox")

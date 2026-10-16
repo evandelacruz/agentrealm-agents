@@ -77,12 +77,14 @@ BLOCKED_SIGHTING_TICKS = 3000
 @dataclass(frozen=True)
 class Passage:
     """A door the character went through (A144): the door's map and cell, the
-    map its warp landed on, and the tick the landing was read."""
+    map its warp landed on, the tick the landing was read, and the cell it
+    landed on (A163: a boss room's exit door is the one by it)."""
 
     from_map: int
     from_pos: Pos
     to_map: int
     tick: int
+    to_pos: Pos | None = None
 
 
 @dataclass
@@ -419,9 +421,6 @@ class WorldModel:
     zone_failed: set[tuple[int, Pos]] = field(default_factory=set)
     # Town and Respawned locations used to seed safe-tile probes.
     respawn_anchors: list[tuple[int, Pos]] = field(default_factory=list)
-    # Boss fight clock, read only when a round trip carries it; the published
-    # docs name no such field (GAME_NOTES.md Levels and bosses, A38).
-    boss_fight_end_tick: int | None = None
     # Tick of the last `level_clear_ceremony` (a boss clear; API Round Trip).
     level_clear_tick: int | None = None
 
@@ -906,21 +905,6 @@ class WorldModel:
             if level is not None and level not in self.levels_cleared:
                 self.levels_cleared = sorted({*self.levels_cleared, level})
 
-    def _apply_boss_fight_clock(self, body: dict, *, complete: bool) -> None:
-        if complete or "boss_fight_end_tick" in body:
-            self.boss_fight_end_tick = _opt_int(body.get("boss_fight_end_tick"))
-
-    def in_boss_fight(self) -> bool:
-        """True while the served fight clock has not expired (A38)."""
-        end = self.boss_fight_end_tick
-        return end is not None and end > self.tick
-
-    def boss_fight_ticks_left(self) -> int | None:
-        end = self.boss_fight_end_tick
-        if end is None:
-            return None
-        return max(0, end - self.tick)
-
     def _apply_inventory(self, inv: dict | None) -> None:
         if inv is None:
             return
@@ -938,7 +922,6 @@ class WorldModel:
     def _apply_snapshot_body(self, snap: dict) -> None:
         self._apply_body_scalars(snap)
         self._apply_vitals(snap, complete=True)
-        self._apply_boss_fight_clock(snap, complete=True)
         if "inventory" in snap:
             self._apply_inventory(snap.get("inventory"))
         if "entities" in snap:
@@ -954,7 +937,6 @@ class WorldModel:
     def _apply_delta_body(self, delta: dict) -> None:
         self._apply_body_scalars(delta)
         self._apply_vitals(delta, complete=False)
-        self._apply_boss_fight_clock(delta, complete=False)
         if "inventory" in delta:
             self._apply_inventory(delta.get("inventory"))
         if "entities" in delta:

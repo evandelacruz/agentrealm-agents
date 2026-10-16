@@ -411,9 +411,12 @@ def health_left(e: Entity, taken: Mapping[int, int] | None = None) -> int:
     """The health hostile ``e`` has left: ``UNKILLED_HOSTILE_HEALTH`` less
     the damage it has taken (``WorldModel.npc_damage``), kept until it dies
     since a hostile never heals (Manual §11 Hostiles), at least 1 while it
-    lives. A boss is priced at ``UNKILLED_HOSTILE_HEALTH`` as before: its
-    served health and the fight's clock are A163's."""
-    if e.is_boss or e.kind != "npc":
+    lives. A boss is priced at its served ``health``, which keeps the damage
+    it has taken between fights and challengers (Manual §11 Bosses and
+    levels, A163), else at ``UNKILLED_HOSTILE_HEALTH``."""
+    if e.is_boss:
+        return max(1, e.health) if e.health is not None else UNKILLED_HOSTILE_HEALTH
+    if e.kind != "npc":
         return UNKILLED_HOSTILE_HEALTH
     return max(1, UNKILLED_HOSTILE_HEALTH - (taken or {}).get(e.id, 0))
 

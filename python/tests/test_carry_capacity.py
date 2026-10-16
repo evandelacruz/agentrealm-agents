@@ -174,6 +174,14 @@ class CarriedChestRecordTest(unittest.TestCase):
         self.assertIsNone(w.carried_chest)
         self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
 
+    def test_a_self_read_without_lives_checks_nothing(self):
+        w = WorldModel(character_id=7)
+        load_carried_chest(self.saved(9), w)
+        w.apply_self({"alive": True})
+        self.assertEqual((w.carried_chest, w.chest_lives), ("middle_chest", 9))
+        w.apply_self({"lives": 9, "alive": True})
+        self.assertEqual((w.carried_chest, w.chest_lives), ("middle_chest", None))
+
     def test_fewer_lives_in_the_first_snapshot_is_a_death_since(self):
         w = WorldModel(character_id=7)
         load_carried_chest(self.saved(9), w)

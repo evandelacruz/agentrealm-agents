@@ -512,7 +512,8 @@ class WorldModel:
         if "movement_speed" in s:
             self.movement_speed = max(1, int(s["movement_speed"]))
         self.alive = bool(s.get("alive", True))
-        self._read_lives(int(s.get("lives", 0)))
+        if "lives" in s:
+            self._read_lives(int(s["lives"]))
         if "asleep" in s:
             self._set_asleep(bool(s["asleep"]))
         self.placed = bool(s.get("placed", True)) or (self.woke and self.alive and not self.asleep)
@@ -1106,9 +1107,10 @@ class WorldModel:
         self.sync_carry_capacity()
 
     def _read_lives(self, lives: int) -> None:
-        """Lives from a self read or a snapshot. The first read after the
-        applied chest was loaded checks it: fewer lives than when it was
-        saved is a death since, which reset it (A157)."""
+        """Lives from a self read or a snapshot that carries them (a read
+        without them leaves lives unknown and checks nothing). The first one
+        after the applied chest was loaded checks it: fewer lives than when it
+        was saved is a death since, which reset it (A157)."""
         self.lives = lives
         if self.chest_lives is not None:
             if lives < self.chest_lives:

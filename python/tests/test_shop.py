@@ -30,7 +30,9 @@ from agentrealm_adk.sellers import Seller, codes_with_sellers, lapse_not_sold, r
 from agentrealm_adk.travel import record_shop_cell
 from agentrealm_adk.travel.knowledge import (
     RESTOCK_SECONDS,
-    SALE_LAPSE_SECONDS,
+    SALE_LAPSE_MISSES,
+    load_our_drops,
+    save_our_drops,
     iter_not_sold,
     iter_shop_sales,
     iter_shop_cells,
@@ -571,20 +573,42 @@ class ShopStockReturnsTest(unittest.TestCase):
         [s] = sellers_of("torch", w, kb)
         self.assertTrue(s.in_stock)
 
-    def test_the_sale_lapses_only_on_a_longer_absence(self):
+    def test_the_sale_lapses_only_after_misses_each_past_the_restock(self):
         kb = self.kb()
-        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
-        note_sold_out(kb, 1, (30, 0), "torch", 100 + (SALE_LAPSE_SECONDS * HZ) // 2, HZ)
-        self.assertEqual(len(iter_shop_sales(kb)), 1, "half the lapse: still its seller")
-        note_sold_out(kb, 1, (30, 0), "torch", 100 + SALE_LAPSE_SECONDS * HZ, HZ)
-        self.assertEqual(iter_shop_sales(kb), [], "absent the whole lapse: the sale is forgotten")
+        window = RESTOCK_SECONDS * HZ
+        tick = 100
+        note_sold_out(kb, 1, (30, 0), "torch", tick, HZ)  # the sell-out itself: no miss
+        for _ in range(SALE_LAPSE_MISSES - 1):
+            tick += window
+            note_sold_out(kb, 1, (30, 0), "torch", tick, HZ)
+            self.assertEqual(len(iter_shop_sales(kb)), 1, "still its seller")
+        tick += window
+        note_sold_out(kb, 1, (30, 0), "torch", tick, HZ)
+        self.assertEqual(iter_shop_sales(kb), [], "missed every restock: the sale is forgotten")
         self.assertEqual(iter_sold_out(kb), {})
 
-    def test_stock_hidden_under_another_supply_is_no_absence(self):
+    def test_two_visits_far_apart_never_lapse_a_shop_that_restocks(self):
+        # Empty at 0, back at 120 s, restocked and bought again, empty at 700 s: one miss, not a lapse.
         kb = self.kb()
-        note_sold_out(kb, 1, (30, 0), "torch", 100, HZ)
-        note_sold_out(kb, 1, (30, 0), "torch", 100 + SALE_LAPSE_SECONDS * HZ, HZ, hidden=True)
-        self.assertEqual(len(iter_shop_sales(kb)), 1, "hidden, the absence starts again")
+        note_sold_out(kb, 1, (30, 0), "torch", 0, HZ)
+        note_sold_out(kb, 1, (30, 0), "torch", 700 * HZ, HZ)
+        self.assertEqual(len(iter_shop_sales(kb)), 1)
+        self.assertEqual(iter_sold_out(kb), {(1, (30, 0), "torch"): 700 * HZ + RESTOCK_SECONDS * HZ})
+
+    def test_sightings_inside_the_restock_window_are_one_sell_out(self):
+        kb = self.kb()
+        for tick in range(0, RESTOCK_SECONDS * HZ, 50):
+            note_sold_out(kb, 1, (30, 0), "torch", tick, HZ)
+        self.assertEqual(iter_sold_out(kb), {(1, (30, 0), "torch"): RESTOCK_SECONDS * HZ})
+        self.assertEqual(len(iter_shop_sales(kb)), 1)
+
+    def test_stock_hidden_under_another_supply_is_no_miss(self):
+        kb = self.kb()
+        window = RESTOCK_SECONDS * HZ
+        note_sold_out(kb, 1, (30, 0), "torch", 0, HZ)
+        for i in range(1, SALE_LAPSE_MISSES + 2):
+            note_sold_out(kb, 1, (30, 0), "torch", i * window, HZ, hidden=True)
+        self.assertEqual(len(iter_shop_sales(kb)), 1, "hidden, never a miss")
 
     def test_seen_selling_it_again_clears_the_sold_out(self):
         kb = self.kb()
@@ -773,6 +797,18 @@ class RunnerLearnsWhatAShopSellsTest(unittest.TestCase):
         self.assertFalse(r.on_result({"tick": 5, "index": 0, "outcome": "applied"}, 0))
         r._learn_shops_from_entities({"supplies": [{"id": 9, "x": 4, "y": 5, "supply_subtype_code": "bronze_sword", "gem_price": 15}]})
         self.assertEqual(iter_shop_cells(kb), [])
+
+    def test_our_drops_are_kept_across_runs(self):
+        kb = KnowledgeBase.empty("sandbox")
+        w = WorldModel(character_id=4)
+        w.note_our_drop(9)
+        save_our_drops(kb, w)
+        later = WorldModel(character_id=4)
+        load_our_drops(kb, later)
+        self.assertTrue(later.is_our_drop(9))
+        other = WorldModel(character_id=5)
+        load_our_drops(kb, other)
+        self.assertFalse(other.is_our_drop(9), "per character")
 
 
 class RunnerShopResultTest(unittest.TestCase):

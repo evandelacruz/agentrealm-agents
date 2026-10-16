@@ -66,7 +66,7 @@ from agentrealm_adk.executor.supply_refusals import (
 from agentrealm_adk.fording import ford_gate, loadout_memory, note_would_strand
 from agentrealm_adk.supplies import is_food
 from agentrealm_adk.travel.resolve import given_up_travel, travel_given_up
-from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.travel.strength import loadout_key
 from agentrealm_adk.executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -209,6 +209,7 @@ class Runner:
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_carried_chest(knowledge, self.world)  # the chest applied in an earlier run (A115)
         load_death_chests(knowledge, self.world)  # chests earlier deaths left (A122)
+        load_our_drops(knowledge, self.world)  # supplies earlier runs dropped: no shop's (A158)
         self.mem = Memory()
         seed = cfg.policy.seed if cfg.policy.seed is not None else character_id
         self.rng = random.Random(seed)
@@ -395,6 +396,7 @@ class Runner:
                 save_hostiles(self.knowledge, self.world, self._loaded_hostiles)
                 save_carried_chest(self.knowledge, self.world)
                 save_death_chests(self.knowledge, self.world)
+                save_our_drops(self.knowledge, self.world)
             self.trace.close()
 
     def next_window(self, not_before: float) -> None:

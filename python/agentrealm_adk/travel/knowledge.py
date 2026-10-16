@@ -6,7 +6,7 @@ from typing import Any
 
 from ..knowledge_base import KnowledgeBase
 from ..knowledge_maps import HUNTING
-from ..world import Pos
+from ..world import Pos, WorldModel
 
 SHOPS = "shops"
 NOT_SOLD = "not_sold"
@@ -17,10 +17,13 @@ SOLD_OUT = "sold_out"
 # §11 Regrowth, drops, and returns, A159): a shop cell seen without its item is
 # sold out until then, not forgotten.
 RESTOCK_SECONDS = 120
-# A shop cell seen without its item, never hidden by another supply, for this
-# long since it was first seen so has lost the sale: stock that returns would
-# have shown by now (A159).
-SALE_LAPSE_SECONDS = 600
+# A shop cell's sale lapses only once it has been seen without its item this
+# many times, each after the stock it was missing would have returned (A159):
+# a miss inside the restock window is the same sell-out, never a second one.
+SALE_LAPSE_MISSES = 3
+# The supplies our own ``Drop`` put down, the latest kept per character (A158).
+OUR_DROPS = "our_drops"
+OUR_DROPS_KEPT = 64
 
 
 def _cell_key(p: Pos) -> str:
@@ -156,11 +159,13 @@ def note_sold_out(
     """The shop cell was seen at ``tick`` without ``code`` for sale (A159).
 
     Its stock returns ``RESTOCK_SECONDS`` after it is bought, so the cell is
-    sold out until then (``back``, a tick), not forgotten. ``since`` is the
-    tick it was first seen so; once that absence runs to
-    ``SALE_LAPSE_SECONDS`` the sale lapses and the cell sells it no more.
-    ``hidden``: another supply lies on the cell, which hides the stock, so
-    the absence starts again. A cell saved before A131 (no ``sells``) is
+    sold out until then (``back``, a tick), not forgotten. A sighting before
+    ``back`` is the same sell-out. One at or after it is a miss: the stock
+    could have returned and been bought again, so the cell is sold out again
+    from that sighting. The sale lapses only after ``SALE_LAPSE_MISSES``
+    misses in a row. ``hidden``: another supply lies on the cell and hides
+    the stock, so it counts no miss. A sighting selling the item clears it
+    all (``record_shop_cell``). A cell saved before A131 (no ``sells``) is
     checked: it sells nothing known."""
     if kb is None:
         return
@@ -175,16 +180,49 @@ def note_sold_out(
         if code not in sells:
             return
         out = row.setdefault(SOLD_OUT, {})
-        prior = out.get(code)
-        since = prior.get("since") if isinstance(prior, dict) and not hidden else None
-        since = since if isinstance(since, int) and since <= tick else tick
-        if tick - since >= SALE_LAPSE_SECONDS * tick_hz:
+        prior = out.get(code) if isinstance(out.get(code), dict) else {}
+        back, misses = prior.get("back"), prior.get("misses", 0)
+        misses = misses if isinstance(misses, int) else 0
+        if isinstance(back, int) and tick < back:
+            return  # the same sell-out: its stock is not due back yet
+        if isinstance(back, int) and not hidden:
+            misses += 1
+        if misses >= SALE_LAPSE_MISSES:
             del sells[code]
             out.pop(code, None)
         else:
-            out[code] = {"since": since, "back": tick + RESTOCK_SECONDS * tick_hz}
+            out[code] = {"back": tick + RESTOCK_SECONDS * tick_hz, "misses": misses}
         if not out:
             del row[SOLD_OUT]
+
+
+def load_our_drops(kb: KnowledgeBase | None, w: WorldModel) -> None:
+    """The supplies this character's ``Drop`` put down in earlier runs (A158)."""
+    if kb is None:
+        return
+    with kb.lock:
+        rows = kb.extra.get(OUR_DROPS)
+        ids = rows.get(str(w.character_id)) if isinstance(rows, dict) else None
+    for sid in ids if isinstance(ids, list) else ():
+        if isinstance(sid, int) and not isinstance(sid, bool):
+            w.note_our_drop(sid)
+
+
+def save_our_drops(kb: KnowledgeBase | None, w: WorldModel) -> None:
+    """Write back the latest ``OUR_DROPS_KEPT`` of this character's drops (A158)."""
+    if kb is None:
+        return
+    with kb.lock:
+        rows = kb.extra.get(OUR_DROPS)
+        rows = dict(rows) if isinstance(rows, dict) else {}
+        if w.our_drops:
+            rows[str(w.character_id)] = sorted(w.our_drops)[-OUR_DROPS_KEPT:]
+        else:
+            rows.pop(str(w.character_id), None)
+        if rows:
+            kb.extra[OUR_DROPS] = rows
+        else:
+            kb.extra.pop(OUR_DROPS, None)
 
 
 def iter_sold_out(kb: KnowledgeBase | None) -> dict[tuple[int, Pos, str], int]:

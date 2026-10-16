@@ -411,7 +411,8 @@ class WorldModel:
     death_chests_gone: list[int] = field(default_factory=list)
     # Supply ids our own applied ``Drop`` put on the ground (A158). Such a
     # supply is priced wherever it lies (Manual §11 A price belongs to the
-    # supply), so its cell is no shop: ``is_our_drop``. This run only.
+    # supply), so its cell is no shop: ``is_our_drop``. Kept across runs
+    # per character (``travel.knowledge.load_our_drops``, ``save_our_drops``).
     our_drops: set[int] = field(default_factory=set)
     # Supply ids inside each ground chest within reach, from the round trip's
     # snapshot (entities.chests[].contents). A chest farther away is absent.

@@ -7,8 +7,8 @@ that does not. ``sellers_of`` is the one seller test. A seller is known by:
   with its gem price. The cell itself is where to go. One seen since without
   it is sold out until its stock is back (``back``, A159: stock returns two
   minutes after it is bought, ``note_sold_out``): still its seller, but not
-  walked to and no buy's seller until then; the sale lapses only on a longer
-  absence.
+  walked to and no buy's seller until then; the sale lapses only after
+  ``SALE_LAPSE_MISSES`` misses in a row, each after its stock was due back.
 - ``clue``: a sign, scroll or NPC line with a phrase that names the item and
   a gem price ("Raft, thirty gems"), at the cell the clue was found
   (``clues``). The seller is somewhere round it: Shop walks there and searches.

@@ -42,6 +42,7 @@ from agentrealm_adk.survival import (
     estimate_health,
     expected_damage,
     known_hostile,
+    UNKILLED_HOSTILE_HEALTH,
     ticks_to_kill_them,
     worn_defense,
 )
@@ -137,8 +138,11 @@ class Budget:
 def fight_cost(foe: Entity, w: WorldModel, loadout: Loadout) -> float:
     """The damage ``foe`` is expected to deal while ``loadout`` kills it alone:
     Gary's win estimate, against the health it has left (``survival.health_left``:
-    a boss's as read, a hostile's less the damage it has taken)."""
+    less the damage it has taken), scaled from his assumed hostile's when a
+    read served it (a boss)."""
     ticks = ticks_to_kill_them([foe], loadout.weapon, w.npc_damage)
+    if foe.is_boss:
+        ticks *= (foe.max_health or foe.health or UNKILLED_HOSTILE_HEALTH) / UNKILLED_HOSTILE_HEALTH
     return expected_damage([foe], w.threat, ticks, loadout.armor)
 
 

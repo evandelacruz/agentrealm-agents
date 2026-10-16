@@ -434,6 +434,20 @@ class CoversPassTest(unittest.TestCase):
                 self.assertTrue(self.covers(), "with the fording supply worn, it can")
 
 
+    def test_a_drink_on_the_pass_costs_its_arm_and_its_use_and_no_cooldown(self):
+        """A153: a ``Use`` on yourself waits on no attack cooldown, so each
+        heal carried takes two ticks of hits (its ``Arm`` and its ``Use``),
+        whatever weapon is armed."""
+        from agentrealm_adk.item_table import InventorySupply
+        from agentrealm_adk.pathing import heal_on_pass
+
+        self.w.held_supplies = [InventorySupply(9, "small_potion")]  # heals 10
+        inside = [p for p in self.PATH if p in self.reach]
+        for armed in ("bronze_mallet", None):
+            self.w.armed_code = armed
+            # 1 a tick: two ticks of hits are worth the 10 it heals; a weapon cooldown's (11) were not.
+            self.assertEqual(heal_on_pass(self.w, inside, 1.0, 10), (10, 2), armed)
+
 class EscalationPlansAreHeldTest(unittest.TestCase):
     def test_a_level_the_ladder_climbs_to_this_decision_is_held_to_the_reach(self):
         """At WALK with a failed window, the ladder climbs to CAUTIOUS this

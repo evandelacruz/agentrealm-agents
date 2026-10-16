@@ -7,7 +7,6 @@ import unittest.mock
 from agentrealm_adk import healing
 from agentrealm_agent.brain import decide
 from agentrealm_adk.config import Policy
-from agentrealm_adk.executor import DEFAULT_WEAPON_COOLDOWN_TICKS
 from agentrealm_adk.healing import absorb_heal_pending, hurt, note_heal_pending
 from agentrealm_adk.executor.supply_refusals import Refusal, note_refusal, refusal_situation
 from agentrealm_adk.item_table import InventorySupply, carried_from_inventory
@@ -160,13 +159,15 @@ class HealStateTest(unittest.TestCase):
         self.assertEqual(d.submit_queue, [{"verb": "Arm", "supply_id": 4},
                                           {"verb": "Use", "target": {"kind": "self"}}])
 
-    def test_a_drink_waits_out_the_use_cooldown_after_the_arm(self):
+    def test_a_drink_right_after_a_swing_waits_on_no_cooldown(self):
+        # A153: a consumable's Use and its Arm wait on no attack cooldown
+        # (Manual §11 What waits on a cooldown).
         w = grid()
         w.tick = 100
         w.held_supplies = [InventorySupply(4, "small_potion")]
-        out = dispatch(w, ctx(Memory(last_use_tick=96)))
+        out = dispatch(w, ctx(Memory(last_use_tick=99)))
         self.assertTrue(out.paced)
-        self.assertEqual(verbs(out), ["Arm"] + ["Wait"] * (DEFAULT_WEAPON_COOLDOWN_TICKS - 5) + ["Use"])
+        self.assertEqual(verbs(out), ["Arm", "Use"])
 
     def test_the_reflex_probe_leaves_the_rearm_due(self):
         # While the drink's queue is held, the runner's reflex probe runs

@@ -109,7 +109,7 @@ class DrinkRefusalTest(RefusalTest):
         self.r.world.alive = True
         self.assertEqual(self.decide()[0], {"verb": "Arm", "supply_id": 4}, "back up: the same potion")
 
-    def test_a_persistent_transient_refusal_is_resent_once_a_cooldown_not_every_tick(self):
+    def test_a_persistent_transient_refusal_is_resent_once_a_second_not_every_tick(self):
         w = self.r.world
         w.held_supplies = [KNIFE, POTION_A]
         for _ in range(3):

@@ -145,10 +145,10 @@ class KeptDamageTest(unittest.TestCase):
         self.assertEqual(rows[9]["health_left"], 6)
         self.assertNotIn("health_left", rows[10], "never hit: nothing to show")
 
-    def test_health_left_is_at_least_one_and_a_boss_is_read(self):
+    def test_health_left_is_at_least_one_and_a_boss_is_priced_as_before(self):
         self.assertEqual(health_left(gnawer((0, 0)), {9: 40}), 1)
         boss = Entity("npc", 3, (0, 0), "fake_boss", health=37, max_health=60)
-        self.assertEqual(health_left(boss, {3: 5}), 37, "a boss's health is served")
+        self.assertEqual(health_left(boss, {3: 5}), UNKILLED_HOSTILE_HEALTH, "a boss's pricing is A163's")
 
     def test_a_hurt_hostile_is_a_shorter_fight(self):
         e = gnawer((1, 0))

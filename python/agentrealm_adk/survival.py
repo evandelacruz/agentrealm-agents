@@ -408,14 +408,14 @@ def attack_interval_ticks(weapon: str | None) -> int:
 
 
 def health_left(e: Entity, taken: Mapping[int, int] | None = None) -> int:
-    """The health ``e`` has left: a boss's as its read serves it, else
-    ``UNKILLED_HOSTILE_HEALTH`` less the damage it has taken
-    (``WorldModel.npc_damage``), kept until it dies since a hostile never
-    heals (Manual §11 Hostiles), at least 1 while it lives."""
-    if e.is_boss and e.health is not None:
-        return max(1, e.health)
-    hit = (taken or {}).get(e.id, 0) if e.kind == "npc" else 0
-    return max(1, UNKILLED_HOSTILE_HEALTH - hit)
+    """The health hostile ``e`` has left: ``UNKILLED_HOSTILE_HEALTH`` less
+    the damage it has taken (``WorldModel.npc_damage``), kept until it dies
+    since a hostile never heals (Manual §11 Hostiles), at least 1 while it
+    lives. A boss is priced at ``UNKILLED_HOSTILE_HEALTH`` as before: its
+    served health and the fight's clock are A163's."""
+    if e.is_boss or e.kind != "npc":
+        return UNKILLED_HOSTILE_HEALTH
+    return max(1, UNKILLED_HOSTILE_HEALTH - (taken or {}).get(e.id, 0))
 
 
 def ticks_to_kill_them(group: list[Entity], weapon: str | None = None, taken: Mapping[int, int] | None = None) -> float:

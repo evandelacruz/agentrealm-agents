@@ -73,13 +73,14 @@ from agentrealm_adk.executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
     DEFAULT_TICK_RATE_HZ,
     QUEUE_HORIZON_INTENTS,
-    attack_cooldown_ticks,
     build_paced_walk_queue,
+    is_weapon_swing,
     pace_speech,
     pace_uses,
     queue_horizon_intents,
     step_landing,
     trim_to_horizon,
+    use_cooldown_ticks,
     wait,
 )
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, held_queue_matches, open_step, possible_positions, unconfirmed_send
@@ -932,8 +933,9 @@ class Runner:
         verb = intent.get("verb")
         if verb != "SetPosition":
             if verb == "Use":
-                # Spaced by the armed weapon's attack cooldown (A123).
-                cooldown = attack_cooldown_ticks(w.armed_code, self.tick_hz)
+                # A swing is spaced by the armed weapon's attack cooldown
+                # (A123); any other Use goes out on the next tick (A153).
+                cooldown = use_cooldown_ticks(intent, w.armed_code, self.tick_hz)
                 return self._paced_action(intent, partial(pace_uses, cooldown_ticks=cooldown), m.last_use_tick)
             if verb in ("Say", "Broadcast"):
                 # Tag whose Say this is: Greet's hello keeps its own record (A65).
@@ -1122,26 +1124,31 @@ class Runner:
                 self._note_applied_self_use(index, result)
                 m.self_use = None
             if intent and intent.get("verb") == "Use":
-                m.last_use_tick = int(result.get("tick", w.tick))
+                used_tick = int(result.get("tick", w.tick))
+                # Only a weapon's swing that changed something spends the
+                # attack cooldown (Manual §11 What waits on a cooldown, A153).
+                swung = is_weapon_swing(intent, code_in_hand(w, self._held_intents(), index))
+                if swung and result.get("outcome") == "applied":
+                    m.last_use_tick = used_tick
                 block = use_target_block(intent, w.entities)
                 if block is not None:
                     npc_type = use_npc_type(intent, block, w.entities)
                     others = any(e.kind == "character" for e in w.entities)
-                    self._applied_uses.append(AppliedUse(m.last_use_tick, w.map_id, *block, npc_type, others))
+                    self._applied_uses.append(AppliedUse(used_tick, w.map_id, *block, npc_type, others))
                 # Break's capability probe (A28), read before _note_break_use clears it.
                 probe = m.break_pending is not None and m.break_pending[1] == block
                 self._note_break_use(intent, result, block, index)
                 tile = w.view.tiles.get(block) if block is not None else None
                 on_block = intent["target"].get("kind") == "block" and tile in CUT_BLOCKS
                 if on_block and result.get("outcome") == "applied":
-                    self.gem_cuts.note_cut(w, block, tile, m.last_use_tick, took=any(map(take_raises_gems, self._applied_take_codes)))
+                    self.gem_cuts.note_cut(w, block, tile, used_tick, took=any(map(take_raises_gems, self._applied_take_codes)))
                 elif on_block and result.get("outcome") == "applied_no_effect" and not probe:
                     # Nothing was cut, so nothing to file: Gather just moves on (A63).
                     # A Break probe that misses is a capability miss (GAME_NOTES:
                     # which item works is per block), not ground that does not cut,
                     # and so is a cut made with an item that does not cut (a potion).
                     if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge):
-                        self.gem_cuts.note_no_effect(w, block, tile, m.last_use_tick)
+                        self.gem_cuts.note_no_effect(w, block, tile, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") in ("Say", "Broadcast"):

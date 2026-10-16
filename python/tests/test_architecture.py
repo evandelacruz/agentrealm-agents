@@ -337,7 +337,7 @@ def is_agent(module: str) -> bool:
 
 
 class ImportLineTest(unittest.TestCase):
-    """The ADK imports neither agent (A149).
+    """The ADK imports neither agent (A149), and Lorraine imports nothing of Gary's (A138).
 
     The line is the import closure, not a list of imports: every ADK module is
     imported in a fresh interpreter, with everything it runs, and no agent
@@ -369,6 +369,22 @@ class ImportLineTest(unittest.TestCase):
                     mods = [node.module or ""]
                 named += [f"{f.relative_to(PYTHON_DIR)}:{node.lineno} {m}" for m in mods if is_agent(m)]
         self.assertEqual(named, [], "an ADK module imports an agent")
+
+    def test_ladder_loads_nothing_of_garys(self):
+        # Lorraine imports nothing of Gary's (A138). Stan stays allowed: her
+        # `run` is his loop until her goal tree drives play.
+        out = subprocess.run(
+            [sys.executable, "-c", "import json, sys, ladder, ladder.__main__; print(json.dumps(sorted(sys.modules)))"],
+            cwd=PYTHON_DIR,
+            env=os.environ.copy(),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        loaded = json.loads(out.stdout)
+        crossed = [m for m in loaded if m == "agentrealm_agent" or m.startswith("agentrealm_agent.")]
+        self.assertEqual(crossed, [], "Lorraine reached into Gary's agentrealm_agent")
+        self.assertIn("agentrealm_adk.pathing", loaded, "the closure should include the ADK she plays on")
 
 
 class OneWaterTestTest(unittest.TestCase):

@@ -139,7 +139,9 @@ class RunnerIsTheLoopTest(unittest.TestCase):
             self.assertNotIn(gone, src)
 
     def test_the_executor_imports_nothing_from_states(self):
-        for path in (RUNNER_SOURCE.parent / "executor").glob("*.py"):
+        executor = sorted((Path(__file__).resolve().parents[1] / "agentrealm_adk" / "executor").glob("*.py"))
+        self.assertTrue(executor, "no executor source found: the check would pass on nothing")
+        for path in executor:
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.ImportFrom):
                     modules = [node.module or ""] + [f"{node.module or ''}.{a.name}" for a in node.names]

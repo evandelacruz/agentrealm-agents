@@ -36,7 +36,7 @@ class BossFight:
     since_tick: int  # tick the boss was first seen
 
 
-@dataclass(frozen=True)
+@dataclass
 class BossClock:
     """The boss fight's clock (A163): no read serves it, so it is counted
     from the tick the step through the boss door applied (``boss_clock``)."""
@@ -44,6 +44,9 @@ class BossClock:
     door_tick: int  # tick the step through the boss door was read applied
     room_map: int  # the boss room's map: the clock runs while the character is on it
     landing: Pos | None  # where the boss door's warp landed: the exit door is the one by it
+    doors: set[Pos] = field(default_factory=set)  # the room's doors seen since, kept out of view (a dark room)
+    # The walk to the way out last priced: (position, target) and its steps, None with no open step.
+    route: tuple[tuple[Pos | None, Pos], int | None] | None = None
 
 
 @dataclass

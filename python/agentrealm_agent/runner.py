@@ -730,9 +730,9 @@ class Runner:
         self._forget_replaced_self_use(intents)
         earlier = w.entities
         worn_before = dict(w.worn_codes)
-        health_before = w.health
+        health_before, map_before = w.health, w.map_id
         events = w.apply_events(r.get("events_by_tick") or [])
-        boss_clock.note_death(m, w, self.knowledge, events, health_before, self.tick_hz)  # the level's limit (A163)
+        boss_clock.note_death(m, w, self.knowledge, events, health_before, map_before, self.tick_hz)  # the level's limit (A163)
         if self._applied_self_use is not None and used_up(events, self.cid, self._applied_self_use.code):
             self._applied_self_use.used = True
         w.apply_observation(r.get("observation"))

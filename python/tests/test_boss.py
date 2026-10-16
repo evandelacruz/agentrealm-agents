@@ -14,8 +14,12 @@ from agentrealm_adk.memory import BossClock, BossFight, Memory
 from agentrealm_adk.survival import health_left
 from agentrealm_agent.plan import Plan, goal_done, validate_goal_op
 from agentrealm_agent.states import PlayContext, dispatch
+from agentrealm_adk.navigation import cost_path
 from agentrealm_agent.states.boss import (
     LEAVE_MARGIN_SECONDS,
+    boss_fight_on,
+    clock_nearly_out,
+    exit_steps,
     boss_attack_queue,
     fight_boss_preconditions_met,
     potion_count,
@@ -353,7 +357,7 @@ class BossClockTest(unittest.TestCase):
 
     def test_the_clock_starts_on_the_boss_door_step(self):
         w, m, plan = self.stepped_through()
-        self.assertEqual(m.boss_clock, BossClock(400, 9, (1, 0)))
+        self.assertEqual((m.boss_clock.door_tick, m.boss_clock.room_map, m.boss_clock.landing), (400, 9, (1, 0)))
         w.tick = 1000
         sync_boss(w, m, plan)
         self.assertEqual(m.boss_clock.door_tick, 400, "counted from the step, not restarted")
@@ -373,15 +377,78 @@ class BossClockTest(unittest.TestCase):
         kb.levels["2"] = {boss_clock.LIMIT: 90}
         self.assertEqual(boss_clock.ticks_left(m, w, kb, 10), 900)
 
-    def test_a_death_no_hit_explains_is_the_limit_and_is_kept(self):
+    def test_a_death_the_clock_explains_is_the_limit_and_is_kept(self):
         w, m, _ = self.stepped_through()
         kb = KnowledgeBase.empty("olympuff")
-        died = [{"kind": "Damaged", "amount": 2, "tick": 1600}, {"kind": "Died", "tick": 1600}]
-        self.assertEqual(boss_clock.note_death(m, w, kb, died, 9, 10), 120)
+        died = [{"kind": "Damaged", "amount": 2, "tick": 1600}, {"kind": "Died", "map_id": 8, "tick": 1600}]
+        self.assertEqual(boss_clock.note_death(m, w, kb, died, 9, 9, 10), 120, "the chest lands outside: map_before counts")
         self.assertEqual(kb.levels["2"][boss_clock.LIMIT], 120)
-        killed = [{"kind": "Damaged", "amount": 9, "tick": 1700}, {"kind": "Died", "tick": 1700}]
-        self.assertIsNone(boss_clock.note_death(m, w, kb, killed, 9, 10), "the boss's hit killed: no limit learned")
-        self.assertEqual(kb.levels["2"][boss_clock.LIMIT], 120)
+        later = [{"kind": "Died", "map_id": 8, "tick": 2200}]
+        self.assertEqual(boss_clock.note_death(m, w, kb, later, 9, 9, 10), 180, "a fight outlived the kept limit")
+
+    def test_any_other_death_leaves_the_limit_unchanged(self):
+        w, m, _ = self.stepped_through()
+        kb = KnowledgeBase.empty("olympuff")
+        kb.levels["2"] = {boss_clock.LIMIT: 120}
+        cases = {
+            "the boss's hit killed": ([{"kind": "Damaged", "amount": 9, "tick": 1700}, {"kind": "Died", "tick": 1700}], 9),
+            "a hit with no amount explains nothing": ([{"kind": "Damaged", "tick": 1700}, {"kind": "Died", "tick": 1700}], 9),
+            "off the room's map": ([{"kind": "Died", "tick": 1700}], 8),
+            "sooner than the kept limit": ([{"kind": "Died", "tick": 1000}], 9),
+            "past the longest limit": ([{"kind": "Died", "tick": 400 + 6010}], 9),
+        }
+        for why, (events, map_before) in cases.items():
+            self.assertIsNone(boss_clock.note_death(m, w, kb, events, 9, map_before, 10), why)
+            self.assertEqual(kb.levels["2"][boss_clock.LIMIT], 120, why)
+
+    def test_the_clock_stops_when_the_boss_op_ends_in_the_room(self):
+        """Review on #262: Retreat, Flee and Heal stand down only while the fight is on."""
+        w, m, plan = self.stepped_through()
+        plan.drop_current("test")
+        sync_boss(w, m, plan)
+        self.assertIsNone(m.boss_clock)
+        self.assertFalse(boss_fight_on(w, m))
+
+    def test_a_defeat_stops_the_clock(self):
+        w, m, plan = self.stepped_through()
+        w.entities = [boss(health=0)]
+        sync_boss(w, m, plan)
+        self.assertIsNone(m.boss_clock)
+
+    def test_a_dark_room_keeps_its_doors(self):
+        """Review on #262: the exit door once seen is the way out out of view too."""
+        w, m, plan = self.stepped_through()
+        self.assertEqual(boss_clock.exit_door(m, w, None), (0, 0))
+        w.view.tiles[(0, 0)] = "?"
+        sync_boss(w, m, plan)
+        self.assertEqual(boss_clock.exit_door(m, w, None), (0, 0))
+
+    def test_no_door_known_walks_back_to_the_landing(self):
+        w = grid(["#######", "#.....#", "#.....#", "#######"], at=(5, 1), map_id=9)
+        m = in_room(w, Memory(), landing=(1, 1))
+        self.assertIsNone(boss_clock.exit_door(m, w, None))
+        self.assertEqual(boss_clock.way_out(m, w, None), (1, 1))
+        w.entities = [boss(health=2, pos=(4, 1))]
+        c = ctx(w, m, boss_plan(5, 5))
+        m.boss_clock.door_tick = w.tick - boss_clock.DEFAULT_LIMIT_SECONDS * c.tick_hz + 5
+        out = dispatch(w, c)
+        self.assertIn("leave before the limit", out.reason)
+        self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (4, 2), "round the boss, toward the landing")
+
+    def test_the_walk_out_is_priced_by_its_path_once_per_position(self):
+        """Review on #262: round a wall the walk is longer than the straight line."""
+        w = grid(["#######", "#D#...#", "#.#...#", "#.....#", "#######"], at=(3, 1), map_id=9)
+        m = in_room(w, Memory(), landing=(1, 2))
+        c = ctx(w, m, boss_plan(5, 5))
+        with mock.patch("agentrealm_agent.states.boss.cost_path", wraps=cost_path) as priced:
+            steps = exit_steps(w, c, (1, 1))
+            self.assertEqual(exit_steps(w, c, (1, 1)), steps)
+            self.assertEqual(priced.call_count, 1, "cached for the same position")
+        self.assertEqual(steps, 4, "two cells away as the crow flies, four round the wall")
+        step = 4  # ticks a step at the default speed and rate
+        m.boss_clock.door_tick = w.tick - boss_clock.DEFAULT_LIMIT_SECONDS * c.tick_hz + 3 * step + LEAVE_MARGIN_SECONDS * c.tick_hz
+        self.assertTrue(clock_nearly_out(w, c, steps), "the straight line would say there is time")
+        self.assertFalse(clock_nearly_out(w, c, 2))
 
     def test_the_clock_stops_off_the_rooms_map(self):
         w, m, plan = self.stepped_through()

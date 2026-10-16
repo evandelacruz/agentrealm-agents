@@ -960,6 +960,28 @@ class RunnerTest(unittest.TestCase):
         self.assertEqual(fake.sent[1][0], [take(6)], "another supply is another intent")
 
 
+class BossLimitRunnerTest(unittest.TestCase):
+    setUp = RunnerTest.setUp
+    runner = RunnerTest.runner
+
+    def test_a_limit_death_in_the_round_trip_is_kept_as_the_levels_limit(self):
+        """A163: the runner hands each round trip's events to ``boss_clock.note_death``."""
+        from agentrealm_adk import boss_clock
+        from agentrealm_adk.knowledge_base import KnowledgeBase
+        from agentrealm_adk.memory import BossClock
+
+        fake = FakeClient([{"tick": 1600, "window_remaining_ms": 0, "events_by_tick": [
+            {"tick": 1600, "events": [{"kind": "Died", "map_id": 3, "x": 1, "y": 1, "tick": 1600}]},
+        ]}])
+        r = self.runner(fake, Policy(goals=["explore"], pickup=False))
+        r.knowledge = KnowledgeBase.empty("sandbox")
+        r.world.health, r.world.map_levels[7] = 9, 2
+        r.plan.push({"op": "fight_boss", "x": 5, "y": 5}, "test")  # the fight is on: the decision keeps the clock
+        r.mem.boss_clock = BossClock(400, 7, (0, 0))
+        r.tick()
+        self.assertEqual(r.knowledge.levels["2"][boss_clock.LIMIT], 120)
+
+
 class NeverAttackRunnerTest(RunnerTest):
     """The executor drops a Use on a never_attack target, whatever decided it (A8)."""
 

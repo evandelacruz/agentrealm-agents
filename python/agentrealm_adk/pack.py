@@ -31,7 +31,7 @@ from .break_memory import capabilities_for_code
 from .fragments import compose_supply_ids
 from .healing import supply_matches
 from .item_table import InventorySupply
-from .knowledge_base import KnowledgeBase
+from .knowledge_base import KnowledgeBase, knowledge_items
 from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
 from .supplies import eaten_on_pickup, kept_on_break
 from .supplies import row as supply_row
@@ -122,6 +122,7 @@ def make_room(
         return Room(TAKE)
     reserved = {s.id for s in reserved_supplies(w, plan_ops, knowledge)}
     free = [s for s in droppable_supplies(w) if s.id not in reserved]
+    items = knowledge_items(knowledge)
     full = f"pack full ({carry_slots_used(w)}/{w.carry_capacity})"
     if not named:
         return Room(ASK, why=f"{full}: name what to drop for {p.code} with drop; {_choices(free, items)}")

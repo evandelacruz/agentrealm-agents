@@ -64,6 +64,23 @@ class DropAnywhereTest(unittest.TestCase):
         reserved = reserved_supplies(w, [{"op": "fight_boss", "x": 0, "y": 0, "armed": "bronze_sword"}], None)
         self.assertEqual([s.id for s in reserved], [2], "the armed sword is kept for the boss")
 
+    def test_the_plan_reserves_the_armed_tool_a_break_will_use(self):
+        w = world(held=[(1, "torch")], armed=(2, "bronze_mallet"))
+        ops = [{"op": "break_block", "x": 9, "y": 9, "capability": "smash"}] * 2
+        self.assertEqual([s.id for s in reserved_supplies(w, ops, None)], [2], "the armed mallet is never offered as a drop")
+        self.assertEqual([s.id for s in droppable_supplies(w) if s.id not in {2}], [1])
+
+    def test_tools_used_up_are_reserved_one_per_break_the_armed_one_first(self):
+        w = world(held=[(1, "matches"), (3, "matches")], armed=(2, "torch"))
+        ops = [{"op": "break_block", "x": 9, "y": 9, "capability": "burn"}] * 2
+        self.assertEqual([s.id for s in reserved_supplies(w, ops, None)], [2, 1])
+
+    def test_an_armed_tool_with_no_id_reserves_nothing_held(self):
+        w = world(held=[(1, "mallet")])
+        w.armed_code = "bronze_mallet"  # no id served: it cannot be dropped, and Break uses it
+        ops = [{"op": "break_block", "x": 9, "y": 9, "capability": "smash"}]
+        self.assertEqual(reserved_supplies(w, ops, None), [])
+
     def test_a_drop_of_the_worn_fording_supply_on_water_is_cut(self):
         w = lake(at=(3, 1), held=("bronze_sword",), armed="bronze_sword")
         w.worn_codes, w.worn_ids = {"accessory": "raft"}, {"accessory": 21}  # a worn fording supply

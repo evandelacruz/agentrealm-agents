@@ -146,35 +146,42 @@ def supply_code_for_take(intent: dict | None, entities: list[Entity]) -> str | N
 
 
 def learn_chest_upgrade(w: WorldModel, code: str | None) -> None:
-    """A ``Use`` on yourself of a chest that went through (it was used up)
-    makes it the carried chest when its Supplies reference ``chest_capacity``
-    is larger; one no larger (the blue chest, the size a character starts
-    with) changes nothing. Taking or holding a chest raises nothing (A108).
-    The server serves neither capacity nor the carried chest, so capacity is
-    derived from this chest (``WorldModel.sync_carry_capacity``, A115), and a
-    ``carry_capacity_full`` refusal still bounds it (A47)."""
-    cap = chest_capacity(code)
-    if cap is not None and cap > (chest_capacity(w.carried_chest) or DEFAULT_CARRY_CAPACITY):
+    """A chest's ``Use`` on yourself that came back ``applied`` made the
+    carried chest bigger: it is the carried chest now. One that did not
+    (``applied_no_effect``, the chest left armed) never reaches here (A157,
+    Manual §11 How big your chest is). Taking or holding a chest raises
+    nothing (A108). The server serves neither capacity nor the carried chest,
+    so capacity is derived from this chest (``WorldModel.sync_carry_capacity``,
+    A115), and a ``carry_capacity_full`` refusal still bounds it (A47)."""
+    if chest_capacity(code) is not None:
         w.carried_chest, w.full_at = code, None
         w.sync_carry_capacity()
 
 
-CARRIED_CHESTS_KEY = "carried_chests"  # kb.extra: character id -> chest code applied (A115)
+CARRIED_CHESTS_KEY = "carried_chests"  # kb.extra: character id -> {"code", "lives"} (A115, A157)
 
 
 def load_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
     """The chest this character applied, from the world knowledge base, so a
     new run starts at its size instead of the blue chest's (A115). Only what
-    the server cannot tell us is kept: the applied chest, never the capacity."""
+    the server cannot tell us is kept: the applied chest, never the capacity.
+    A death since it was saved resets it (A157): the lives saved with it are
+    checked at the first lives read (``WorldModel.chest_lives``), and a served
+    death chest the saved ones do not name resets it too. A row saved before
+    A157, a bare code, has no lives to check."""
     rows = knowledge.extra.get(CARRIED_CHESTS_KEY) if knowledge is not None else None
-    code = rows.get(str(w.character_id)) if isinstance(rows, dict) else None
+    row = rows.get(str(w.character_id)) if isinstance(rows, dict) else None
+    code, lives = (row.get("code"), row.get("lives")) if isinstance(row, dict) else (row, None)
     if isinstance(code, str) and chest_capacity(code) is not None:
         w.carried_chest = code
+        w.chest_lives = lives if isinstance(lives, int) and not isinstance(lives, bool) and lives > 0 else None
         w.sync_carry_capacity()
 
 
 def save_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
-    """Write the applied chest back; the blue chest (None) removes the row."""
+    """Write the applied chest back with the lives it was saved at, so the
+    next load can tell a death since (A157); the blue chest (None) removes
+    the row."""
     if knowledge is None:
         return
     with knowledge.lock:
@@ -183,7 +190,12 @@ def save_carried_chest(knowledge: KnowledgeBase | None, w: WorldModel) -> None:
         if w.carried_chest is None:
             rows.pop(str(w.character_id), None)
         else:
-            rows[str(w.character_id)] = w.carried_chest
+            # Lives not read yet this run: the ones it was loaded with still hold.
+            lives = w.chest_lives if w.chest_lives is not None else w.lives
+            row: dict = {"code": w.carried_chest}
+            if lives > 0:
+                row["lives"] = lives
+            rows[str(w.character_id)] = row
         if rows:
             knowledge.extra[CARRIED_CHESTS_KEY] = rows
         else:

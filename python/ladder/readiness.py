@@ -1,9 +1,11 @@
 """What Lorraine's goal tree reads (A139): one risk function and the facts of the next level.
 
 Every "am I prepared" in Lorraine is computed here, once. The goal tree
-(``ladder/goals.py``) reads it for its readiness predicates, and the reflexes
-(A141) will read the same :func:`risk_budget` instead of thresholds of their
-own (:func:`margin_now` is their hook).
+(``ladder/goals.py``) reads it for its readiness predicates, and her reflexes
+and walks (``ladder/reflexes.py``, ``ladder/act.py``, A141) read the same
+:func:`risk_budget` instead of thresholds of their own, through
+:func:`margin_now` on the hostiles that can reach her (:class:`Here`) or on
+one hostile (:func:`fits_now`).
 
 **One risk function.** :func:`risk_budget` compares what the character has
 to spend, health plus the potions carried (``healing.held_heal``, A132;
@@ -186,8 +188,35 @@ def margin_after(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None, *
 
 
 def margin_now(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None) -> Budget:
-    """The hook the reflexes (A141) read: the goal being worked, priced now."""
+    """What the reflexes read (A141): the goal being worked, priced now."""
     return risk_budget(goal, world, kb, now=True)
+
+
+@dataclass(frozen=True)
+class Here:
+    """What a reflex prices: the hostiles that can reach her where she stands
+    (:func:`foes_here`), valued as the goal she works."""
+
+    value: str = ORDINARY
+
+    def foes(self, world: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
+        return foes_here(world, kb)
+
+
+@dataclass(frozen=True)
+class One:
+    """One hostile, valued as the goal she works: what a walk prices a hostile's ground by."""
+
+    foe: Entity
+    value: str = ORDINARY
+
+    def foes(self, world: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
+        return [self.foe]
+
+
+def fits_now(foe: Entity, world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> bool:
+    """A fight with ``foe`` alone fits the margin now: a walk may cross its ground."""
+    return margin_now(One(foe, value), world, kb).ok
 
 
 # The next level and what it holds.

@@ -14,7 +14,7 @@ from agentrealm_agent.strategist import Strategist, StrategistConfig
 from ladder import goals
 from ladder.ask import CONTRACT, Planner, Reply, answer, lift_changed, node_state, question, read_reply
 from ladder.goals import Blocks, find, walk
-from ladder.play import LadderRunner, path_to
+from ladder.play import LadderRunner
 from tests.test_ladder_goals import geared, hostile, knowledge, world
 from tests.test_starter_agent import FakeClient
 
@@ -43,6 +43,18 @@ class FakeLLM:
 
     def check(self):
         pass
+
+
+class HeldLLM(FakeLLM):
+    """A provider whose call does not return until ``go`` is set: a slow or hung call."""
+
+    def __init__(self, *replies, **kw):
+        super().__init__(*replies, **kw)
+        self.go = threading.Event()
+
+    def complete(self, messages):
+        self.go.wait()
+        return super().complete(messages)
 
 
 def planner(*replies, **kw) -> tuple[Planner, FakeLLM]:
@@ -237,8 +249,17 @@ class SharedPlumbingTest(unittest.TestCase):
             self.assertFalse(Planner.from_env().enabled)
 
 
+def settle(r: LadderRunner):
+    """A round of ``goal_op``, then more as each planner call comes back: the op once no call is out."""
+    op = r.goal_op()
+    while r.call is not None:
+        r.call.wait()
+        op = r.goal_op()
+    return op
+
+
 class PlayTest(unittest.TestCase):
-    """``run`` walks the tree, asks the one question at its goal, and runs the op (until A141)."""
+    """``run`` walks the tree, asks the one question at its goal off the tick thread, and runs the op."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -258,67 +279,80 @@ class PlayTest(unittest.TestCase):
         w, kb = short_of_a_raft()
         p, fake = planner('{"op": {"op": "travel", "to": "town"}}')
         r = self.runner(p, w, kb)
-        self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
+        self.assertEqual(settle(r), {"op": "travel", "to": "town"})
         self.assertIn("goal: hold what it requires", fake.messages[0][1]["content"])
         for _ in range(5):
-            r.goal_op()  # the same goal and state: not asked again
+            settle(r)  # the same goal and state: not asked again
+        self.assertEqual(len(fake.messages), 1)
+
+    def test_the_trees_op_runs_while_the_call_is_out(self):
+        w, kb = short_of_a_raft()
+        fake = HeldLLM('{"op": {"op": "travel", "to": "town"}}')
+        r = self.runner(Planner(client=fake, clock=Clock(), tokens_per_min=10**9), w, kb)
+        self.addCleanup(fake.go.set)
+        for _ in range(3):
+            self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})  # the tree's op meanwhile
+        fake.go.set()
+        r.call.wait()
+        self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
         self.assertEqual(len(fake.messages), 1)
 
     def test_a_cannot_moves_the_next_walk_on(self):
         w, kb = short_of_a_raft()
         p, fake = planner('{"cannot": "the shop is shut"}', '{"op": {"op": "travel", "to": "town"}}')
         r = self.runner(p, w, kb)
-        self.assertIsNone(r.goal_op())
-        self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
+        self.assertIsNone(settle(r))
+        self.assertEqual(settle(r), {"op": "travel", "to": "town"})
         self.assertIn("goal: stay alive", fake.messages[1][1]["content"])
 
     def test_a_cannot_is_not_asked_again_on_the_next_tick(self):
         w = geared()  # the level is the goal, and nothing under it to work
         p, fake = planner('{"cannot": "the door will not open"}')
         r = self.runner(p, w, knowledge())
+        self.assertIsNone(settle(r))
         for _ in range(5):
-            self.assertIsNone(r.goal_op())
             w.tick += 1
+            self.assertIsNone(settle(r))
         self.assertEqual(len(fake.messages), 1)
 
     def test_a_new_state_asks_again(self):
         w, kb = short_of_a_raft()
         p, fake = planner('{"op": {"op": "travel", "to": "town"}}', '{"op": {"op": "buy", "code": "raft"}}')
         r = self.runner(p, w, kb)
-        r.goal_op()
+        settle(r)
         record_shop_cell(kb, 1, (30, 30), "small_potion", 5)  # a seller known for another item
-        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertEqual(settle(r), {"op": "buy", "code": "raft"})
         self.assertEqual(len(fake.messages), 2)
 
     def test_after_a_failed_ask_it_asks_again_only_past_the_backoff(self):
         w, kb = short_of_a_raft()
         p, fake = planner(RuntimeError("down"), '{"op": {"op": "travel", "to": "town"}}')
         r = self.runner(p, w, kb)
-        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})  # the tree's op meanwhile
-        r.goal_op()
+        self.assertEqual(settle(r), {"op": "buy", "code": "raft"})  # the tree's op
+        settle(r)
         self.assertEqual(len(fake.messages), 1)
         p.clock.now = p.backoff.retry_at
-        self.assertEqual(r.goal_op(), {"op": "travel", "to": "town"})
+        self.assertEqual(settle(r), {"op": "travel", "to": "town"})
 
     def test_a_cannot_already_met_is_asked_once_more_with_a_note(self):
         w, kb = short_of_a_raft()  # 40 gems held
         p, fake = planner('{"cannot": "short", "until": "gems 30"}', '{"op": {"op": "buy", "code": "raft"}}')
         r = self.runner(p, w, kb)
-        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertEqual(settle(r), {"op": "buy", "code": "raft"})
         self.assertIn("note: your last answer was cannot until gems 30, which is already true", fake.messages[1][1]["content"])
         self.assertEqual(r.blocks, {})
         for _ in range(3):
-            r.goal_op()
+            settle(r)
         self.assertEqual(len(fake.messages), 2)  # no loop
 
     def test_a_second_cannot_already_met_leaves_a_plain_block(self):
         w, kb = short_of_a_raft()
         p, fake = planner(*['{"cannot": "short", "until": "gems 30"}'] * 2, *['{"cannot": "hold on"}'] * 3)
         r = self.runner(p, w, kb)
-        r.goal_op()
+        settle(r)
         self.assertEqual((r.blocks["requires"].named, r.blocks["requires"].until), ("", w.tick + goals.BLOCK_TICKS))
         for _ in range(3):
-            r.goal_op()
+            settle(r)
         about = [m[1]["content"].splitlines()[0] for m in fake.messages]
         self.assertEqual(about.count("goal: hold what it requires"), 2)  # once, then once more: no loop
         self.assertEqual(len(about), len(set(about)) + 1)  # each goal the walk moves on to asked once
@@ -328,48 +362,16 @@ class PlayTest(unittest.TestCase):
         p, fake = planner('{"cannot": "short", "until": "gems 60"}', '{"cannot": "hold on"}',
                           '{"op": {"op": "buy", "code": "raft"}}')
         r = self.runner(p, w, kb)
-        r.goal_op()  # requires blocked until 60 gems
-        r.goal_op()  # stay alive asked, blocked
+        settle(r)  # requires blocked until 60 gems
+        settle(r)  # stay alive asked, blocked
         w.gems = 60  # requires lifts; its watched lines are as they were
-        self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
+        self.assertEqual(settle(r), {"op": "buy", "code": "raft"})
         self.assertIn("goal: hold what it requires", fake.messages[2][1]["content"])
 
     def test_with_no_answer_the_trees_op_runs(self):
         w, kb = short_of_a_raft()
         r = self.runner(Planner.off(), w, kb)
         self.assertEqual(r.goal_op(), {"op": "buy", "code": "raft"})
-
-    def open_ground(self, w):
-        for x in range(0, 15):
-            for y in range(0, 10):
-                w.view.tiles[(x, y)] = "grass"
-        return w
-
-    def test_an_op_naming_a_cell_is_walked_to(self):
-        w = self.open_ground(geared())
-        r = self.runner(Planner.off(), w, knowledge())  # the tree's op: enter the level at its door
-        d = r.decide()
-        self.assertEqual(d.mode, "Goal")
-        self.assertEqual(d.intents, [{"verb": "SetPosition", "x": 6, "y": 4}])
-        self.assertEqual(path_to(w, (10, 4), set())[-1], (10, 4))
-
-    def test_an_op_reached_is_done_and_never_walked_back_to(self):
-        w = self.open_ground(geared(pos=(9, 4)))  # beside the level's door
-        r = self.runner(Planner.off(), w, knowledge())
-        self.assertEqual(r.decide().intents, [{"verb": "SetPosition", "x": 10, "y": 4}])
-        w.pos = (10, 4)
-        self.assertNotEqual(r.decide().mode, "Goal")  # done there: Stan explores
-        w.pos = (11, 4)  # explore stepped her off it
-        for _ in range(3):
-            self.assertNotEqual(r.decide().mode, "Goal")
-
-    def test_explore_areas_point_is_a_region_not_a_cell_to_walk_back_to(self):
-        w = self.open_ground(geared(pos=(3, 3)))
-        r = self.runner(Planner.off(), w, None)  # no entrance known: the tree explores from where she stands
-        self.assertEqual(r.goal_op()["op"], "explore_area")
-        for pos in ((4, 3), (5, 3)):
-            w.pos = pos
-            self.assertNotEqual(r.decide().mode, "Goal")
 
 
 if __name__ == "__main__":

@@ -116,13 +116,9 @@ class ChestTest(unittest.TestCase):
         self.assertTrue(never_worn("blue_chest"))
         self.assertEqual(supplies.what_it_does("blue_chest")["chest_capacity"], 10)
 
-    def test_capacity_comes_from_the_reference_and_only_rises(self):
+    def test_capacity_comes_from_the_reference(self):
         w = world()
-        learn_chest_upgrade(w, "blue_chest")
-        self.assertEqual(w.carry_capacity, DEFAULT_CARRY_CAPACITY)
         learn_chest_upgrade(w, "red_chest")
-        self.assertEqual(w.carry_capacity, 50)
-        learn_chest_upgrade(w, "middle_chest")
         self.assertEqual(w.carry_capacity, 50)
         learn_chest_upgrade(w, "bronze_sword")
         self.assertEqual(w.carry_capacity, 50)

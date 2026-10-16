@@ -20,7 +20,8 @@ from agentrealm_adk.planner_reference import (
     select_sections,
     split_sections,
 )
-from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt, estimate_tokens
+from agentrealm_adk.llm import estimate_tokens
+from agentrealm_agent.strategist import PROGRESSION, SYSTEM_PROMPT, build_prompt
 from agentrealm_adk.world import WorldModel
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"

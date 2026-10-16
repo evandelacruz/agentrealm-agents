@@ -54,10 +54,19 @@ class LadderCommandTest(unittest.TestCase):
         client.self_ = mock.Mock(side_effect=ApiError(404, "character_not_found"))
         self.assertEqual(self.quiet(status, client, self.cfg, 42), 1)
 
-    def test_run_plays_stans_loop(self):
-        with mock.patch("starter_agent.run", return_value=0) as stan:
-            self.assertEqual(self.main_with(FakeClient(), ["run", PROFILE, "--character-id", "42"]), 0)
-        self.assertEqual(stan.call_args.args[2], 42)
+    def test_run_plays_the_tree_with_the_planner_off_in_test_mode(self):
+        with mock.patch("ladder.__main__.run", return_value=0) as run_:
+            self.assertEqual(self.main_with(FakeClient(), ["run", PROFILE, "--character-id", "42", "--no-planner"]), 0)
+        self.assertEqual(run_.call_args.args[2], 42)
+        self.assertFalse(run_.call_args.args[3].enabled)
+
+    def test_run_without_a_planner_key_stops_before_play(self):
+        env = {"AGENTREALM_NO_PLANNER": "", "AGENTREALM_PLANNER_PROVIDER": "openai", "OPENAI_API_KEY": "",
+               "AGENTREALM_PLANNER_OPENAI_KEY": ""}
+        with mock.patch.dict("os.environ", env), mock.patch("ladder.__main__.run", return_value=0) as run_:
+            self.assertEqual(self.main_with(FakeClient(), ["run", PROFILE, "--character-id", "42"]), 2)
+        run_.assert_not_called()
+        self.assertIn("OPENAI_API_KEY", self.out.getvalue())
 
     def test_run_rejects_missing_character(self):
         client = FakeClient()

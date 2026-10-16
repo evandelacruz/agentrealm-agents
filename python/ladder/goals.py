@@ -33,7 +33,9 @@ goal, notes it as skipped with that reason, and descends into its children,
 taking the first with a node not ready under it; a ready node has nothing to
 do, so it is never the goal. A node not ready whose whole way
 down is blocked blocks its parent too, with its reason, so a node is the
-goal only while all its children are ready. A block lapses at its expiry.
+goal only while all its children are ready. A block lapses at its expiry,
+or earlier once the part of the node's state its reason named changes
+(``ask.lift_changed``).
 """
 
 from __future__ import annotations
@@ -119,13 +121,15 @@ class Node:
 class Block:
     reason: str
     until: int  # the tick it lapses
+    named: str = ""  # what it waits on: an ``ask.watch_lines`` key or ``gems``; "" holds to the expiry
+    was: str = ""  # what that line read when the block was marked, or the gem count awaited
 
 
 class Blocks(dict[str, Block]):
     """The nodes the planner said it cannot work, by key (A140 sets them)."""
 
-    def mark(self, key: str, reason: str, now: int, ticks: int = BLOCK_TICKS) -> None:
-        self[key] = Block(reason, now + ticks)
+    def mark(self, key: str, reason: str, now: int, ticks: int = BLOCK_TICKS, named: str = "", was: str = "") -> None:
+        self[key] = Block(reason, now + ticks, named, was)
 
     def active(self, key: str, now: int) -> Block | None:
         """The block on ``key`` still in force at ``now``; a lapsed one is forgotten."""

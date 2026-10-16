@@ -61,7 +61,7 @@ from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
 from agentrealm_adk.survival import recently_attacked
 from agentrealm_adk.targets import GoalOp
 from agentrealm_adk.trace import Trace, tick_detail
-from agentrealm_adk.travel.knowledge import record_shop_cell, sync_entrances, sync_town
+from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
@@ -117,6 +117,7 @@ class LadderRunner:
         self.tick_hz, self.horizon = DEFAULT_TICK_RATE_HZ, QUEUE_HORIZON_INTENTS
         self.trace = Trace(cfg.trace_path(cid), cfg.profile, out)
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
+        load_our_drops(knowledge, self.world)  # supplies this character dropped: no shop's (A158)
         self.root: Node = tree()
         self.blocks = Blocks()
         self.turn: Turn | None = None  # the last walk of the tree
@@ -170,6 +171,7 @@ class LadderRunner:
             if self.knowledge is not None:
                 sync_world_maps(self.knowledge, w)
                 save_hostiles(self.knowledge, w, self._loaded_hostiles)
+                save_our_drops(self.knowledge, w)
             self.trace.close()
 
     def on_error(self, call: str, e: ApiError) -> bool:

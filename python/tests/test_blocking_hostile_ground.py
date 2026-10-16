@@ -173,6 +173,27 @@ class LandsToFightTest(unittest.TestCase):
         self.assertFalse(on_water(w, c.memory, met))
         self.assertEqual(asks(c), [])
 
+    def test_a_meeting_outside_its_range_of_where_it_stands_still_lands(self):
+        """The chaser comes round to meet the walk at (7, 2), 3 from where it
+        stands: a fight decided only there still lands, though from no cell
+        within range of where it stands now would the engagement fight."""
+        from unittest import mock
+
+        from agentrealm_adk.engagement import would_fight
+        from agentrealm_agent.states.base import op_walk
+        from agentrealm_agent.states.way import land_to_fight
+
+        def only_at_the_meeting(*args, at=None, **kw):
+            return at == (7, 2) and would_fight(*args, at=at, **kw)
+
+        w = live(LAND)
+        c = to_door()
+        self.assertGreater(max(abs(7 - BOGMAW[0]), abs(2 - BOGMAW[1])), POLICY.hostile_range)
+        with mock.patch("agentrealm_agent.states.way.would_fight", side_effect=only_at_the_meeting):
+            out = land_to_fight(w, c, DOOR, "Travel", op_walk(w, c)[2])
+        self.assertIsNotNone(out)
+        self.assertIn("land at", out.reason)
+
     def test_landed_where_it_comes_in_range_fight_arms_the_sword(self):
         """Ashore at the wall's end with the bogmaw come round beside it,
         Fight arms the sword (A133) and closes."""

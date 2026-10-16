@@ -242,12 +242,11 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     def ashore(p: Pos) -> bool:
         return land(p) and not on_water(w, m, p)
 
+    # One search per landing, nearest first, until one is reached. No cheaper
+    # test rules a landing out first: the chase meets the walk where it comes
+    # within range of us, which for a chaser in the open lies outside its
+    # range of where it stands now, so a decision on that ground says nothing.
     landings = [p for p in near if ashore(p) and p != e.pos]
-    # The meeting is a cell within its range on land, so with no such cell the
-    # engagement would fight from, no landing passes: skip the searches.
-    if not any(would_fight(w, policy, ctx.params, also=e, m=m, at=p) for p in landings):
-        return None
-    # Then one search per landing, nearest first, until one is reached.
     for cell in sorted(landings, key=lambda p: (chebyshev(p, w.pos), p)):
         avoid = plan_avoid | others | (near - {cell})
         path = cost_path(w, cell, grid_params(policy, avoid, plan_costly))

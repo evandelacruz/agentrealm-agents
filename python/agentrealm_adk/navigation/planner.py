@@ -12,6 +12,7 @@ from dataclasses import dataclass, field, replace
 
 from ..supplies import worn_armor_defense
 from ..world import DOORS, NEIGHBOURS, VOID, Entity, MapView, Pos, WorldModel, chebyshev
+from ..zone_discovery import safe_tiles
 
 # Base step costs (PLAYABLE_AGENT_PLAN Navigation §1). Every step costs at
 # least KNOWN_WALKABLE, so Chebyshev distance * KNOWN_WALKABLE is a lower
@@ -21,13 +22,15 @@ FOG = 2
 # High but finite: route around when a step is possible (occupants move).
 OCCUPANT = 50
 # Added at distance 0; falls off 5 per block of Chebyshev separation and
-# stops at HOSTILE_DANGER_RADIUS.
+# stops at HOSTILE_DANGER_RADIUS. Never on a known safe block, where no hit
+# lands (Manual §11 Combat, A162).
 HOSTILE_DANGER = 30
 HOSTILE_DANGER_RADIUS = 6
 # Extra cost of a step onto a `costly` tile, or onto fire/lava whose
 # occupy_damage no read has named: worth a long detour to avoid one. A named
 # occupy_damage costs what gets through: less the defense of the armor worn,
-# never below 0 (Manual §11), as the character's defense stays 0.
+# never below 0 (Manual §11), as the character's defense stays 0. Fire or
+# lava on a known safe block costs nothing: damaging blocks do not hurt there.
 COSTLY_STEP = 100
 HAZARDS = ("fire", "lava")
 
@@ -47,7 +50,7 @@ class CostGridParams:
     costly: set[Pos] = field(default_factory=set)  # passable at COSTLY_STEP extra (escape off hazards)
     break_nominated: set[Pos] = field(default_factory=set)  # breakable cells considered for opening
     break_costs: dict[Pos, int] = field(default_factory=dict)  # passable at break time + 1 (+ tool price)
-    priced: dict[Pos, int] = field(default_factory=dict)  # passable at this many steps extra (a faded post's ground, A85)
+    priced: dict[Pos, int] = field(default_factory=dict)  # passable at this many steps extra (ground near a hostile, A85)
     # Which entities add danger: ``pathing.grid_params`` passes the agent's
     # one hostility test (``survival.is_hostile``), so townsfolk repel no path.
     is_hostile: Callable[[WorldModel, Entity], bool] = lambda w, e: e.kind == "npc"
@@ -156,12 +159,14 @@ class _Grid:
         if same_world is not None:
             assert same_world.w is w and same_world.params is params
             self.occupied, self.hostiles = same_world.occupied, same_world.hostiles
-            self.for_sale = same_world.for_sale
+            self.for_sale, self.safe = same_world.for_sale, same_world.safe
             self._danger, self._costs = same_world.danger_map(), same_world._costs
             self.known_box = same_world.known_box
         else:
             self.occupied = w.occupied()
             self.for_sale = w.for_sale()
+            # Known safe blocks: no hazard or hostile hurts there (Manual §11 Combat).
+            self.safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
             self.hostiles: list[Entity] = [e for e in w.entities if params.is_hostile(w, e)]
             self._danger: dict[Pos, int] | None = None  # built on first use (``danger_map``)
             # Each non-goal cell's cost, worked out once: a search prices a
@@ -227,18 +232,22 @@ class _Grid:
             base = KNOWN_WALKABLE
         else:
             return None  # void, blocked, or an unknown type
-        if block in HAZARDS:
+        safe = p in self.safe
+        if block in HAZARDS and not safe:
             dmg = self.w.view.occupy_damage(p)
             base += COSTLY_STEP if dmg is None else max(0, dmg - self.armor)
         if p in params.costly:
             base += COSTLY_STEP
-        base += params.priced.get(p, 0) * KNOWN_WALKABLE
+        if not safe:
+            base += params.priced.get(p, 0) * KNOWN_WALKABLE
         if p in self.occupied:
             base += OCCUPANT
         return base + self.danger(p)
 
     def danger(self, p: Pos) -> int:
-        return self.danger_map().get(p, 0)
+        """The hostiles' share of the cost onto ``p`` (``danger_map``): none
+        on a known safe block, where no hit lands."""
+        return 0 if p in self.safe else self.danger_map().get(p, 0)
 
     def danger_map(self) -> dict[Pos, int]:
         if self._danger is None:

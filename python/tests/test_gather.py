@@ -14,7 +14,7 @@ from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
 from agentrealm_agent.states import gather as gather_mod
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, GATHER_SHADOW_MARGIN, danger, is_safe_ish
 from agentrealm_agent.states.gather_safe import gather_ground, route_clear
-from agentrealm_adk.world import POST_STILL_TICKS, Entity, WorldModel, chebyshev
+from agentrealm_adk.world import STILL_TICKS, Entity, WorldModel, chebyshev
 from agentrealm_adk.gem_yield import NO_EFFECT_ZONE_CUTS, REGION_SIZE, GemYieldTracker, record_cut, region_of
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.navigation import stuck as nav_stuck
@@ -170,31 +170,33 @@ class GatherGroundTest(unittest.TestCase):
 
 
 class SafeIshTest(unittest.TestCase):
-    """The stricter safe-zone ground a hurt character walks first."""
+    """The safe-zone blocks a hurt character walks first: judged on the exact
+    block, where nothing hurts (Manual §11 Combat, A162)."""
 
     def test_known_safe_tile_qualifies(self):
         w = grid(["ggg"], at=(1, 0))
         safe(w, (1, 0))
-        self.assertTrue(is_safe_ish(w, (1, 0), Policy()))
+        self.assertTrue(is_safe_ish(w, (1, 0)))
 
-    def test_hostile_in_range_disqualifies(self):
+    def test_a_hostile_beside_it_does_not_disqualify(self):
+        """A hostile may walk in but deals nothing there."""
         w = grid(["ggg"], at=(1, 0))
         safe(w, (1, 0))
         w.entities = [Entity("npc", 1, (2, 0), "gnawer")]
         w.hostile_types.add(("npc", "gnawer"))  # a type seen attacking (survival.is_hostile)
-        pol = Policy(hostile=["npc"], hostile_range=2)
-        self.assertFalse(is_safe_ish(w, (1, 0), pol))
+        self.assertTrue(is_safe_ish(w, (1, 0)))
 
-    def test_townsfolk_in_range_do_not_disqualify(self):
-        w = grid(["ggg"], at=(1, 0))
+    def test_a_hazard_on_it_does_not_disqualify(self):
+        w = grid(["glg"], at=(0, 0))
         safe(w, (1, 0))
-        w.entities = [Entity("npc", 1, (2, 0), "villager")]
-        self.assertTrue(is_safe_ish(w, (1, 0), Policy(hostile=["npc"], hostile_range=2)))
+        self.assertTrue(is_safe_ish(w, (1, 0)), "damaging blocks do not hurt on a safe block")
 
-    def test_respawn_ring_qualifies_without_zone(self):
+    def test_a_block_beside_a_safe_zone_or_a_respawn_anchor_does_not_qualify(self):
         w = grid(["ggg"], at=(2, 0))
+        safe(w, (0, 0))
         w.record_respawn_anchor(7, (0, 0))
-        self.assertTrue(is_safe_ish(w, (2, 0), Policy()))
+        self.assertFalse(is_safe_ish(w, (1, 0)))
+        self.assertFalse(is_safe_ish(w, (2, 0)))
 
 
 
@@ -917,17 +919,17 @@ class TargetRegionTest(unittest.TestCase):
 GUARD = ("npc", "fake_gristle")
 
 
-def remember_post(w: WorldModel, post, at) -> None:
-    """A guard stood on ``post`` long enough to keep it; then it was out of view."""
-    guard = Entity("npc", 9, post, GUARD[1])
+def remember_still(w: WorldModel, cell, at) -> None:
+    """A hostile stood still on ``cell`` (blocked, A162); then it was out of view, its cell out of sight."""
+    guard = Entity("npc", 9, cell, GUARD[1])
     w.hostile_types.add(GUARD)
-    w.pos = (post[0] - 3, post[1])
+    w.pos = (cell[0] - 3, cell[1])
     w.tick = 0
     w._set_entities([guard], 0)
-    w.tick = POST_STILL_TICKS
-    w._set_entities([guard], POST_STILL_TICKS)
+    w.tick = STILL_TICKS
+    w._set_entities([guard], STILL_TICKS)
     w.pos = w.terrain_center = at
-    w.tick = POST_STILL_TICKS + 1
+    w.tick = STILL_TICKS + 1
     w._set_entities([], w.tick)
 
 
@@ -992,10 +994,10 @@ class KeepsClearTest(unittest.TestCase):
         self.assertEqual(m.gather_status, gather_mod.BLOCKED)
 
     def corridor(self) -> WorldModel:
-        """A corridor along y 9..11 that runs past a remembered post at (14, 10);
-        the named region (x 32..47) unknown."""
+        """A corridor along y 9..11 that runs past a hostile remembered still
+        at (14, 10); the named region (x 32..47) unknown."""
         w = grid(["." * 32] * 21, at=(2, 10))
-        remember_post(w, (14, 10), (2, 10))
+        remember_still(w, (14, 10), (2, 10))
         for cell in list(w.view.tiles):
             if not 9 <= cell[1] <= 11:
                 w.view.tiles[cell] = "wall"
@@ -1005,13 +1007,13 @@ class KeepsClearTest(unittest.TestCase):
             w.view.tiles[(-1, y)] = "wall"
         return w
 
-    POST_GROUND = {(14 + dx, 10 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
+    HELD_GROUND = {(14 + dx, 10 + dy) for dx in range(-3, 4) for dy in range(-3, 4)}
 
-    def test_the_walk_to_an_unseen_region_takes_no_way_past_a_remembered_post(self):
+    def test_the_walk_to_an_unseen_region_takes_no_way_past_a_remembered_hostile(self):
         w, m = self.corridor(), Memory()
         w.view.tiles[(4, 10)] = "grass"
         out = gather_outcome(w, m, self.POLICY, op={"op": "gather_gems", "count": 99, "x": 40, "y": 10})
-        self.assertFalse(set(m.path) & self.POST_GROUND, (out.reason, m.path))
+        self.assertFalse(set(m.path) & self.HELD_GROUND, (out.reason, m.path))
         self.assertEqual(m.gather_target, ("grass", (4, 10)), "no way to the region: it works anywhere")
         self.assertEqual(m.gather_status, "walking to grass")
         w.pos = (4, 10)
@@ -1067,7 +1069,7 @@ class KeepsClearTest(unittest.TestCase):
         op = {"op": "gather_gems", "count": 99, "x": 40, "y": 10, "fight": True}
         out = gather_outcome(w, m, self.POLICY, op=op)
         self.assertTrue(out.intents, out.reason)
-        self.assertTrue(set(m.path) & self.POST_GROUND, "past the post: the op chose the risk")
+        self.assertTrue(set(m.path) & self.HELD_GROUND, "past the hostile: the op chose the risk")
 
 
 

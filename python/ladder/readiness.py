@@ -39,7 +39,6 @@ from agentrealm_adk.sellers import sellers_of
 from agentrealm_adk.supplies import armor_defense, heal_of, heals, is_weapon, sold_codes, worn_slot
 from agentrealm_adk.survival import (
     FIGHT_REACH_RADIUS,
-    UNKILLED_HOSTILE_HEALTH,
     estimate_health,
     expected_damage,
     known_hostile,
@@ -137,10 +136,9 @@ class Budget:
 
 def fight_cost(foe: Entity, w: WorldModel, loadout: Loadout) -> float:
     """The damage ``foe`` is expected to deal while ``loadout`` kills it alone:
-    Gary's win estimate, its health scaled from his assumed hostile's when a
-    read served it (a boss)."""
-    hp = foe.max_health or foe.health or UNKILLED_HOSTILE_HEALTH
-    ticks = ticks_to_kill_them([foe], loadout.weapon) * hp / UNKILLED_HOSTILE_HEALTH
+    Gary's win estimate, against the health it has left (``survival.health_left``:
+    a boss's as read, a hostile's less the damage it has taken)."""
+    ticks = ticks_to_kill_them([foe], loadout.weapon, w.npc_damage)
     return expected_damage([foe], w.threat, ticks, loadout.armor)
 
 

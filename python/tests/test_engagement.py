@@ -15,7 +15,7 @@ from unittest import mock
 from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_adk.engagement import BREAK_EVEN, CHASE_PROBE_TICKS, fight_bar, fights, sync_engagement
-from agentrealm_adk.hostile_ground import Danger, danger
+from agentrealm_adk.hostile_ground import Danger, danger, known_reach
 from agentrealm_adk.memory import Memory
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
@@ -23,7 +23,7 @@ from agentrealm_agent.states.detour import Detour, detour_find
 from agentrealm_agent.states.fight import held_target
 from agentrealm_agent.states.gather import gather_outcome
 from agentrealm_adk.survival import should_retreat, win_ratio
-from agentrealm_adk.world import Entity, Sighting, WorldModel, chebyshev
+from agentrealm_adk.world import SIGHTING_TICKS, STILL_TICKS, Entity, Sighting, WorldModel, chebyshev
 
 MAP = 1
 CODE = "fake_biter"
@@ -282,75 +282,75 @@ class CannotOutrunTest(unittest.TestCase):
         self.assertEqual(out.reason, "not outrunning npc 7: fight npc 7")
 
 
-def guard_post(w: WorldModel, npc: Entity, home) -> None:
-    """``npc`` keeps a post at ``home``, seen just now."""
-    w.sightings[(npc.kind, npc.id)] = Sighting(npc, MAP, w.tick, home, post=True, noted=w.tick)
+def last_seen_still(w: WorldModel, npc: Entity) -> None:
+    """``npc`` was seen just now standing still where it is (blocked), and is out of view."""
+    w.sightings[(npc.kind, npc.id)] = Sighting(npc, MAP, w.tick, still=True, in_view=False)
 
 
 def gem(supply_id: int, at) -> Entity:
     return Entity("supply", supply_id, at, code="gem")
 
 
-class TurnedBackTest(unittest.TestCase):
-    """A hostile that came out to fight us holds the ground out to where it did."""
+class RememberedWhereLastSeenTest(unittest.TestCase):
+    """A162: a hostile keeps no post (Manual §11 Hostiles). Out of view it
+    is remembered at the cell it was last seen on: one that stood still
+    there (blocked) until that cell is seen empty, one that was moving for
+    ``SIGHTING_TICKS``. Gather keeps off the ground it holds meanwhile."""
 
-    POST = (30, 10)
-    PILE = (26, 10)
+    LAST = (30, 10)
+    PILE = (28, 10)
 
     def setUp(self):
-        self.w, self.c = world(at=(24, 10)), ctx(on_hostile="flee", pickup=True)
-        self.guard = biter(7, self.POST)
-        guard_post(self.w, self.guard, self.POST)
+        self.w = world(at=(10, 10))
+        self.guard = biter(7, self.LAST)
 
-    def turned_back(self) -> None:
-        """The guard comes out to us at (24, 10), then goes home and out of view."""
-        self.w.pos = self.w.terrain_center = (24, 10)
-        self.guard.pos = (25, 10)
-        self.w.entities = [self.guard]
-        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
-        self.guard.pos = self.POST
-        self.w.pos = self.w.terrain_center = (10, 10)
-        self.w.entities = [gem(50, self.PILE)]
-        self.w.tick += 100
-        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
+    def seen(self, ticks: int) -> None:
+        """The guard in view on its cell for ``ticks``, then out of view."""
+        w = self.w
+        for t in range(w.tick, w.tick + ticks + 1):
+            w.tick = t
+            w._set_entities([self.guard], t)
+        w.tick += 1
+        w._set_entities([], w.tick)
 
-    def test_its_reach_stretches_to_where_it_came_for_us(self):
-        self.turned_back()
-        self.assertEqual(self.w.sightings[("npc", 7)].reach, chebyshev((24, 10), self.POST))
+    def held(self) -> bool:
+        return (self.LAST, 3) in known_reach(self.w, self.policy())
 
-    def test_a_guard_still_on_its_post_learns_no_reach(self):
-        """Joined the group beside the one that came out, it came out for nobody."""
-        neighbour = biter(8, (27, 10))
-        guard_post(self.w, neighbour, (27, 10))
-        self.w.pos = self.w.terrain_center = (24, 10)
-        self.guard.pos = (25, 10)
-        self.w.entities = [self.guard, neighbour]
-        sync_engagement(self.w, self.c.memory, self.c.policy, self.c.params)
-        self.assertIn(("npc", 8), self.c.memory.engagement.group)
-        self.assertEqual(self.w.sightings[("npc", 8)].reach, 0)
-        self.assertEqual(self.w.sightings[("npc", 7)].reach, 6)
+    def policy(self) -> Policy:
+        return ctx(on_hostile="flee").policy
 
-    def test_gather_does_not_go_back_for_the_pile_it_turned_us_from(self):
+    def test_a_still_hostile_is_remembered_until_its_cell_is_seen_empty(self):
+        self.seen(STILL_TICKS)
+        self.assertTrue(self.w.sightings[("npc", 7)].still, "it stood still: blocked")
+        self.w.tick += 10 * SIGHTING_TICKS
+        self.w._set_entities([], self.w.tick)
+        self.assertTrue(self.held(), "time alone does not move a blocked hostile")
+        self.w.pos = (25, 10)  # its cell in sight, nobody on it
+        self.w._set_entities([], self.w.tick)
+        self.assertNotIn(("npc", 7), self.w.sightings)
+
+    def test_a_moving_hostile_is_remembered_for_sighting_ticks(self):
+        self.seen(1)
+        self.assertFalse(self.w.sightings[("npc", 7)].still)
+        self.assertTrue(self.held())
+        self.w.tick += SIGHTING_TICKS + 1
+        self.w._set_entities([], self.w.tick)
+        self.assertFalse(self.held())
+
+    def test_gather_keeps_off_a_pile_by_a_remembered_hostile(self):
         w = self.w
         w.entities = [gem(50, self.PILE)]
-        w.pos = w.terrain_center = (10, 10)
         m = Memory()
-        gather_outcome(w, m, self.c.policy, op={"op": "gather_gems", "count": 5})
-        self.assertEqual(m.gather_target, ("pile", self.PILE), "before: the pile is outside the post's ground")
-        self.turned_back()
+        gather_outcome(w, m, self.policy(), op={"op": "gather_gems", "count": 5})
+        self.assertEqual(m.gather_target, ("pile", self.PILE), "before: no hostile known")
+        last_seen_still(w, self.guard)
         m = Memory()
-        gather_outcome(w, m, self.c.policy, op={"op": "gather_gems", "count": 5})
+        gather_outcome(w, m, self.policy(), op={"op": "gather_gems", "count": 5})
         self.assertNotEqual(m.gather_target, ("pile", self.PILE))
-
-    def test_detour_does_not_go_back_for_it_either(self):
-        self.turned_back()
-        m = self.c.memory
-        m.goal, m.path = "travel", [(x, 10) for x in range(11, 40)]
-        self.assertIsNone(detour_find(self.w, self.c))
 
 
 class PricedTargetTest(unittest.TestCase):
-    """Danger at a target counts in its price: a nearer pile on faded ground loses to a clear one."""
+    """Danger at a target counts in its price: a nearer pile on priced ground loses to a clear one."""
 
     def test_gather_takes_the_clear_pile_over_a_nearer_priced_one(self):
         w = world(at=(10, 10))
@@ -383,8 +383,8 @@ class NearGroundTest(unittest.TestCase):
         self.policy = ctx(on_hostile="flee").policy
         self.w = world(at=(20, 10))
         self.guard = biter(7, self.POST)
-        guard_post(self.w, self.guard, self.POST)
-        self.w.entities = [gem(50, (25, 10))]  # 5 from the post: outside its ground, near it
+        last_seen_still(self.w, self.guard)
+        self.w.entities = [gem(50, (25, 10))]  # 5 from where it was last seen: outside its ground, near it
         self.w.view.tiles[(20, 16)] = "grass"  # 6 steps off, far from the post
 
     def pick(self) -> tuple:
@@ -392,7 +392,7 @@ class NearGroundTest(unittest.TestCase):
         gather_outcome(self.w, m, self.policy, op={"op": "gather_gems", "count": 5})
         return m.gather_target
 
-    def test_grass_further_off_beats_a_pile_near_a_post(self):
+    def test_grass_further_off_beats_a_pile_near_a_remembered_hostile(self):
         self.assertEqual(self.pick(), ("grass", (20, 16)))
 
     def test_with_no_hostile_known_the_pile_is_taken(self):

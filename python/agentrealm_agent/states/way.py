@@ -19,10 +19,11 @@ keeps the walk, and the safe default never stands in for it
    above every executor, or the planner's, with a ``fight`` op (A114). The
    executor never starts a fight of its own: it names the hostile in its ask.
    A hostile's ground that is the only thing between the walk and its
-   target is passed when health covers it (``pathing.HostileReach``,
-   A146, A151); when it does not and that one hostile in view is one the
-   engagement would fight from land beside it, the walk lands there first
-   (``land_to_fight``, A151), and the engagement takes it ashore.
+   target is passed when, priced as a chaser, it never comes within range
+   and health covers it (``pathing.HostileReach``, A146, A151, A162); when
+   it does not and that one hostile in view is one the engagement would
+   fight from the land cell where it first comes within range, the walk
+   lands there (``land_to_fight``, A151), and the engagement takes it ashore.
 4. **Ask.** One ``no_way_on`` with why, what blocks the way and what was
    tried: the searches, ``Use``s and recorded breaks, never what is merely
    held (``ask.ask_the_planner``), and the decision holds while the planner
@@ -40,12 +41,14 @@ from agentrealm_adk.break_memory import attempts_at, breakable_block, choice_at,
 from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.navigation.planner import CostGridParams
 from agentrealm_adk.navigation import stuck as nav_stuck
+from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import attack_forbidden
 from agentrealm_adk.engagement import would_fight
 from agentrealm_adk.fording import on_water
+from agentrealm_adk.hostile_ground import chase
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.pathing import HostileReach, bounded_step, grid_params, plan_sets
-from agentrealm_adk.world import Pos, WorldModel, chebyshev
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 from ..plan import GoalOp
 from .intents import set_position
@@ -210,16 +213,19 @@ def clear_the_way(
 def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: HostileReach) -> StateOutcome | None:
     """A step toward land to fight from, when one hostile's ground is all
     that shuts the way to ``at`` and the pass through it is not covered
-    (A151, A120): that hostile is in view, not forbidden, and the
-    engagement would fight it from a land cell within its range
-    (``engagement.would_fight`` as it would stand there, so the decision it
-    makes on landing is fight), reached on a way that comes within its
-    range only on that cell. On land the engagement takes it and Fight arms
-    the weapon (A133); afloat it never says fight (A146), so no step on
-    water comes within range. The landings are tried nearest first, and the
-    search runs only while the way is not known shut (``clear_the_way``'s
-    ``Memory.way_shut``). None when no such landing exists: then the
-    executor asks."""
+    (A151, A120, A162): that hostile is in view and not forbidden, and a
+    land cell within its range is reached on a way where, priced as a
+    chaser (``hostile_ground.chase``: it steps toward us as we walk), it
+    first comes within range of us on land, and the engagement would fight
+    it from that cell (``engagement.would_fight`` as it would stand there,
+    so the decision it makes there is fight). A chaser in the open meets
+    the walk before the landing; one the ground stops, at it. On land the
+    engagement takes it and Fight arms the weapon (A133); afloat it never
+    says fight (A146), so no meeting on water will do. The landings are
+    tried nearest first, each by a way that keeps out of its range but on
+    that cell, and the search runs only while the way is not known shut
+    (``clear_the_way``'s ``Memory.way_shut``). None when no such landing
+    exists: then the executor asks."""
     if w.pos is None:
         return None
     m, policy = ctx.memory, ctx.policy
@@ -232,16 +238,16 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     near = {p for p in reach.cells if chebyshev(p, e.pos) <= policy.hostile_range}
     others = set(reach.cells) - ground.cells
     land = w.walkable_test(swing=True)
+
+    def ashore(p: Pos) -> bool:
+        return land(p) and not on_water(w, m, p)
+
     # Cheap tests first, then one search per landing, nearest first, until one is reached.
-    landings = [
-        p
-        for p in near
-        if land(p) and not on_water(w, m, p) and p != e.pos
-        and would_fight(w, policy, ctx.params, also=e, m=m, at=p)
-    ]
-    for cell in sorted(landings, key=lambda p: (chebyshev(p, w.pos), p)):
+    for cell in sorted((p for p in near if ashore(p) and p != e.pos), key=lambda p: (chebyshev(p, w.pos), p)):
         avoid = plan_avoid | others | (near - {cell})
-        if cost_path(w, cell, grid_params(policy, avoid, plan_costly)):
+        path = cost_path(w, cell, grid_params(policy, avoid, plan_costly))
+        meet = _meeting(w, policy, e, path)
+        if meet is not None and ashore(meet) and would_fight(w, policy, ctx.params, also=e, m=m, at=meet):
             break
     else:
         return None
@@ -253,6 +259,15 @@ def land_to_fight(w: WorldModel, ctx: PlayContext, at: Pos, state: str, reach: H
     if step is None:
         return None
     return StateOutcome([set_position(step)], f"land at {cell[0]},{cell[1]} to fight {e.code or e.kind} {e.id}", state=state)
+
+
+def _meeting(w: WorldModel, policy: Policy, e: Entity, path: list[Pos] | None) -> Pos | None:
+    """The first cell of ``path`` where ``e``, chasing us as we walk it
+    (``hostile_ground.chase``), is within ``policy.hostile_range``: where
+    the engagement takes it. None with no path or no such cell."""
+    if not path:
+        return None
+    return next((p for c, p in zip(chase(w, e.pos, path), path) if chebyshev(c, p) <= policy.hostile_range), None)
 
 
 def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:

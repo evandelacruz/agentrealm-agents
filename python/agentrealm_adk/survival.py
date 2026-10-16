@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING
 
 from .executor.pacing import attack_cooldown_ticks
@@ -27,6 +27,9 @@ GAP_PROBE_TICKS = 30
 # Stated assumptions until measured (GAME_NOTES.md Open questions, "Assumed
 # until measured"). Only the win estimate reads them; A23 refines it.
 HOSTILE_ATTACK_INTERVAL_TICKS = 15
+# The health of a hostile never hit: a hostile never heals while it lives
+# (Manual §11 Hostiles), so one hit starts each fight that much lower
+# (``health_left``, ``WorldModel.npc_damage``).
 UNKILLED_HOSTILE_HEALTH = 10
 # Our swing, by the published roll (GAME_NOTES.md Combat): it hits when d20
 # plus attack power is at least 10 plus the target's defense, which a
@@ -404,23 +407,42 @@ def attack_interval_ticks(weapon: str | None) -> int:
     return attack_cooldown_ticks(fighting_weapon(weapon))
 
 
-def ticks_to_kill_them(group: list[Entity], weapon: str | None = None) -> float:
+def health_left(e: Entity, taken: Mapping[int, int] | None = None) -> int:
+    """The health ``e`` has left: a boss's as its read serves it, else
+    ``UNKILLED_HOSTILE_HEALTH`` less the damage it has taken
+    (``WorldModel.npc_damage``), kept until it dies since a hostile never
+    heals (Manual §11 Hostiles), at least 1 while it lives."""
+    if e.is_boss and e.health is not None:
+        return max(1, e.health)
+    hit = (taken or {}).get(e.id, 0) if e.kind == "npc" else 0
+    return max(1, UNKILLED_HOSTILE_HEALTH - hit)
+
+
+def ticks_to_kill_them(group: list[Entity], weapon: str | None = None, taken: Mapping[int, int] | None = None) -> float:
     """Ticks for ``weapon`` to kill ``group``: one swing (``swing_damage``)
     every attack cooldown (``attack_interval_ticks``), so a slower weapon's
-    bigger hit counts for what it is worth (A123)."""
+    bigger hit counts for what it is worth (A123), against the health each
+    has left (``health_left``, the damage it has ``taken`` counted)."""
     if not group:
         return float("inf")
-    return len(group) * UNKILLED_HOSTILE_HEALTH * attack_interval_ticks(weapon) / swing_damage(weapon)
+    health = sum(health_left(e, taken) for e in group)
+    return health * attack_interval_ticks(weapon) / swing_damage(weapon)
 
 
 def win_ratio(
-    health: int | None, group: list[Entity], threat: ThreatTable, weapon: str | None = None, armor: int = 0
+    health: int | None,
+    group: list[Entity],
+    threat: ThreatTable,
+    weapon: str | None = None,
+    armor: int = 0,
+    taken: Mapping[int, int] | None = None,
 ) -> float:
     """Ticks for them to kill us through ``armor`` (``worn_defense``), over
-    ticks for us to kill ``group`` with ``weapon`` armed. Higher is better for us."""
+    ticks for us to kill ``group`` with ``weapon`` armed, the damage each has
+    ``taken`` counted (``WorldModel.npc_damage``). Higher is better for us."""
     if health is None or not group:
         return float("inf")
-    return ticks_to_kill_us(health, group, threat, armor) / ticks_to_kill_them(group, weapon)
+    return ticks_to_kill_us(health, group, threat, armor) / ticks_to_kill_them(group, weapon, taken)
 
 
 def estimate_health(w: WorldModel) -> int:

@@ -2,12 +2,15 @@
 
 The parser and ``status``'s self line are the ADK's (``agentrealm_adk.cli``),
 as Gary's are. ``status`` then prints her goal tree's readiness (A139,
-``ladder.goals.dump``).
+``ladder.goals.dump``). ``run`` plays the tree (``ladder.play``): the one
+planner question at its goal (A140), off with ``--no-planner`` or
+``AGENTREALM_NO_PLANNER``.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
 
 from agentrealm_adk import config
 from agentrealm_adk.character_select import CharacterSelectionError, create, resolve_character_id
@@ -16,18 +19,21 @@ from agentrealm_adk.client import ApiError, Client
 from agentrealm_adk.knowledge_base import KnowledgeBaseError
 from agentrealm_adk.knowledge_base import load as load_knowledge
 from agentrealm_adk.knowledge_base.hostiles import load_hostiles
+from agentrealm_adk.llm import PlannerConfigError
 from agentrealm_adk.world import WorldModel
 
+from ladder.ask import Planner
 from ladder.goals import dump
-
-# Temporary, and the one tie to Stan: until her goal tree drives play (A140–A141)
-# `run` is Stan's loop (sync, flee, explore). Run from `python/`, where
-# `starter_agent.py` is importable.
-import starter_agent
+from ladder.play import LadderRunner
 
 def main(argv: list[str] | None = None) -> int:
     ap, sub = parser("ladder", "Ladder Lorraine, the goal-tree agent for Agent Realm.")
-    sub.add_parser("run", parents=[profile_parser()], help="drive one character until interrupted")
+    run_p = sub.add_parser("run", parents=[profile_parser()], help="drive one character until interrupted")
+    run_p.add_argument(
+        "--no-planner",
+        action="store_true",
+        help="test mode: play without the AI planner (the goal tree's own op at every node)",
+    )
     sub.add_parser("status", parents=[profile_parser()], help="print the character's self and her goal tree's readiness")
     args = ap.parse_args(argv)
 
@@ -49,7 +55,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.cmd == "status":
         return status(client, cfg, cid)
-    return run(client, cfg, cid)
+    try:
+        planner = Planner.off() if args.no_planner else Planner.from_env()
+        failed = planner.check()  # a refused key stops here, before play
+    except PlannerConfigError as e:
+        print(e, file=sys.stderr)
+        return 2
+    if failed is not None:
+        print(f"planner: startup check failed: {failed}", file=sys.stderr)
+    return run(client, cfg, cid, planner)
 
 
 def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
@@ -81,9 +95,33 @@ def status(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
     return 0
 
 
-def run(client: Client, cfg: config.CharacterConfig, cid: int) -> int:
-    """Play until Ctrl-C: Stan's loop, until her goal tree replaces it."""
-    return starter_agent.run(client, cfg, cid)
+def run(client: Client, cfg: config.CharacterConfig, cid: int, planner: Planner | None = None) -> int:
+    """Play until Ctrl-C: walk the tree, ask the one question at its goal, run
+    the op (``ladder.play``; A141 replaces how the op is carried out)."""
+    try:
+        client.self_(cid)
+    except ApiError as e:
+        print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
+        return 2
+    try:
+        kb = load_knowledge(cfg.world)
+    except (KnowledgeBaseError, OSError) as e:
+        print(f"{cfg.profile} ({cid}): knowledge base: {e}", file=sys.stderr)
+        return 1
+    stop = threading.Event()
+    runner = LadderRunner(cfg, client, cid, stop, planner or Planner.off(), knowledge=kb)
+    load_hostiles(kb, runner.world)
+    thread = threading.Thread(target=runner.run, daemon=True)
+    thread.start()
+    try:
+        while thread.is_alive():
+            thread.join(0.5)
+    except KeyboardInterrupt:
+        stop.set()
+        print("stopping")
+    finally:
+        stop.set()
+    return 1 if runner.failed else 0
 
 
 if __name__ == "__main__":

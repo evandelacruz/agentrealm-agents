@@ -371,10 +371,17 @@ class ImportLineTest(unittest.TestCase):
         self.assertEqual(named, [], "an ADK module imports an agent")
 
     def test_ladder_loads_nothing_of_garys(self):
-        # Lorraine imports nothing of Gary's (A138). Stan stays allowed: her
-        # `run` is his loop until her goal tree drives play.
+        # Lorraine imports nothing of Gary's (A138), his planner's prompt
+        # included: her one question shares only the ADK's call plumbing
+        # (`agentrealm_adk.llm`, A140). Stan stays allowed: her play rides
+        # his sync and flee until A141.
+        mods = sorted(
+            ".".join(("ladder", *f.relative_to(PYTHON_DIR / "ladder").with_suffix("").parts)).removesuffix(".__init__")
+            for f in (PYTHON_DIR / "ladder").rglob("*.py")
+        )
+        load = f"import importlib, json, sys\nfor m in {mods!r}: importlib.import_module(m)\nprint(json.dumps(sorted(sys.modules)))"
         out = subprocess.run(
-            [sys.executable, "-c", "import json, sys, ladder, ladder.__main__; print(json.dumps(sorted(sys.modules)))"],
+            [sys.executable, "-c", load],
             cwd=PYTHON_DIR,
             env=os.environ.copy(),
             capture_output=True,
@@ -385,6 +392,8 @@ class ImportLineTest(unittest.TestCase):
         crossed = [m for m in loaded if m == "agentrealm_agent" or m.startswith("agentrealm_agent.")]
         self.assertEqual(crossed, [], "Lorraine reached into Gary's agentrealm_agent")
         self.assertIn("agentrealm_adk.pathing", loaded, "the closure should include the ADK she plays on")
+        self.assertIn("agentrealm_adk.llm", loaded, "her question calls the planner through the ADK")
+        self.assertIn("ladder.ask", loaded)
 
 
 class OneWaterTestTest(unittest.TestCase):

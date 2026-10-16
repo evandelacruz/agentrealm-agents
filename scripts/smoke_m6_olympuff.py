@@ -32,7 +32,8 @@ from agentrealm_agent.m6_acceptance import M6AcceptanceMetrics, TARGET_STEPS  # 
 from agentrealm_agent.acceptance_smoke import NO_PLANNER_HELP, add_park_argument, planner_for  # noqa: E402
 from agentrealm_adk.park import ABORT_JOIN_SECONDS, install_stop_signals  # noqa: E402
 from agentrealm_agent.runner import Runner  # noqa: E402
-from agentrealm_agent.strategist import PlannerConfigError, Strategist  # noqa: E402
+from agentrealm_adk.llm import PlannerConfigError  # noqa: E402
+from agentrealm_agent.strategist import Strategist  # noqa: E402
 
 DEFAULT_PROFILE = PYTHON / "characters" / "olympuff_walker.toml"
 DEFAULT_BASE = "https://api.agentrealm.gg"

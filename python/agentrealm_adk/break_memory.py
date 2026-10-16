@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 
-from .executor.pacing import DEFAULT_WEAPON_COOLDOWN_TICKS
+from .executor.pacing import use_cooldown_ticks
 from .item_table import InventorySupply, merge_capability
 from .knowledge_base import KnowledgeBase
 from .supplies import CAPABILITIES, break_capabilities, kept_on_break, listed
@@ -35,7 +35,12 @@ BREAK_GOAL = "break"
 
 BREAKABLE = frozenset({"bush", "tree", "rock", "mountain", "wall"})
 REGROWTH_TICKS = 600  # 60 s at 10 Hz: a block's recovery time unless the world sets another (Manual §11 Regrowth)
-BREAK_BASE_COST = DEFAULT_WEAPON_COOLDOWN_TICKS + 1
+# A break's own tick, the ``Use``. A weapon's break adds its attack cooldown;
+# a tool's (matches, a bomb) waits on none (Manual §11 What waits on a
+# cooldown, A153).
+BREAK_BASE_COST = 1
+# The shape of a break's ``Use``: a block target, for ``use_cooldown_ticks``.
+_BREAK_USE = {"verb": "Use", "target": {"kind": "block"}}
 # Refusals of a break that say "not yet", not "cannot": the pair is not marked failed.
 TRANSIENT_BREAK_REJECTIONS = frozenset({"attack_cooldown"})
 # Results that mark a (block, capability) pair failed: it is not tried there again.
@@ -244,9 +249,11 @@ def untried_capabilities(kb: KnowledgeBase | None, map_id: int | None, pos: Pos,
 
 
 def break_step_cost(kb: KnowledgeBase | None, code: str) -> int:
-    """Weapon cooldown plus one, plus the gem price of a tool a break uses up
+    """The ``Use``'s tick, plus a weapon's attack cooldown (none for a tool,
+    ``use_cooldown_ticks``), plus the gem price of a tool a break uses up
     (any supply the reference does not list as kept on a break)."""
-    return BREAK_BASE_COST + (0 if kept_on_break(code) else _tool_gem_cost(kb, code))
+    cooldown = use_cooldown_ticks(_BREAK_USE, code)
+    return BREAK_BASE_COST + cooldown + (0 if kept_on_break(code) else _tool_gem_cost(kb, code))
 
 
 def breakable_block(w: WorldModel, pos: Pos) -> str | None:

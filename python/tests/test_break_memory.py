@@ -13,6 +13,7 @@ from agentrealm_adk.break_memory import (
     attempt_failed,
     attempt_open,
     break_key,
+    break_step_cost,
     cannot_cut,
     capabilities_for_code,
     break_costs_for_planning,
@@ -89,6 +90,19 @@ def _sword_world(rows: list[str], at) -> WorldModel:
     w.terrain_center, w.terrain_map = at, 7
     w.held_supplies = [InventorySupply(5, "bronze_sword")]
     return w
+
+
+class BreakStepCostTest(unittest.TestCase):
+    """A153: a weapon's break waits on its attack cooldown; a tool's on none
+    (Manual §11 What waits on a cooldown)."""
+
+    def test_a_weapon_break_costs_its_use_and_its_cooldown(self):
+        self.assertEqual(break_step_cost(None, "bronze_mallet"), 1 + 13)
+        self.assertEqual(break_step_cost(None, "pocket_knife"), 1 + 8)
+
+    def test_a_tool_break_costs_its_use_alone(self):
+        for code in ("matches", "bomb", "torch"):
+            self.assertEqual(break_step_cost(None, code), 1, code)
 
 
 class NominateOnPathTest(unittest.TestCase):

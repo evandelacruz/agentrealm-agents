@@ -183,7 +183,7 @@ def should_flee(world: WorldModel, ctx: PlayContext) -> bool:
     policy = ctx.policy
     if policy.kind != "scripted" or not world.alive or world.pos is None:
         return False
-    if boss_fight_on(world, ctx.memory):
+    if boss_fight_on(world, ctx):
         return False  # Boss retreats out or commits (A38)
     if policy.on_hostile == "ignore" or not flee_from(world, policy):
         return False

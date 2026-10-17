@@ -93,6 +93,20 @@ class ReservedTest(unittest.TestCase):
         ]
         self.assertEqual(sorted(s.id for s in reserved_supplies(w, ops, kb())), [MALLET, MATCHES_A, 4])
 
+    def test_every_pass_through_a_locked_entrance_reserves_a_key(self):
+        """Manual §11: a locked door uses up its key on every pass, so a plan
+        that means to come back keeps a spare (A163)."""
+        w = world()
+        full_pack(w, spare="key")
+        k = kb()
+        k.entrances["1:5,0"] = {"map_id": 1, "x": 5, "y": 0, "locked": True, "needs": "key"}
+        enter = {"op": "enter_level", "x": 5, "y": 0}
+        self.assertEqual([s.id for s in reserved_supplies(w, [enter], k)], [4])
+        again = [enter, {"op": "leave_level"}, {"op": "travel", "to": "entrance", "map_id": 1, "x": 5, "y": 0}]
+        self.assertEqual([s.id for s in reserved_supplies(w, again, k)], [4, 5], "a spare for the way back")
+        del k.entrances["1:5,0"]["locked"]
+        self.assertEqual(reserved_supplies(w, again, k), [], "an open entrance spends no key")
+
     def test_compose_reserves_one_fragment_per_slot(self):
         w = world()
         full_pack(w)

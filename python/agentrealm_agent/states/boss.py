@@ -1,10 +1,17 @@
-"""Boss: plan preconditions, the fight clock, defeat from boss health (A38)."""
+"""Boss: plan preconditions, the fight clock, defeat from boss health (A38).
+
+The clock is counted, not read (A163, ``boss_clock``): it starts on the
+step through the op's boss door, against the level's limit kept in the
+knowledge base. Near the limit, or on a retreat, Boss walks out through
+the room's exit door (``boss_clock.exit_door``); the boss keeps the damage
+it has taken, and its served health prices a return (``survival.health_left``)."""
 
 from __future__ import annotations
 
+from agentrealm_adk import boss_clock
 from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import attack_forbidden
-from agentrealm_adk.executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents
+from agentrealm_adk.executor import attack_cooldown_ticks, build_attack_queue, queue_horizon_intents, ticks_per_step
 from agentrealm_adk.healing import potion_count
 from agentrealm_adk.memory import BossFight, Memory
 from agentrealm_adk.navigation import cost_path
@@ -27,8 +34,10 @@ from .intents import set_position
 from .way import clear_the_way
 
 DOOR_GOAL = "boss:door"
-# Stop trying to leave once the fight clock is this close to expiring (10 s at 10 Hz).
-CLOCK_COMMIT_TICKS = 100
+EXIT_GOAL = "boss:exit"
+# Seconds kept in hand beyond the walk to the exit door: with less left than
+# that walk and these, Boss leaves (A163).
+LEAVE_MARGIN_SECONDS = 10
 
 
 def boss_entity(w: WorldModel, fight: BossFight | None = None) -> Entity | None:
@@ -51,9 +60,11 @@ def current_fight_boss(plan: Plan | None) -> GoalOp | None:
     return None
 
 
-def boss_fight_on(w: WorldModel, m: Memory) -> bool:
-    """A boss is engaged, or the served clock runs: Retreat and Flee stand down."""
-    return m.boss is not None or w.in_boss_fight()
+def boss_fight_on(w: WorldModel, ctx: PlayContext) -> bool:
+    """The counted clock runs with time left: Retreat and Flee stand down,
+    and only then (A163). A fight seen with no clock assumes one (``sync_boss``)."""
+    left = boss_clock.ticks_left(ctx.memory, w, ctx.knowledge, ctx.tick_hz)
+    return left is not None and left > 0
 
 
 def boss_defeated(w: WorldModel, fight: BossFight) -> bool:
@@ -70,13 +81,21 @@ def boss_defeated(w: WorldModel, fight: BossFight) -> bool:
 def sync_boss(w: WorldModel, m: Memory, plan: Plan | None) -> None:
     """Start, end and finish the boss fight once per decision (A38).
 
-    The one place ``m.boss`` changes. A fight starts when a boss is seen while
-    a ``fight_boss`` op is current. It ends on death, when that op is no longer
-    current (popped, dropped, or the stack reloaded), or when the boss is out
-    of view with no served clock running. On an observed defeat Boss pops the
-    op itself.
+    The one place ``m.boss`` and ``m.boss_clock`` change. The clock starts on
+    a step through the current ``fight_boss`` op's door, keeps the room's
+    doors seen, and stops once the character is dead or off the room's map,
+    or once no ``fight_boss`` op is current (A163). A fight starts when a
+    boss is seen while a ``fight_boss`` op is current. It ends on death, when
+    that op is no longer current (popped, dropped, or the stack reloaded), or
+    when the boss is out of view with no clock running. On an observed
+    defeat Boss pops the op itself.
     """
     op = current_fight_boss(plan)
+    if op is not None and w.alive:
+        boss_clock.start(m, w, boss_door_pos(op))
+    if m.boss_clock is not None and (op is None or not boss_clock.running(m, w)):
+        m.boss_clock = None
+    boss_clock.note_doors(m, w)
     if m.boss is not None and (m.boss.op is not op or not w.alive):
         m.boss = None
     if op is None or not w.alive:
@@ -86,12 +105,13 @@ def sync_boss(w: WorldModel, m: Memory, plan: Plan | None) -> None:
         if boss is None:
             return
         m.boss = BossFight(op, boss.id, w.tick)
+        boss_clock.assume(m, w)  # no step through the op's door seen: the shortest limit, from now
     if boss_defeated(w, m.boss):
         assert plan is not None
         plan.finish_current(f"boss {m.boss.boss_id} defeated", memory=m)
-        m.boss = None
+        m.boss = m.boss_clock = None
         return
-    if boss_entity(w, m.boss) is None and not w.in_boss_fight():
+    if boss_entity(w, m.boss) is None and not boss_clock.running(m, w):
         m.boss = None
 
 
@@ -130,29 +150,58 @@ def at_boss_door(w: WorldModel, door: Pos) -> bool:
     return chebyshev(w.pos, door) == 1 and w.view.tiles.get(door) in DOORS
 
 
-def on_boss_door(w: WorldModel, door: Pos) -> bool:
-    return w.pos == door and w.view.tiles.get(door) in DOORS
-
-
-def can_retreat_out(w: WorldModel, ctx: PlayContext, door: Pos) -> bool:
-    """True when a step toward the boss door is open (retreat-out when possible)."""
-    if w.pos is None or w.map_id is None:
-        return False
-    if on_boss_door(w, door):
-        return True
+def exit_steps(w: WorldModel, ctx: PlayContext, target: Pos) -> int | None:
+    """Steps of the walk to the way out, None with no step toward it open.
+    An open walk is kept on its inputs (position, target, blocked and
+    occupied cells, the map's tiles, fording) and reused only while the clock is far from the limit
+    (twice the leave margin past the walk); near it, or with any input
+    changed, the walk is priced again. No step open is never kept."""
+    c = ctx.memory.boss_clock
+    if c is None or w.pos is None or w.map_id is None:
+        return None
     m = ctx.memory
     blocked, _, _ = plan_sets(w, m, ctx.policy, ctx.knowledge)
+    key = (w.pos, target, frozenset(blocked), frozenset(w.occupied()), w.view.tiles.revision, w.fords)
+    if c.route is not None and c.route[0] == key and not clock_nearly_out(w, ctx, c.route[1], margins=2):
+        return c.route[1]
     params = grid_params(ctx.policy, blocked, set(), allow_goal_door=True, m=m)
-    path = cost_path(w, door, params, nav=nav_search(m, w, DOOR_GOAL, door)) or []
-    return next_step(w, blocked, path) is not None
+    path = cost_path(w, target, params, nav=nav_search(m, w, EXIT_GOAL, target)) or []
+    if next_step(w, blocked, path) is None:
+        c.route = None
+        return None
+    c.route = (key, len(path))
+    return len(path)
 
 
-def should_commit(w: WorldModel, ctx: PlayContext, door: Pos) -> bool:
-    """No retreat-out path, or the fight clock is nearly gone."""
-    left = w.boss_fight_ticks_left()
-    if left is not None and left <= CLOCK_COMMIT_TICKS:
-        return True
-    return not can_retreat_out(w, ctx, door)
+def clock_nearly_out(w: WorldModel, ctx: PlayContext, steps: int, *, margins: int = 1) -> bool:
+    """Less of the counted clock is left than the walk of ``steps`` to the
+    way out and ``margins`` times ``LEAVE_MARGIN_SECONDS`` (A163)."""
+    left = boss_clock.ticks_left(ctx.memory, w, ctx.knowledge, ctx.tick_hz)
+    if left is None:
+        return False
+    step = ticks_per_step(tick_rate_hz=ctx.tick_hz, movement_speed_milli=max(1, w.movement_speed))
+    return left <= steps * step + margins * LEAVE_MARGIN_SECONDS * ctx.tick_hz
+
+
+def leave_room(
+    w: WorldModel, ctx: PlayContext, plan_avoid: set[Pos], plan_costly: set[Pos], *, retreat: bool
+) -> StateOutcome | None:
+    """The walk out of the boss room (A163): to the exit door, else back to
+    where the boss door landed (``boss_clock.way_out``), near the limit or
+    on Retreat's rule; None to fight on: neither holds, or no step toward
+    it is open."""
+    m = ctx.memory
+    target = boss_clock.way_out(m, w, ctx.knowledge)
+    if target is None:
+        return None
+    steps = exit_steps(w, ctx, target)
+    if steps is None:
+        return None
+    if clock_nearly_out(w, ctx, steps):
+        return _walk_to_door(w, m, ctx.policy, target, plan_avoid, plan_costly, "leave before the limit", EXIT_GOAL)
+    if retreat:
+        return _walk_to_door(w, m, ctx.policy, target, plan_avoid, plan_costly, "retreat out", EXIT_GOAL)
+    return None
 
 
 def boss_attack_queue(w: WorldModel, m: Memory, target: Entity, tick_hz: int) -> list[dict] | None:
@@ -180,7 +229,7 @@ class BossState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return boss_fight_on(world, ctx.memory) or current_fight_boss(ctx.plan) is not None
+        return boss_fight_on(world, ctx) or ctx.memory.boss is not None or current_fight_boss(ctx.plan) is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
@@ -197,24 +246,18 @@ class BossState(State):
         m, policy = ctx.memory, ctx.policy
         if op is None and m.boss is None:
             return StateOutcome(None, "no fight_boss op", state=self.name)
-        if m.boss is None and op is not None:
-            ok, why = fight_boss_preconditions_met(world, op)
-            if not ok:
-                return StateOutcome(None, f"fight_boss preconditions not met: {why}", state=self.name)
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
 
         if m.boss is not None:
+            # Out first, whatever else holds this decision: the limit kills (A163).
+            out = leave_room(world, ctx, plan_avoid, plan_costly, retreat=should_retreat(world, policy, ctx.params, fights(m)))
+            if out is not None:
+                return out
             boss = boss_entity(world, m.boss)
             if boss is None:
                 return StateOutcome(None, "boss out of view", state=self.name)
             if attack_forbidden(boss, ctx.never_attack):
                 return StateOutcome(None, "boss forbidden", state=self.name)
-            door = boss_door_pos(m.boss.op)
-            if (
-                should_retreat(world, policy, ctx.params, fights(m))
-                and not should_commit(world, ctx, door)
-            ):
-                return _walk_to_door(world, m, policy, door, plan_avoid, plan_costly, "retreat out")
             if not can_engage(world, boss, ctx):
                 return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op, reach=())
             if not in_weapon_reach(world, boss, ctx.knowledge):
@@ -229,13 +272,22 @@ class BossState(State):
             label = f"boss fight {boss.id}"
             if boss.health is not None and boss.max_health:
                 label += f" ({boss.health}/{boss.max_health})"
-            if world.boss_fight_ticks_left() is not None:
-                label += f" clock {world.boss_fight_ticks_left()}t"
+            left = boss_clock.ticks_left(m, world, ctx.knowledge, ctx.tick_hz)
+            if left is not None:
+                label += f" clock {left}t"
             return StateOutcome(queue, label, reflex=True, state=self.name, paced=True)
 
-        if op is None:
-            # The served clock runs but no boss is engaged: nothing to fight.
+        if boss_clock.running(m, world):
+            # In the boss room with no boss in view: out before the limit, else nothing to fight.
+            out = leave_room(world, ctx, plan_avoid, plan_costly, retreat=False)
+            if out is not None:
+                return out
             return StateOutcome(None, "boss clock, no boss in view", state=self.name)
+        if op is None:
+            return StateOutcome(None, "no fight_boss op", state=self.name)
+        ok, why = fight_boss_preconditions_met(world, op)
+        if not ok:
+            return StateOutcome(None, f"fight_boss preconditions not met: {why}", state=self.name)
         door = boss_door_pos(op)
         if world.pos == door:
             return StateOutcome(None, "entering boss room", wait=True, state=self.name)
@@ -253,14 +305,15 @@ def _walk_to_door(
     plan_avoid: set[Pos],
     plan_costly: set[Pos],
     label: str,
+    goal: str = DOOR_GOAL,
 ) -> StateOutcome:
     def params():
         return grid_params(policy, plan_avoid, plan_costly, allow_goal_door=True, m=m)
 
     def plan_fn(_att):
-        return cost_path(w, door, params(), nav=nav_search(m, w, DOOR_GOAL, door))
+        return cost_path(w, door, params(), nav=nav_search(m, w, goal, door))
 
-    step = guided_step(m, w, DOOR_GOAL, door, plan_avoid, plan_fn, params=params)
+    step = guided_step(m, w, goal, door, plan_avoid, plan_fn, params=params)
     if step is None:
         return StateOutcome(None, f"{label}: no path", state=BossState.name)
     return StateOutcome([set_position(step)], f"boss {label} → {door}", state=BossState.name)

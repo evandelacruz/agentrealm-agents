@@ -254,6 +254,16 @@ class RiskBudgetTest(unittest.TestCase):
         lo = readiness.Loadout.now(w)
         self.assertAlmostEqual(readiness.fight_cost(boss, w, lo), 5 * readiness.fight_cost(weak, w, lo))
 
+    def test_a_hurt_boss_is_priced_by_the_health_it_has_left(self):
+        """A163: a boss keeps its damage, so its served health, not its maximum, prices it."""
+        w = world()
+        weak = Entity("npc", 1, (0, 0), "rat")
+        boss = Entity("npc", 2, (0, 0), "rat", health=20, max_health=50)
+        lo = readiness.Loadout.now(w)
+        self.assertAlmostEqual(readiness.fight_cost(boss, w, lo), 2 * readiness.fight_cost(weak, w, lo))
+        w.npc_damage[2] = 15  # our own swings at it are already in its served health
+        self.assertAlmostEqual(readiness.fight_cost(boss, w, lo), 2 * readiness.fight_cost(weak, w, lo))
+
     def test_the_reflex_hook_reads_the_same_function(self):
         w = world()
         hostile(w, 50, (6, 5))

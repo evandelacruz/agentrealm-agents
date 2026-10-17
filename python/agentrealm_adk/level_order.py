@@ -219,21 +219,25 @@ def way_out(kb: KnowledgeBase | None, w: WorldModel) -> Pos | None:
     is unread counts only here, with no door known to lead out), or the
     landing cell while no such door is seen;
     else None: no known way out, and the planner is asked.
+    Among the doors, one that spends no key comes first: a locked door uses
+    up its key on every pass (Manual §11 Bosses and levels, A163).
     """
     if w.map_id is None:
         return None
     here = w.pos
-    known = {(int(d["x"]), int(d["y"])): _leads_out(kb, w, d) for d in iter_doors(kb, w.map_id)} if kb is not None else {}
+    rows = iter_doors(kb, w.map_id) if kb is not None else []
+    known = {(int(d["x"]), int(d["y"])): _leads_out(kb, w, d) for d in rows}
+    locked = {(int(d["x"]), int(d["y"])) for d in rows if d.get("locked")} | {p for p, on in w.view.locked.items() if on}
     doors = {p for p, b in w.view.tiles.items() if b in DOORS}
     out = [p for p in doors if known.get(p)]
     if out and here is not None:
-        return min(out, key=lambda p: (chebyshev(p, here), p))
+        return min(out, key=lambda p: (p in locked, chebyshev(p, here), p))
     landing = landing_cell(kb, w.map_id)
     if landing is None:
         return None
     back = [p for p in doors if known.get(p) is not False]
     if back:
-        return min(back, key=lambda p: (chebyshev(p, landing), p))
+        return min(back, key=lambda p: (p in locked, chebyshev(p, landing), p))
     return landing if landing != here else None
 
 

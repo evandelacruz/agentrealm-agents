@@ -8,7 +8,9 @@ gems, which take no slot; Recover withdraws only what fits). The rule:
 - A supply that fits, a gem or life (counters, no slot), or food (eaten on
   pickup, never carried: Manual §11 Food and potions, A155) is taken.
 - A supply the plan reserves is never dropped (:func:`reserved_supplies`):
-  one held supply for each op on the stack that will use it.
+  one held supply for each op on the stack that will use it, and a key for
+  every pass through a locked entrance, since each pass uses one up: a plan
+  that means to come back through it keeps a spare (A163).
 - A price belongs to the supply (Manual §11, A158): a priced subtype costs
   its ``gem_price`` wherever a copy lies, our own drop included, so a drop of
   one forfeits its price on any cell, a shop cell no different. The drop
@@ -28,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Literal
 
 from .break_memory import capabilities_for_code
+from .entrance_needs import entrance_of, meets, needs_of
 from .fragments import compose_supply_ids
 from .healing import supply_matches
 from .item_table import InventorySupply
@@ -35,6 +38,7 @@ from .knowledge_base import KnowledgeBase, knowledge_items
 from .loot import Pickup, carry_slots_used, droppable_supplies, inventory_full, is_counter_supply
 from .supplies import eaten_on_pickup, kept_on_break
 from .supplies import row as supply_row
+from .travel.knowledge import entrance_key
 from .world import WorldModel
 
 RoomKind = Literal["take", "drop", "ask"]
@@ -63,8 +67,10 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
     as Solve composes them), and ``break_block``'s tool for its ``capability``, the one
     Break picks (``break_memory.pick_supply_for_capability``: one a break does not use
     up first, then the armed one, A154: an armed tool can be dropped too); one kept
-    for every break when a break does not use it up, else one per op. An op is
-    matched to the lowest id not yet reserved."""
+    for every break when a break does not use it up, else one per op; and the key
+    of a locked entrance an ``enter_level`` or ``travel`` passes
+    (``locked_entrance_needs``), one per pass. An op is matched to the lowest
+    id not yet reserved."""
     pool = sorted(w.held_supplies + w.chest_supplies + w.loadout_supplies(), key=lambda s: s.id)
     out: list[InventorySupply] = []
 
@@ -84,6 +90,8 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
             held = sorted((s for s in w.held_supplies if s.id not in taken), key=lambda s: s.id)
             ids = set(compose_supply_ids(held, op["composes_into"]))
             out.extend(s for s in held if s.id in ids)
+        elif kind in ("enter_level", "travel") and (needs := locked_entrance_needs(w, op, knowledge)):
+            claim(lambda s, n=needs: any(meets(s.code, need) for need in n))
         elif kind == "fight_boss":
             worn = op.get("worn") if isinstance(op.get("worn"), list) else []
             for code in [op.get("armed"), *worn]:
@@ -104,6 +112,20 @@ def reserved_supplies(w: WorldModel, ops: Iterable[dict[str, Any]], knowledge: K
             )
             claim(lambda s: True, tools)
     return out
+
+
+def locked_entrance_needs(w: WorldModel, op: dict[str, Any], knowledge: KnowledgeBase | None) -> list[str]:
+    """What a locked entrance ``op`` passes is recorded to need (its key), else []."""
+    where = entrance_of(op, w, knowledge)
+    if where is None or knowledge is None:
+        return []
+    map_id, pos = where
+    with knowledge.lock:
+        row = knowledge.entrances.get(entrance_key(map_id, pos))
+        locked = isinstance(row, dict) and bool(row.get("locked"))
+    if not locked and not (map_id == w.map_id and w.view.locked.get(pos)):
+        return []
+    return needs_of(knowledge, map_id, pos)
 
 
 def make_room(

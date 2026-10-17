@@ -28,7 +28,7 @@ from .executor.supply_refusals import can_try, in_hand
 from .navigation import stuck as nav_stuck
 from .item_table import InventorySupply
 from .supplies import BLOCK_FOOD, heal_of, is_food, is_potion, kept_on_break, row
-from .survival import hostiles_in_range, recently_attacked
+from .survival import hostiles_in_range, under_attack
 from .world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -128,14 +128,31 @@ def low_health_line(w: WorldModel, params: Params) -> int | None:
 
 def in_combat(w: WorldModel, m: Memory, policy: Policy, *, fight_ahead: bool = False) -> bool:
     """In a fight or about to be one (A135): inside a level, a boss fight
-    on, a hostile in range, hit by one lately (``survival.recently_attacked``),
-    or a fight next on the plan (``fight_ahead``). Only then is a potion worth
-    more than food."""
+    on, a hostile in range, under attack (``survival.under_attack``: hit by
+    one lately, or one closing on us, A165), or a fight next on the plan
+    (``fight_ahead``). Only then is a potion worth more than food."""
     if (w.map_level or 0) > 0 or fight_ahead:
         return True
     if m.boss is not None or boss_clock.running(m, w):
         return True
-    return bool(hostiles_in_range(w, policy)) or recently_attacked(w)
+    return bool(hostiles_in_range(w, policy)) or under_attack(w, policy)
+
+
+def drink_first(w: WorldModel, policy: Policy, params: Params) -> bool:
+    """Under attack (``survival.under_attack``) at or below the low line
+    (``health_low``): a usable potion held is drunk before any other state
+    acts, Retreat included (A165). ``spend_potion`` says yes there (in combat
+    at the low line), and the drink and its ``Arm`` wait on no cooldown
+    (A153), so it costs the next tick and no more."""
+    return health_low(w, params) and under_attack(w, policy)
+
+
+def food_on_hold(w: WorldModel, policy: Policy) -> bool:
+    """Under attack, no walk goes for food (A165): not to food lying near, not
+    to a block that drops it, not on a detour. A heal of food is worth less
+    than the hits taken walking to it; a potion held is the heal there
+    (``drink_first``)."""
+    return under_attack(w, policy)
 
 
 def spend_potion(

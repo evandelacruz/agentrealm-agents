@@ -71,8 +71,9 @@ from .wait import WaitState
 from .way import break_due
 
 # Act on what is happening now (PLAYABLE_AGENT_PLAN.md State machine). Sync
-# and Downed only wait, the forced waits. Escape, Retreat and Heal (A10)
-# are survival; Fight (A23) slots in before Flee; then Pickup in reach (A20),
+# and Downed only wait, the forced waits. Escape, Heal (A10) and Retreat
+# are survival, Heal first: under attack at the low line a held potion is
+# drunk before Retreat walks (A165); Fight (A23) slots in before Flee; then Pickup in reach (A20),
 # Recover (A11), Detour (A71, A73) to a valuable in view worth the steps it adds,
 # Greet (A65), a one-tick hello to an NPC in sight, and UseItem (A108), which
 # applies a bigger chest once held and is also the ``use_item`` op's executor.
@@ -81,8 +82,8 @@ REFLEXES: tuple[State, ...] = (
     DownedState(),
     EscapeState(),
     AshoreState(),
-    RetreatState(),
     HealState(),
+    RetreatState(),
     FightState(),
     FleeState(),
     PickupState(),
@@ -118,7 +119,7 @@ STATES: tuple[State, ...] = REFLEXES + EXECUTORS + (IdleState(),)
 
 # The runner's park phase, after the run ends (A66): the survival reflexes,
 # then Park walking to safe ground. No plan op runs, and nothing else.
-SURVIVAL = ("Sync", "Downed", "Escape", "Ashore", "Retreat", "Heal", "Fight", "Flee")
+SURVIVAL = ("Sync", "Downed", "Escape", "Ashore", "Heal", "Retreat", "Fight", "Flee")
 PARK_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name in SURVIVAL) + (ParkState(),)
 
 # The runner's held-queue probe (A64): the states that can answer with a

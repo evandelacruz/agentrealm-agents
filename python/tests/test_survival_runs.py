@@ -189,7 +189,7 @@ class RetreatCorridorTest(unittest.TestCase):
         with mock.patch("agentrealm_adk.navigation.planner.FINE_NODE_BUDGET", 50):
             dispatch(self.w, self.c)
             self.w.tick += RETREAT_PROBE_TICKS
-            hit(self.w)
+            hit(self.w, npc_id=9)  # from a hostile out of view: none in view is closing on us (A165)
             out = dispatch(self.w, self.c)
         self.assertIn("losing ground", out.reason)
         self.assertIsNot(m.corridors[LOSING_NAV], m.corridors[RETREAT_NAV])
@@ -229,20 +229,18 @@ class RetreatQueueTest(unittest.TestCase):
         dispatch(self.w, self.c)
         m.held_queue = {"queue_id": "q1", "next_index": 1}
         self.w.tick += RETREAT_PROBE_TICKS
-        hit(self.w)
+        hit(self.w, npc_id=9)  # from a hostile out of view: none in view is closing on us (A165)
         out = dispatch(self.w, self.c)
         self.assertTrue(out.reflex)
         self.assertIn("losing ground", out.reason)
 
-    def test_losing_ground_drinks_what_it_carries(self):
-        m = self.c.memory
+
+    def test_under_attack_at_the_low_line_the_potion_goes_first(self):
+        """A165: Heal drinks before Retreat walks, on the first decision."""
         self.w.held_supplies = [InventorySupply(5, "small_potion")]
-        dispatch(self.w, self.c)
-        self.w.tick += RETREAT_PROBE_TICKS
-        hit(self.w)
         out = dispatch(self.w, self.c)
-        self.assertEqual(out.state, "Retreat")
-        self.assertTrue(out.reason.startswith("retreat losing ground: arm and use small_potion"), out.reason)
+        self.assertEqual(out.state, "Heal")
+        self.assertEqual(out.reason, "arm and use small_potion")
         self.assertTrue(out.reflex)
 
     def test_gaining_ground_is_not_losing(self):

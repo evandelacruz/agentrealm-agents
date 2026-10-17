@@ -15,7 +15,7 @@ now (``can_try``).
 from __future__ import annotations
 
 from agentrealm_adk.break_memory import choice_at, given_up_blocks
-from agentrealm_adk.healing import carried_heal, hurt, in_combat, potion_count
+from agentrealm_adk.healing import carried_heal, drink_first, food_on_hold, hurt, in_combat, potion_count
 from agentrealm_adk.memory import Memory, queue_signal
 from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.navigation import stuck as nav_stuck
@@ -32,16 +32,20 @@ from .use_item import rearm_after_use, use_on_self
 
 
 class HealState(State):
-    """Reflex, above Fight. Hurt and no hostile in range, it heals by the
-    first of these that can be had:
+    """Reflex, above Retreat. Under attack at or below the low line with a
+    usable potion held (``healing.drink_first``, A165), it drinks before any
+    other state acts, Retreat and Flee included, with a hostile in range or
+    not, and the drink is a reflex, so it goes out over a walk queue Retreat
+    left running. Else, hurt and no hostile in range, it heals by the first
+    of these that can be had:
 
     1. In combat or about to be (``healing.in_combat``), a carried potion
        that is due goes first (A135).
-    2. Food lying within ``healing.FOOD_REACH`` that it is hurt by at least
+    2. Not under attack (``healing.food_on_hold``, A165), food lying within ``healing.FOOD_REACH`` that it is hurt by at least
        the heal of (``healing.worth_eating``, A155), the cheapest by its
        walk on Heal's ground (``food.food_target``). Food is eaten on
        pickup, so the ``Take`` is the meal.
-    3. Out of combat, a block within that reach that drops such food (a
+    3. Out of combat (so not under attack either), a block within that reach that drops such food (a
        bush, for berries) and a held blade opens, the cheapest the same way
        (``food.block_target``, A135).
     4. A carried potion when ``healing.spend_potion`` says it is worth
@@ -68,12 +72,16 @@ class HealState(State):
     def guard(self, world: WorldModel, ctx: PlayContext) -> bool:
         if ctx.policy.kind != "scripted" or not world.alive or world.pos is None:
             return False
-        return _wants_heal(world, ctx) or ctx.memory.self_use_rearm is not None
+        return _wants_heal(world, ctx) or _drink_due(world, ctx) or ctx.memory.self_use_rearm is not None
 
     def done(self, world: WorldModel, ctx: PlayContext) -> bool:
         return not self.guard(world, ctx)
 
     def act(self, world: WorldModel, ctx: PlayContext) -> StateOutcome:
+        # Under attack at the low line, the potion goes before anything else (A165).
+        if drink_first(world, ctx.policy, ctx.params) and (out := use_carried_heal(world, ctx)):
+            out.reflex = True
+            return out
         # A Use on yourself went out: the weapon goes back before anything else.
         if ctx.memory.self_use_rearm is not None and (out := _rearm_weapon(world, ctx.memory)).intents:
             return out
@@ -87,12 +95,18 @@ def _wants_heal(w: WorldModel, ctx: PlayContext) -> bool:
     return hurt(w) and not hostiles_in_range(w, ctx.policy)
 
 
+def _drink_due(w: WorldModel, ctx: PlayContext) -> bool:
+    """Under attack at the low line with a potion ``spend_potion`` lets go (A165)."""
+    return drink_first(w, ctx.policy, ctx.params) and carried_heal(w, ctx.memory, ctx.policy, ctx.params) is not None
+
+
 def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     # A potion is for a fight (A135): in one, a heal that is due goes before any walk for food.
     fighting = in_combat(w, ctx.memory, ctx.policy)
     if fighting and (out := use_carried_heal(w, ctx)):
         return out
-    if out := _act_food(w, ctx):
+    # Under attack, no walk goes for food (A165): only the potion below heals.
+    if not food_on_hold(w, ctx.policy) and (out := _act_food(w, ctx)):
         return out
     if not fighting and (out := _act_block(w, ctx)):
         return out

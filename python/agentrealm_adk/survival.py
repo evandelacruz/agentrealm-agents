@@ -137,6 +137,38 @@ def approaching(w: WorldModel, e: Entity) -> bool:
     return w.tick - tick <= THREAT_MEMORY_TICKS and chebyshev(e.pos, w.pos) < chebyshev(before, w.pos)
 
 
+def closing_hostiles(w: WorldModel, policy: Policy) -> list[Entity]:
+    """The hostiles in view coming for us (A165): its latest move brought it
+    closer (``approaching``), or it is the one that hit us within
+    ``THREAT_MEMORY_TICKS``."""
+    hit = recently_attacked(w)
+    return [
+        e for e in w.entities if is_hostile(w, policy, e) and (approaching(w, e) or (hit and is_attacker(w, e)))
+    ]
+
+
+def under_attack(w: WorldModel, policy: Policy) -> bool:
+    """Hit by a hostile within ``THREAT_MEMORY_TICKS``, or a hostile in view
+    closing on us (``closing_hostiles``, A165). A potion held is drunk first
+    then at the low line (``healing.drink_first``), and no walk goes for food."""
+    return recently_attacked(w) or bool(closing_hostiles(w, policy))
+
+
+def opens_distance(here: Pos, step: Pos, hostiles: Collection[Entity]) -> bool:
+    """``step`` from ``here`` is further from every one of ``hostiles`` (A165):
+    a retreat never steps toward a hostile closing on us."""
+    return all(chebyshev(step, h.pos) > chebyshev(here, h.pos) for h in hostiles)
+
+
+def beats_the_chase(here: Pos, goal: Pos, chasers: Collection[Entity]) -> bool:
+    """``goal`` is nearer than the nearest of ``chasers`` (A165). A chaser
+    keeps our pace (Manual §11 Hostiles, A162), so running opens no distance:
+    the gap it has is the most a walk keeps, and every turn or stop on the way
+    lets it close. Only a refuge reached in fewer steps than that gap is got
+    to before the chase closes; any further one is a walk under its hits."""
+    return not chasers or chebyshev(here, goal) < min(chebyshev(here, h.pos) for h in chasers)
+
+
 def threatening(w: WorldModel, group: list[Entity]) -> bool:
     """A hostile in ``group`` is coming for us: it hit us recently, stands in
     reach (``HOSTILE_REACH``), or is approaching. A hostile that just stands

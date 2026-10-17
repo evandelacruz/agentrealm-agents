@@ -395,6 +395,7 @@ class RetreatWindowPausedTest(unittest.TestCase):
         from agentrealm_adk.item_table import InventorySupply
         from agentrealm_agent.states.retreat import RETREAT_PROBE_TICKS
         from agentrealm_adk.zone_discovery import apply_zone
+        from agentrealm_agent.states.retreat import retreat_step
         from tests.test_survival_runs import MAP as SURVIVAL_MAP, ctx as survival_ctx, hit, world
 
         w, c = world(health=4), survival_ctx(on_hostile="fight")
@@ -402,12 +403,13 @@ class RetreatWindowPausedTest(unittest.TestCase):
         w.entities = [Entity("npc", 7, (11, 10), code="chaser")]
         hit(w)
         w.held_supplies = [InventorySupply(5, "small_potion")]
-        first = dispatch(w, c)
+        # Straight to Retreat's walk: through dispatch, Heal drinks first at this health (A165).
+        first = retreat_step(w, c, "Retreat")
         self.assertEqual(first.state, "Retreat")
         self.assertIsNone(c.memory.retreat_paused, "walking is not a pause")
         w.tick += RETREAT_PROBE_TICKS
         hit(w)
-        out = dispatch(w, c)
+        out = retreat_step(w, c, "Retreat")
         self.assertTrue(out.reason.startswith("retreat losing ground: arm and use"), out.reason)
         self.assertEqual(c.memory.retreat_paused, (c.memory.retreat_to, w.tick))
 

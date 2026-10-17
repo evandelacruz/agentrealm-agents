@@ -47,7 +47,7 @@ from __future__ import annotations
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from agentrealm_adk.healing import worth_eating
+from agentrealm_adk.healing import food_on_hold, worth_eating
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, Danger, danger, hostiles_within, reach_cells
 from agentrealm_adk.knowledge_base import knowledge_items
 from agentrealm_adk.memory import Memory
@@ -56,6 +56,7 @@ from agentrealm_adk.pack import TAKE
 from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.navigation.rejection import navigation_avoid_costly
 from agentrealm_adk.pathing import bounded_step, grid_params, nav_search, route_ahead
+from agentrealm_adk.supplies import is_food
 from agentrealm_adk.survival import health_floor, hit_damage, worn_defense
 from agentrealm_adk.threat import type_key_for_entity
 from agentrealm_adk.world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
@@ -128,10 +129,12 @@ class DetourState(State):
 def valuable(w: WorldModel, e: Entity, items: dict, ctx: PlayContext) -> bool:
     """A free ground supply worth a detour that fits by the pack rule
     (``pack.make_room``): a gem, a life, or food the character is hurt by
-    at least the heal of (``healing.worth_eating``, A155)."""
+    at least the heal of (``healing.worth_eating``, A155), never under
+    attack (``healing.food_on_hold``, A165)."""
     if e.kind != "supply" or e.gem_price is not None or not e.code:
         return False
-    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code) or worth_eating(w, e.code)):
+    food = worth_eating(w, e.code) and not food_on_hold(w, ctx.policy)
+    if not (e.code in GEM_SUPPLY_CODES or is_life_supply(e.code) or food):
         return False
     return room_for(w, ctx, Pickup(e.id, e.code, e.pos, None, loot_score(e.code, items))).kind == TAKE
 
@@ -259,11 +262,14 @@ def chosen_fight(ctx: PlayContext) -> bool:
 
 def _still_on(w: WorldModel, d: Detour, ctx: PlayContext, known: Danger) -> bool:
     """The find is still there, on ground Gather may work, its risk still
-    covered by health, and the path being walked to it is clear of known
-    reach. How long the detour has run is no reason to drop it (A125)."""
+    covered by health, the path being walked to it is clear of known reach,
+    and it is no food while under attack (A165). How long the detour has run
+    is no reason to drop it (A125)."""
     m = ctx.memory
     there = any(e.kind == "supply" and e.id == d.supply_id for e in w.entities)
     if not there or not gather_ground(w, d.pos, ctx.policy, known):
+        return False
+    if is_food(d.code) and food_on_hold(w, ctx.policy):
         return False
     if not risk_allowed(w, ctx, d.pos, known):
         return False

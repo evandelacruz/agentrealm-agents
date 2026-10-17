@@ -1858,6 +1858,7 @@ class Strategist:
         committed for the old op, so they no longer hold, ``targets``)."""
         old, goals = runner.plan, new.goals
         runner.plan = new
+        runner.mem.answered_ask = runner.mem.no_way_on  # a hold on it no longer waits for a reply (A166)
         head = old.current()
         if goals and head is not None and same_ops(goals[:1], [head]):
             # Same op on top: it carries on where it was; only the ops below it changed.

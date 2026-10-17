@@ -40,7 +40,8 @@ from agentrealm_adk.world import WorldModel
 
 from ..plan import OP_STATE, PLAN_STALL_SECONDS, Plan
 from ..shop import sync_shop
-from .base import PlayContext, State, StateOutcome, top_executor
+from .ask import ask_the_planner, op_key
+from .base import PlayContext, State, StateOutcome, top_executor, top_op
 from .ashore import AshoreState
 from .boss import BossState, sync_boss
 from .break_state import BreakState
@@ -134,6 +135,11 @@ PROBE_STATES: tuple[State, ...] = tuple(s for s in REFLEXES if s.name not in (Gr
 # Greet's tries (its hello waits for a decision window, A65).
 PROBE_NEVER_KEEPS = ("nav", "nav_stuck", "boss", "greetings")
 
+# How long a state may hold the round sending nothing, with no reflex holding
+# it and no progress waited on, before the planner is asked why (A166): a few
+# seconds, well inside the op stall clock (``PLAN_STALL_SECONDS``).
+HELD_ASK_SECONDS = 3
+
 D = TypeVar("D")
 
 
@@ -226,6 +232,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
         return outcome  # not a decision window: no op's stall clock runs (A64)
     if op is not None and ctx.plan is not None and ctx.plan.current() is op:
         _note_op_progress(ctx.plan, world, m, op, owner, outcome, knowledge=ctx.knowledge)
+    _ask_when_held(world, ctx, outcome)
     oscillation.note_move(m, world, outcome.intents, m.state)
     return outcome
 
@@ -311,6 +318,43 @@ def _note_op_progress(
         plan.demote_current(why, memory=m)
 
 
+def _ask_when_held(world: WorldModel, ctx: PlayContext, out: StateOutcome) -> None:
+    """A state that holds with no intent for ``HELD_ASK_SECONDS`` raises one
+    stall ask (A166), whichever state it is.
+
+    A hold is a decision that sends nothing while no reflex holds the round,
+    nothing waited on is progress (``StateOutcome.wait`` with ``progress``,
+    the plan's ``wait`` op say), and no ask for this op from this cell is
+    waiting for the planner's reply (``Memory.no_way_on``, answered once a
+    reply lands, ``Memory.answered_ask``). Once the same state has held on
+    the same op and cell that long, the planner gets one ``no_way_on`` with
+    the state's name and its reason, and the reasons of the states that fell
+    through to it; the op's stall clock (A104) runs on as before. Any intent
+    sent, or a hold by another state, op or cell, starts afresh.
+    """
+    m = ctx.memory
+    op = top_op(ctx)
+    reflex = any(out.state == s.name for s in REFLEXES)
+    asking = m.no_way_on is not None and m.no_way_on != m.answered_ask
+    asking = asking and m.no_way_on[:2] == (world.map_id, world.pos) and m.no_way_on[3] == op_key(op)
+    if out.intents or reflex or (out.wait and out.progress) or asking or ctx.policy.kind != "scripted" or m.parking:
+        m.silent_hold = None
+        return
+    key = (out.state, op_key(op), world.map_id, world.pos)
+    if m.silent_hold is None or m.silent_hold[0] != key:
+        m.silent_hold = (key, world.tick, False)
+        return
+    _, since, asked = m.silent_hold
+    if asked or world.tick - since < HELD_ASK_SECONDS * ctx.tick_hz:
+        return
+    m.silent_hold = (key, since, True)
+    held_by = out.state or "no state"
+    why = f"{held_by} held {HELD_ASK_SECONDS}s sending nothing: {out.reason}"
+    if out.yielded:
+        why += f" (after {'; '.join(out.yielded)})"
+    ask_the_planner(world, ctx, why, held_by, op)
+
+
 def _states(ctx: PlayContext) -> tuple[State, ...]:
     """The states this call may run: ``PARK_STATES`` in the park phase (A66),
     else ``PROBE_STATES`` in the held-queue probe (A64), else all of ``STATES``."""
@@ -334,7 +378,9 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
     a kept ``Arm``; ashore, the weapon is
     armed again in front of any queue but an escape's or a paced one
     (Fight arms it in its own attack queue). A
-    queue cut to nothing falls through like a state that sends nothing.
+    reflex's queue cut to nothing falls through like a state that sends
+    nothing; the top op's executor cut to nothing asks the planner with the
+    cut's why and holds (A166).
 
     In the held-queue probe, when none does, ``Memory.state`` stays the state
     that sent the held queue (A64).
@@ -354,6 +400,12 @@ def _run_states(world: WorldModel, ctx: PlayContext, yielded: list[str]) -> Stat
             if why:
                 outcome.reason = f"{outcome.reason}; {why}"
             outcome.intents = sent
+            if not sent and state.name == top_executor(ctx) and not ctx.probe and (op := top_op(ctx)) is not None:
+                # The op's executor was cut to nothing: it asks with why, never a silent hold (A166).
+                out = ask_the_planner(world, ctx, f"{op['op']}: {outcome.reason}", state.name, op)
+                out.yielded = yielded
+                m.state = state.name
+                return out
         if outcome.intents or outcome.wait:
             m.state = state.name
             outcome.yielded = yielded

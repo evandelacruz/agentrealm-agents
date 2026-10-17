@@ -187,12 +187,20 @@ class Memory:
     gather_rearm: tuple[str, str] | None = None
     break_rearm: str | None = None  # code armed before Break, restored when break finishes (A28)
     break_pending: tuple[int, Pos, str] | None = None  # map, block and capability a Use in flight targets (A28)
-    # Cells (map, cell) a ``would_strand`` refusal came from, oldest first
-    # (A133, ``fording.note_would_strand``): water, whatever the map shows.
-    water_cells: dict[tuple[int, Pos], None] = field(default_factory=dict)
+    # Cells (map, cell) a ``would_strand`` refusal came from, oldest first, with
+    # the tick of the refusal (A133, ``fording.note_would_strand``): water,
+    # whatever the map shows, until the mark lapses (``fording.WATER_MARK_TICKS``, A166).
+    water_cells: dict[tuple[int, Pos], int] = field(default_factory=dict)
+    # A hold with nothing sent (A166, ``dispatch._ask_when_held``): the state,
+    # op, map and cell it holds on, the tick it began, and whether the stall
+    # ask went out for it.
+    silent_hold: tuple[tuple, int, bool] | None = None
     # The last no_way_on ask (A114, A120): map, cell, why and the op (``ask.ask_key``). One ask per op, cell and reason: the safe
     # default with nothing left to explore, or an executor whose way is shut (``states.ask``).
     no_way_on: tuple[int, Pos, str, tuple | None] | None = None
+    # The ask the planner's latest reply came after (A166): a hold on an ask is
+    # waiting for the planner only until a reply lands (``dispatch._ask_when_held``).
+    answered_ask: tuple[int, Pos, str, tuple | None] | None = None
     # What an executor's shut way was last found under (``way.clear_the_way``, A120): while the
     # state, op, map, cell, tiles, what is held, the blocks backed off from (A90) and the route learnings stay the same, the way is still shut and its
     # searches are not run again on every held decision.

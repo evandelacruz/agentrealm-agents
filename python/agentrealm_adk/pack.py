@@ -128,7 +128,6 @@ def locked_entrance_needs(w: WorldModel, op: dict[str, Any], knowledge: Knowledg
     return needs_of(knowledge, map_id, pos)
 
 
-
 def make_room(
     w: WorldModel,
     p: Pickup,

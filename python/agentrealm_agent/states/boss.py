@@ -249,14 +249,15 @@ class BossState(State):
         _, plan_avoid, plan_costly = plan_sets(world, m, policy, ctx.knowledge)
 
         if m.boss is not None:
+            # Out first, whatever else holds this decision: the limit kills (A163).
+            out = leave_room(world, ctx, plan_avoid, plan_costly, retreat=should_retreat(world, policy, ctx.params, fights(m)))
+            if out is not None:
+                return out
             boss = boss_entity(world, m.boss)
             if boss is None:
                 return StateOutcome(None, "boss out of view", state=self.name)
             if attack_forbidden(boss, ctx.never_attack):
                 return StateOutcome(None, "boss forbidden", state=self.name)
-            out = leave_room(world, ctx, plan_avoid, plan_costly, retreat=should_retreat(world, policy, ctx.params, fights(m)))
-            if out is not None:
-                return out
             if not can_engage(world, boss, ctx):
                 return clear_the_way(world, ctx, boss.pos, "cannot reach boss", self.name, op, reach=())
             if not in_weapon_reach(world, boss, ctx.knowledge):

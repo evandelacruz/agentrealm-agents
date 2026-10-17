@@ -289,6 +289,22 @@ class RetreatCommitTest(unittest.TestCase):
         out = dispatch(w, c)
         self.assertEqual(out.intents[0]["verb"], "Use")
 
+    def test_leaves_near_the_limit_with_the_boss_out_of_view_or_forbidden(self):
+        """Review on #262: no early return keeps it in the room past the limit."""
+        for case in ("out of view", "forbidden"):
+            w, m, plan = self.hurt_in_fight()
+            w.health = 10
+            c = ctx(w, m, plan, on_hostile="fight")
+            m.boss = BossFight(plan.current(), 50, w.tick)
+            m.boss_clock.door_tick = w.tick - boss_clock.DEFAULT_LIMIT_SECONDS * c.tick_hz + 5
+            if case == "out of view":
+                w.entities = []
+            with mock.patch("agentrealm_agent.states.boss.attack_forbidden", return_value=case == "forbidden"):
+                out = dispatch(w, c)
+            self.assertEqual(out.state, "Boss", case)
+            self.assertIn("leave before the limit", out.reason, case)
+            self.assertEqual((out.intents[0]["x"], out.intents[0]["y"]), (1, 0), case)
+
     def test_walks_to_the_rooms_exit_door_not_the_ops_boss_door(self):
         """Finding 38: the op's boss door is on the map outside; out is by the room's door."""
         w, m, plan = self.hurt_in_fight()

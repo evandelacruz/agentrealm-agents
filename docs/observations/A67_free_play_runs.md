@@ -2104,7 +2104,7 @@ A live run in the same dark level (map 44, 16 × 12, all 192 cells known, none `
 ### Run 27: stopped at 279 s inside level 4, every exit within a bogmaw's barred ground
 
 - **Code:** `main` at `822cf98`. Since run 26: A144 (a travel to an entrance finishes on going through it), A145 (levels taken in order; the level number read from the minimap), A146 (walks inside a level cross water with a ford; a `?` in a terrain read is unknown, not void), A147 (a level's clue names the item it needs; a worn ford beats an armed one).
-- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile. Planned as three chained 600 s parts; **stopped by hand at 279 s** of part 1, on the supervisor's call, while the fix (A151) is written. M10 reports `FAIL: ran 279s < target 600s`. The park ended "no safe ground known at 44:10,10 … queue cleared".
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile. Planned as three chained 600 s parts; **stopped by hand at 279 s** of part 1, on the supervisor's call, while the fix (A151) was written. M10 reports `FAIL: ran 279s < target 600s`. The park ended "no safe ground known at 44:10,10 … queue cleared".
 - **Knowledge base:** kept from run 26. **Supplies:** served.
 - **Start:** inside map 44 at (14, 2), where run 26 ended: 10/10, 3 lives, 12 gems, the raft armed, the bronze_mail worn, the sword held.
 
@@ -2114,12 +2114,12 @@ State now read **`map_level=4`** from the minimap (A145), with `levels_cleared=[
 
 The first decision (1 s) was "no path out of the level to 7,11: asked the planner". After that the planner put up `travel` ops one after another: to town, to the south door (7, 11), and to the door's tiles at (7, 10) and (8, 10). At 70 s it wrote "leave_level is not a valid op. Dropped it". Walks over water away from the west side went through: (14, 2) → (12, 6) → (11, 10) → (10, 10). Every walk toward either door, (7, 11) or (7, 0), or the tiles beside them returned "no step toward it". There were **22 `no_way_on`** asks in 279 s, each `blocked_by` "no known way: walls, no ground or unseen ground" and `tried` "a way round".
 
-Bogmaw 64 holds the island at (4–6, 3–5). Both doors and their tiles are within 5 to 6 cells of it, inside the ground a hostile bars (its reach plus a step, Gather's and the walks' rule). That ground covers every way out of the room. The walk did not take A146's "may pass a hostile's reach when it is the only way", and `blocked_by` named no hostile. The supervisor has dispatched the fix as A151.
+The bogmaw holds the island at (4–6, 3–5). Both doors and their tiles are within 5 to 6 cells of it, and its ground covered every way out of the room. This is the defect in **After A146, map 44: one hostile's ground shuts every way out (A151)** above, which gives the cause; A151 has since shipped, and run 28 left the level at once.
 
 #### Defects
 
-1. **A hostile's barred ground that covers every exit leaves the walk with no step, and `blocked_by` does not name the hostile** (A151). **Rule:** when every way to the goal crosses a hostile's barred ground, the walk takes the least exposed way through, and the ask names the hostile as the block.
-2. **The planner asks for an op that does not exist** ("leave_level is not a valid op"). The State or the arc names the level-exit behaviour without an op the planner can put on the stack.
+1. **A hostile's barred ground that covers every exit leaves the walk with no step, and `blocked_by` does not name the hostile** (A151). **Rule:** as in **After A146, map 44: one hostile's ground shuts every way out (A151)** above.
+2. **The planner sends an internal op** ("leave_level is not a valid op"). The contract names `leave_level` among the ops (`strategist.py:251`, `:293`), but it is in `plan.INTERNAL_OPS`, so the planner sent it and it was dropped. **Rule:** the contract never names an internal op as one the planner can send.
 
 ### Run 28: out of level 4 at once; killed 75 s later with a potion held; stopped at 640 s for Lorraine's first run
 

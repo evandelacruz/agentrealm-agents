@@ -2099,3 +2099,95 @@ Per A87, each names the rule a fix should generalize.
 A live run in the same dark level (map 44, 16 × 12, all 192 cells known, none `?`). He stood on water with the raft armed at 10/10; one bogmaw sat on its island in the middle. Every walk to either exit door, and to the tile cells by them, came back `no step toward it`, blocked_by "no known way: walls, no ground or unseen ground", tried "a way round", the internal `leave_level` walk ("no path out of the level") included. Only water legs away from the bogmaw moved him. Every blocked target lay within about 5–6 cells of it.
 
 **Cause** (reproduced in `test_blocking_hostile_ground`): the bogmaw's ground was its walk reach plus the post it keeps, grown by the hits it dealt from off its post, and that ground covered every way to the door. A146's pass counted only cells within reach plus margin of a hostile in view, and never a remembered hostile's ground, so it never fired; and `blocked_by` named a hostile in view only by its range, so the hostile whose post shut the way was not named. **Rule** (A151): name the hostile and its cell; pass its ground when it is the only way and health and the heals carried cover the pass, seen or remembered; else land beside it when the engagement would fight it from there; only then ask.
+
+
+### Run 27: stopped at 279 s inside level 4, every exit within a bogmaw's barred ground
+
+- **Code:** `main` at `822cf98`. Since run 26: A144 (a travel to an entrance finishes on going through it), A145 (levels taken in order; the level number read from the minimap), A146 (walks inside a level cross water with a ford; a `?` in a terrain read is unknown, not void), A147 (a level's clue names the item it needs; a worn ford beats an armed one).
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile. Planned as three chained 600 s parts; **stopped by hand at 279 s** of part 1, on the supervisor's call, while the fix (A151) was written. M10 reports `FAIL: ran 279s < target 600s`. The park ended "no safe ground known at 44:10,10 … queue cleared".
+- **Knowledge base:** kept from run 26. **Supplies:** served.
+- **Start:** inside map 44 at (14, 2), where run 26 ended: 10/10, 3 lives, 12 gems, the raft armed, the bronze_mail worn, the sword held.
+
+#### What happened
+
+State now read **`map_level=4`** from the minimap (A145), with `levels_cleared=[]` and `level_target=1`: the level was barred, and the plan was to leave. All 192 cells of the room were known from the entry read, with no `?`.
+
+The first decision (1 s) was "no path out of the level to 7,11: asked the planner". After that the planner put up `travel` ops one after another: to town, to the south door (7, 11), and to the door's tiles at (7, 10) and (8, 10). At 70 s it wrote "leave_level is not a valid op. Dropped it". Walks over water away from the west side went through: (14, 2) → (12, 6) → (11, 10) → (10, 10). Every walk toward either door, (7, 11) or (7, 0), or the tiles beside them returned "no step toward it". There were **22 `no_way_on`** asks in 279 s, each `blocked_by` "no known way: walls, no ground or unseen ground" and `tried` "a way round".
+
+The bogmaw holds the island at (4–6, 3–5). Both doors and their tiles are within 5 to 6 cells of it, and its ground covered every way out of the room. This is the defect in **After A146, map 44: one hostile's ground shuts every way out (A151)** above, which gives the cause; A151 has since shipped, and run 28 left the level at once.
+
+#### Defects
+
+1. **A hostile's barred ground that covers every exit leaves the walk with no step, and `blocked_by` does not name the hostile** (A151). **Rule:** as in **After A146, map 44: one hostile's ground shuts every way out (A151)** above.
+2. **The planner sends an internal op** ("leave_level is not a valid op"). The contract names `leave_level` among the ops (`strategist.py:251`, `:293`), but it is in `plan.INTERNAL_OPS`, so the planner sent it and it was dropped. **Rule:** the contract never names an internal op as one the planner can send.
+
+### Run 28: out of level 4 at once; killed 75 s later with a potion held; stopped at 640 s for Lorraine's first run
+
+- **Code:** `main` at `049b3d5`, after A149 moved the shared code into `python/agentrealm_adk/`. Since run 27: A148 (planner coordinates from State), A151 (a hostile's ground that blocks every way is passed or fought), A152 (game notes synced to the manual), A153–A164 (among them weapon-only cooldown, food eaten on pickup, death resets the chest, shop rules, Gather fells trees, hostiles chase and patrol, the counted boss clock and keys). The M10 runner and the m6–m11 smoke scripts all start after A149.
+- **Runner:** `scripts/smoke_m10_olympuff.py`, same free-play profile. Planned as three chained 600 s parts. **Stopped by hand at about 640 s**, in part 1, on the supervisor's call to make room for Lorraine's first live run. M10 reported 1 death, 0 API errors, 47 plans accepted, 0 planner errors.
+- **Knowledge base:** kept from run 27. **Supplies:** served.
+- **Start:** parked on water inside map 44 (level 4) at (10, 10), where run 27 stopped: 10/10, 3 lives, 12 gems, the raft armed, the bronze_mail worn, the sword held.
+- **First attempt:** a start at 21:53 UTC the day before failed on its first call (connection reset; the game site was down) and changed nothing.
+
+#### What happened
+
+1. **Level 4 exit (0–1 s).** The first decision was "leave level → (7, 11)", and he was through the south door one round trip later, onto map 76 at (658, 400). There was no fight and the bogmaw did not close. Run 27's block (A151) is gone.
+2. **30 s idle on Equip (5–36 s).**
+   - The planner's top op was `equip` with no code, "re-arm the bronze sword once ashore": the raft was armed and the sword held, at 10/10 with no hostile in view.
+   - Equip sent nothing. Every decision read "Equip holds its walk" at (648, 390), and the trace does not say why.
+   - The 30 s stall clock moved the op below `travel` to town. The sword was armed only at 52 s, by an `Arm` under that travel, as two hostiles closed.
+3. **Death (75 s) at 76:607,366.**
+   - **Attackers:** a bogmaw and a wartlurch, chasing (A162).
+   - **Health:** 10 → 5 → 3 → 1 → dead over about 11 s.
+   - **No reflex:** at no point did Heal, Flee or Fight run.
+   - **Retreat:** it ran toward safe ground at (397, 401), about 220 cells west. Its first step, up_left from (620, 371), went toward the pair, which stood 2–4 cells to his north-west. The two then kept pace 2–4 cells behind him.
+   - **Potion never drunk:** he held a `small_potion` (heal 10), and the drink bar was health ≤ 5.
+   - **Food break:** at 1/10 health, with the hostiles 4 and 6 cells away, he stopped twice to "break for food": `break cut` on a berry bush, heal 1. The next hit killed him.
+   - **Planner too late:** its answer to the `hurt` ask, `use_item small_potion`, arrived after the death.
+4. **After the respawn (2 lives).**
+   - He gathered near the start, then walked about 200 cells west to the town shop at (414, 398). There he bought a `bronze_sword` with all 15 gems at 7.5 min.
+   - The death chest at (607, 366) was in State on every call as `contents: "unknown"`. No answer proposed reclaiming it; call 32 named it only as a hazard on the route east.
+   - He held a `small_potion` again after the respawn (drink bar now health ≤ 6).
+5. **Planner load.** 47 asks in 640 s. Triggers over all asks: discovery 26, timer 17, `no_way_on` 7, `goal_done` 5, `goal_failed` 3, map 2, and one each of `goal_stalled`, `hurt`, `death`, `stuck` and `heal_supplies`. From call 13 on, the asks were one discovery about every 10–20 s as he walked past new hostiles, NPCs and shops, plus the timer; most answers restated the stack.
+
+**Totals:**
+- Intents: 616 `Step`, 1442 `Wait`, 80 `Use`, 17 `Take`, 4 `Arm`.
+- Events: 10 hits taken, 18 supplies taken, no kills.
+- Gems: 12 at the start, 15 at the buy, 3 at the stop.
+- Tokens: 438k input, 13k output, 6.1M cache read.
+
+#### Defects
+
+1. **A drink that covers the danger is not taken while health falls through the drink bar under attack.** He held a potion that heals 10, health went 5 → 3 → 1 under two chasers, and he never drank; Retreat ran instead. **Rule:** when health is at or under the drink bar and a heal is held, the drink comes before any walk, however the engagement is ranked.
+2. **A food break runs under attack.** At 1/10 with two hostiles within 6 cells he stopped to cut a berry bush that heals 1. **Rule:** food is never sought while a hostile that can reach the character before the food heals it is near.
+3. **Retreat's first step goes toward the hostiles it retreats from.** The goal was a safe tile 220 cells away, and the path started through the pack. **Rule:** a retreat's path must not close on a hostile it runs from; a goal that needs that is not a refuge.
+4. **An `equip` op with no code holds for its full 30 s stall clock with nothing sent.** **Rule:** an executor that has nothing to send on its first decision finishes or drops its op at once with the reason, and never waits on the stall clock.
+5. **A death chest is never weighed against buying the same item.** State shows its contents as "unknown", so the planner pays 15 gems for a sword its chest holds 200 cells away. **Rule:** State says what a death chest holds when the death dropped it, so a reclaim can be weighed against a buy.
+
+### Lorraine run 1: a smoke test on the goal tree, stopped at 136 s in a silent hold on her first gather
+
+- **Code:** `main` at `049b3d5`, the same as run 28. This is Ladder Lorraine's first live run (M14: A138–A141, `python/ladder/`).
+- **Runner:** `python3 -m ladder run <free-play profile> --character-name <character>`, run from `python/`. The command has no `--seconds` option, so it was planned as 600 s under a SIGINT timeout. **Stopped by hand at 136 s** (15:59:08–16:01:24 UTC), on the supervisor's call, once the hold was clear. She stopped cleanly on SIGINT (exit 0).
+- **Profile and knowledge base:** the same as Gary's runs, with no steering. **Planner:** on.
+- **Start:** on map 76 at (434, 382), where run 28 stopped: 8/10, 2 lives.
+
+#### What happened
+
+1. **First 11 s.**
+   - The tree's goal was `gather_gems`, and her walk went toward a gem at (439, 360).
+   - The planner was asked once, 4 s in, and answered `gather_gems` with count 10.
+   - She took one gem at (439, 360), stepped to (441, 360), and retargeted to a ground supply at (429, 351). Two hostiles stood 1–5 cells from it.
+2. **11 s to the stop (about 125 s): a silent hold.**
+   - Every round trip, every 3 ticks, read `by=gather_gems`, "lorraine:gather: no step toward (429, 351)", with no intents sent. The walk keeps off every hostile's ground, so it had no step to the target.
+   - The target was never given up, and the goal never changed.
+   - No reflex held the round. Health stayed 8/10 and she was never attacked.
+   - There was no second planner ask and no `cannot`. Her ask rule fires only when the goal or a watched state line changes, and a walk with no step changes neither.
+   - There were no exceptions or API errors.
+3. **Planner rate:** 1 call in 136 s.
+
+The trace's `tick` records carry `by` (the op) and `reason`. They do not carry the tree node or which reflex was checked, so the trace alone cannot say which node a decision came from.
+
+#### Defects
+
+1. **An op whose walk has no step holds every round with nothing sent, and nothing gives the target up or asks again.** **Rule:** a walk with no step toward its target gives that target up and picks the next one. When the op has no target left, it is over for that goal, and the tree's walk or the planner is asked afresh with the reason. A silent hold is never a steady state.
+2. **The trace does not name the goal node or the reflex that held each decision.** **Rule:** every tick record names the tree node worked and the reflex, if any, that held the round, so a hold can be read from the trace.

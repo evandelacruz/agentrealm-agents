@@ -114,6 +114,13 @@ class NoFoodUnderAttackTest(unittest.TestCase):
         out = dispatch(self.w, self.c)
         self.assertNotIn("heal_food", out.reason)
 
+    def test_a_far_hostile_wandering_closer_is_no_attack(self):
+        far = Entity("npc", 8, (5, 13), code="chaser")  # 8 off: beyond the reach a fight counts
+        self.w.entities = [berry(), far]
+        closing_in(self.w, far, (5, 14))
+        self.assertFalse(under_attack(self.w, self.c.policy))
+        self.assertEqual(dispatch(self.w, self.c).reason, "heal_food → (7, 5)")
+
     def test_with_none_closing_the_food_is_walked_to(self):
         self.w.entities = [berry(), self.npc]  # it stands still: not closing
         self.assertEqual(dispatch(self.w, self.c).reason, "heal_food → (7, 5)")

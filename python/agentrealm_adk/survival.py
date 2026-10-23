@@ -138,12 +138,20 @@ def approaching(w: WorldModel, e: Entity) -> bool:
 
 
 def closing_hostiles(w: WorldModel, policy: Policy) -> list[Entity]:
-    """The hostiles in view coming for us (A165): its latest move brought it
-    closer (``approaching``), or it is the one that hit us within
-    ``THREAT_MEMORY_TICKS``."""
+    """The hostiles in view coming for us (A165): within
+    ``FIGHT_REACH_RADIUS``, where one can reach us within a fight (the reach
+    the win estimate counts, ``can_reach_us``), its latest move brought it
+    closer (``approaching``); or it is the one that hit us within
+    ``THREAT_MEMORY_TICKS``. One wandering our way further off is no
+    attack: food and the potion reserve keep their out-of-combat rules."""
+    if w.pos is None:
+        return []
     hit = recently_attacked(w)
     return [
-        e for e in w.entities if is_hostile(w, policy, e) and (approaching(w, e) or (hit and is_attacker(w, e)))
+        e
+        for e in w.entities
+        if is_hostile(w, policy, e)
+        and ((approaching(w, e) and chebyshev(e.pos, w.pos) <= FIGHT_REACH_RADIUS) or (hit and is_attacker(w, e)))
     ]
 
 

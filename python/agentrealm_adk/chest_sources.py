@@ -24,8 +24,15 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from typing import TYPE_CHECKING
+
+from .discovery import seen_prices
 from .healing import supply_matches
+from .travel.knowledge import iter_shop_sales
 from .world import Pos, WorldModel, chebyshev
+
+if TYPE_CHECKING:
+    from .knowledge_base import KnowledgeBase
 
 # Gems a minute assumed for earning a price until a gather measures a rate
 # (Manual §16: field work makes about 6 gems a minute).
@@ -54,6 +61,16 @@ def chest_items(w: WorldModel) -> list[ChestItem]:
         steps = chebyshev(w.pos, c.pos) if here and w.pos is not None else None
         out += [ChestItem(chest_id, c.map_id, c.pos, code, steps, c.seen) for code in c.contents or ()]
     return sorted(out, key=lambda i: (i.steps is None, i.steps or 0, i.map_id, i.chest_id, i.code))
+
+
+def known_prices(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, int]:
+    """Each item's gem price as seen for sale: the cheapest a shop cell was
+    seen selling it at, an ``items`` row's, or one priced in sight."""
+    prices = dict(seen_prices(w, kb))
+    for _, _, code, price in iter_shop_sales(kb):
+        if isinstance(price, int) and price > 0 and price < prices.get(code, price + 1):
+            prices[code] = price
+    return prices
 
 
 def walk_seconds(item: ChestItem, w: WorldModel) -> float | None:

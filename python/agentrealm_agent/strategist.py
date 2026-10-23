@@ -133,7 +133,7 @@ from agentrealm_adk.travel.resolve import given_up_travel, travel_dest, travel_g
 from agentrealm_adk.travel.strength import StrengthBracket
 from agentrealm_adk.discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from agentrealm_adk.sellers import codes_with_sellers, refuse_unsold, sellers_line
-from agentrealm_adk.chest_sources import refuse_chest_held
+from agentrealm_adk.chest_sources import known_prices, refuse_chest_held
 from agentrealm_adk.level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, level_pending, order_line, refuse_barred
 from agentrealm_adk.entrance_needs import CLUE_NEEDS, CLUE_WHY, NEEDS, record_needs, refuse_unmet, unmet_need
 from agentrealm_adk.knowledge_base import KnowledgeBase
@@ -960,7 +960,7 @@ def death_chests_line(
     ``seen`` in reach or are ``expected`` from what was carried at the
     death. So the planner weighs going back for one (a ``travel`` to its
     cell; Recover takes back what fits) against buying what it holds."""
-    prices = seen_prices(w, knowledge)
+    prices = known_prices(w, knowledge)
     gains = upgrade_gains(w, knowledge)
     rows = []
     for chest_id, c in w.death_chests.items():
@@ -1799,7 +1799,7 @@ class Strategist:
             record["no_seller_refused"] = unsold
             self.rejected = [*self.rejected, *unsold]
         rate = runner.gem_cuts.run_counts(runner.world.tick, runner.tick_hz).get("gems_per_min")
-        goals, in_chest = refuse_chest_held(goals, runner.world, seen_prices(runner.world, runner.knowledge), rate)
+        goals, in_chest = refuse_chest_held(goals, runner.world, known_prices(runner.world, runner.knowledge), rate)
         if in_chest:
             # A death chest of ours holding the item is its source ahead of buying (A167).
             record["chest_held_refused"] = in_chest

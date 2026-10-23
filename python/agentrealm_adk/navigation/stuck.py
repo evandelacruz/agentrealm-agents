@@ -29,9 +29,11 @@ character or an NPC goes round them when a way round is near
 (``pathing.guided_step``), else waits for them to move
 (``wait_on_occupants``). The time spent waiting never counts toward a
 window's time, so no level fails and no target is given up while only
-occupants stand in the way; how long to wait (``OCCUPANT_WAIT_TICKS``) is
-the caller's to read (``occupant_wait``). Only terrain makes a target
-unreachable.
+occupants stand in the way. The wait is capped here for every walk
+(``OCCUPANT_WAIT_TICKS``): past it ``stuck_reason`` says ``OCCUPIED`` and
+the walk holds (``hold_on_occupants``): no move, back to its first level,
+no give-up and no backoff, its caller told (``occupants_held``) so it can
+let the walk go or ask. Only terrain makes a target unreachable.
 
 A walk must make net progress (A125): each level's window counts progress
 only when the plan's measure falls below the lowest the walk has had since
@@ -100,10 +102,11 @@ RESET_PROGRESS_CELLS = 5
 BACKOFF_BASE_TICKS = 300
 
 # Longest a walk waits for occupants (characters, NPCs) to clear its way
-# before its caller lets the walk go (A169), 15 s at 10 ticks/s. Occupants
-# move, so the wait never fails a window and never gives the target up:
-# only terrain makes a target unreachable.
+# (A169), 15 s at 10 ticks/s: past it the walk holds (``OCCUPIED``) with no
+# give-up, for every caller. Occupants move, so the wait never fails a
+# window and never gives the target up: only terrain makes a target unreachable.
 OCCUPANT_WAIT_TICKS = 150
+OCCUPIED = "occupied"
 
 # Lapsed give-ups kept for their power beyond this many are forgotten,
 # oldest first. A give-up still backed off is never forgotten.
@@ -167,6 +170,9 @@ class NavAttempt:
     # The tick the walk began waiting for occupants to clear its next step
     # (A169); None while it walks. The wait never counts toward the window.
     occupied_since: int | None = None
+    # The tick the wait on occupants ran past ``OCCUPANT_WAIT_TICKS`` and the
+    # walk held with no give-up; None once it is walked again.
+    occupants_held_at: int | None = None
 
 
 class Leg(NamedTuple):
@@ -492,6 +498,7 @@ def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None, corridor: Na
     if att.occupied_since is not None:
         att.window_tick = min(w.tick, att.window_tick + max(0, w.tick - att.occupied_since))
         att.occupied_since = None
+    att.occupants_held_at = None
     _note_position(att, w)
     cost = measure(path, att.target, corridor)
     if cost is None:
@@ -525,7 +532,10 @@ def stuck_reason(att: NavAttempt, tick: int) -> str | None:
         return "rejections"
     if att.moves >= PROGRESS_MOVE_LIMIT:
         return "moves"
-    # Time waiting on occupants is not the walk's (A169): the clock stops at the wait.
+    # Time waiting on occupants is not the walk's (A169): the clock stops at
+    # the wait, and the wait has its own cap.
+    if att.occupied_since is not None and tick - att.occupied_since >= OCCUPANT_WAIT_TICKS:
+        return OCCUPIED
     since = att.occupied_since if att.occupied_since is not None else tick
     if since - att.window_tick >= PROGRESS_TICK_LIMIT:
         return "time"
@@ -539,6 +549,23 @@ def wait_on_occupants(att: NavAttempt, tick: int) -> None:
     it waits, from the first tick it found the step held (A169)."""
     if att.occupied_since is None:
         att.occupied_since = tick
+
+
+def hold_on_occupants(m: Memory, att: NavAttempt, tick: int) -> None:
+    """The wait on occupants ran out (``OCCUPIED``): the walk holds as for
+    hostile ground (``hold``), with no give-up and no backoff, and says when
+    (``occupants_held``) until it is walked again. The next call plans
+    afresh: it walks if the way cleared, else waits once more."""
+    hold(m, att, tick)
+    att.occupants_held_at = tick
+
+
+def occupants_held(m: Memory, w: WorldModel, goal: str, since: int = 0) -> bool:
+    """``goal``'s walk waited on occupants past ``OCCUPANT_WAIT_TICKS`` at or
+    after tick ``since`` and has not walked since: its caller lets it go or
+    asks, the target not given up (A169)."""
+    att = active(m, w)
+    return att is not None and att.goal == goal and att.occupants_held_at is not None and att.occupants_held_at >= since
 
 
 def occupant_wait(m: Memory, w: WorldModel, goal: str) -> int | None:

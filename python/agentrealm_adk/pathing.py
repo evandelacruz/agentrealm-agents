@@ -735,7 +735,8 @@ def _wait(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list
         return None
     clear = dataclasses.replace(grid, avoid=set(grid.avoid) | (w.occupied() - {att.target}))
     around = cost_path(w, att.target, clear)
-    if around and len(around) <= len(path) + ROUND_OCCUPANTS_CELLS and next_step(w, avoid, around):
+    # Only a way that reaches the target: a search out of budget returns a partial one.
+    if around and around[-1] == att.target and len(around) <= len(path) + ROUND_OCCUPANTS_CELLS and next_step(w, avoid, around):
         m.path = around
         nav_stuck.observe(att, w, around, nav_stuck.corridor_for(m, w, att))
         return next_step(w, avoid, around)
@@ -862,6 +863,9 @@ def guided_step(
         nav_stuck.finish(m, att)
         return None
     reason = None if att.level in (nav_stuck.REVEAL, nav_stuck.BREAK) else nav_stuck.stuck_reason(att, w.tick)
+    if reason == nav_stuck.OCCUPIED:
+        nav_stuck.hold_on_occupants(m, att, w.tick)  # the wait's cap: no give-up, the caller lets go or asks (A169)
+        return None
     if reach and (reason is not None or att.level != nav_stuck.WALK):
         # An escalating walk's plan is held to the reach as a walk's is: at
         # every level, so no reveal, alternative or break walk goes through it.

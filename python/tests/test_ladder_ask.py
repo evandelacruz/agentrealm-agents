@@ -180,11 +180,11 @@ class BlockTest(unittest.TestCase):
                 self.assertIn("requires", blocks)
 
     def test_a_block_is_retried_once_the_state_the_planner_saw_changes(self):
-        """A169: her region, what she carries, or her health."""
+        """A169: her region, what she carries, or her health crossing her risk budget's line."""
         changes = {
             "region": lambda w: setattr(w, "pos", (5 + ask.REGION_CELLS, 5)),
             "held": lambda w: setattr(w, "held_supplies", [InventorySupply(9, "raft")]),
-            "health": lambda w: setattr(w, "health", w.health - 1),
+            "health": lambda w: (setattr(w, "max_health", 20), setattr(w, "health", 20)),  # the rat in reach now fits
         }
         for name, change in changes.items():
             with self.subTest(change=name):
@@ -192,6 +192,12 @@ class BlockTest(unittest.TestCase):
                 self.assertEqual(lift_changed(blocks, w, kb), [])
                 change(w)
                 self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+
+    def test_a_hit_that_crosses_no_line_of_her_risk_budget_lifts_no_block(self):
+        w, kb, blocks = self.block("ticks 2000")
+        w.health -= 1  # 2 to 1: short of the margin before and after
+        self.assertEqual(lift_changed(blocks, w, kb), [])
+        self.assertIn("requires", blocks)
 
     def test_a_block_is_retried_once_the_walk_given_up_for_it_may_be_walked_again(self):
         w, kb = short_of_a_raft()

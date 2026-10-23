@@ -10,6 +10,7 @@ from unittest import mock
 from agentrealm_adk import config
 from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk.executor import step_landing
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.navigation import stuck
 from agentrealm_adk.world import Entity
 from ladder import act, ask
@@ -75,6 +76,22 @@ class BlockedGoalTest(Base):
         self.assertIn("risk", r.blocks)
         self.assertIn("goal: ready for its risk", fake.messages[0][1]["content"])
 
+    def test_a_hit_while_gathering_never_lifts_the_block_or_asks_again(self):
+        """Her health is watched only where it crosses her risk budget's line (review of A169)."""
+        fake = FakeLLM(CANNOT, '{"op": {"op": "gather_gems", "count": 50, "x": 2, "y": 5}}')
+        r = self.runner(short_of_risk(), Planner(client=fake, clock=Clock(), tokens_per_min=10**9))
+        settle(r)
+        settle(r)
+        asked, block = len(fake.messages), r.blocks["risk"]
+        r.planner.clock.now += 60  # the call budget has room again
+        for _ in range(3):
+            r.world.health -= 1
+            r.mem.pending_intents, r.queue_of = None, None
+            settle(r)
+            self.assertEqual(r.turn.goal.key, "gather")
+        self.assertIs(r.blocks["risk"], block)
+        self.assertEqual(len(fake.messages), asked)
+
     def test_the_tick_record_names_the_blocked_goal_and_why_and_the_goal_worked(self):
         """Rule 4: which goal is blocked and why, and which is worked instead."""
         r = self.runner(short_of_risk())
@@ -112,7 +129,7 @@ class BlockedGoalTest(Base):
 
     def test_the_blocked_goal_is_retried_once_the_state_it_was_blocked_in_changes(self):
         """(b) Her health, what she carries or where she stands changes: the risk is asked about again."""
-        for name, change in (("health", lambda w: setattr(w, "health", w.health - 1)),
+        for name, change in (("held", lambda w: setattr(w, "held_supplies", [InventorySupply(9, "raft")])),
                              ("region", lambda w: setattr(w, "pos", (w.pos[0] + ask.REGION_CELLS, w.pos[1])))):
             with self.subTest(change=name):
                 r = self.blocked_by_a_given_up_walk()
@@ -125,7 +142,7 @@ class BlockedGoalTest(Base):
                 self.assertIn(mock.call("planner", "risk: block lifted, what it waited on came or its blocker may "
                                                    "have changed"), log.call_args_list)
                 # Retried: the buy ran again (its walk still backed off) and blocked it from the new state.
-                self.assertEqual(r.blocks["risk"].seen, seen(r.world))
+                self.assertEqual(r.blocks["risk"].seen, seen(r.world, r.knowledge))
 
     def test_with_nothing_to_work_she_always_asks_and_explores_only_alongside(self):
         """Rule 2 (Evan): no op to work always asks the planner, with why; exploring fills the wait."""
@@ -218,6 +235,30 @@ class OccupantsTest(Base):
                 self.walk_out(r, d)
         self.assertIn({"verb": "Take", "supply_id": 7}, d.intents)
         self.assertLessEqual(max(abs(w.pos[0] - 12), abs(w.pos[1] - 5)), 1)  # within reach, not on the shelf
+
+    def test_past_the_waits_cap_the_buy_is_over_its_seller_not_given_up_and_the_tree_moves_on(self):
+        """The ADK's cap on the wait: the op is over, the target not backed off, and no loop on it."""
+        w = short_of_risk()
+        shelf = Entity("supply", 7, (12, 5), "large_potion", gem_price=20)
+        w.entities.append(shelf)
+        self.crowd(w, shelf.pos)
+        r = self.runner(w)
+        whys = []
+        for _ in range(2 * stuck.OCCUPANT_WAIT_TICKS // 10):
+            d = r.decide()
+            whys.append(d.why)
+            self.walk_out(r, d)
+            if "risk" in r.blocks:
+                break
+        self.assertIn("stayed held by occupants", r.blocks["risk"].reason)  # the buy over at the cap
+        self.assertGreater(sum("held by occupants, waiting" in x for x in whys), 10)
+        self.assertFalse(stuck.backed_off(r.mem, "lorraine:buy", MAP, shelf.pos, w.tick))
+        self.assertFalse(r.mem.nav_stuck.given_up)  # nothing given up: only terrain does that
+        self.assertIn("risk", r.blocks)
+        for _ in range(3):  # the tree works gather now, never the same buy again
+            d = r.decide()
+            self.assertEqual((r.turn.goal.key, d.by), ("gather", "gather_gems"))
+            self.walk_out(r, d)
 
     def test_a_walk_shut_by_terrain_is_still_given_up(self):
         """(d) Only terrain makes a target unreachable: a walled-in cell is given up for the backoff."""

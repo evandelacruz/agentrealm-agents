@@ -468,7 +468,7 @@ class LadderRunner:
     def block(self, key: str, reason: str) -> None:
         """Block ``key`` for the loop's own reason (a stall, every op over),
         retried as a ``cannot`` is (A169)."""
-        self.blocks.mark(key, reason, self.world.tick, seen=seen(self.world), retry_at=self.retry_at())
+        self.blocks.mark(key, reason, self.world.tick, seen=seen(self.world, self.knowledge), retry_at=self.retry_at())
         self.own_blocks.add(key)
 
     def ask(self, turn: Turn, note: str = "") -> None:

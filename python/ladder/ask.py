@@ -26,7 +26,8 @@ the block holds to its expiry.
 
 Whatever ``until`` says, a blocked goal is retried once its blocker can
 have changed (A169, ``lift_changed``): the state the planner saw changed
-(``seen``: the region she stands in, what she carries, her health), or the
+(``seen``: the region she stands in, what she carries, whether her health
+covers what is ahead on her risk function), or the
 backoff of a walk given up for it ended (``Block.retry_at``); the next walk
 asks again.
 
@@ -116,12 +117,17 @@ def watch_lines(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, str]:
     }
 
 
-def seen(w: WorldModel) -> tuple:
+def seen(w: WorldModel, kb: KnowledgeBase | None) -> tuple:
     """The state the planner saw, as a block retries on it (A169): the
-    region she stands in, what she carries, and her health."""
+    region she stands in, what she carries, and whether her health covers
+    what is ahead, on her one risk function (``readiness.risk_budget``: the
+    next level, and the hostiles that can reach her now). A hit or a heal
+    that crosses neither line is no change, so it never re-asks."""
     where = (w.map_id, w.pos[0] // REGION_CELLS, w.pos[1] // REGION_CELLS) if w.pos is not None else None
     carried = tuple(sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values()))
-    return (where, carried, w.health)
+    level = r.Foes(tuple(r.level_foes(w, kb)), r.VALUABLE)
+    here = r.Foes(tuple(r.foes_here(w, kb)), r.ORDINARY)
+    return (where, carried, r.risk_budget(level, w, kb).ok, r.risk_budget(here, w, kb, now=True).ok)
 
 
 def question_prefix(reference_sections: str = "") -> str:
@@ -219,7 +225,7 @@ def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, retry_at: int 
         named, was = GEMS, arg
     elif name == TICKS and _count(arg) is not None:
         ticks = min(BLOCK_TICKS, _count(arg))
-    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world), retry_at=retry_at)
+    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world, rd.kb), retry_at=retry_at)
     return None
 
 
@@ -230,22 +236,23 @@ def lifts(block: Block, w: WorldModel, lines: dict[str, str]) -> bool:
     return block.named in lines and lines[block.named] != block.was
 
 
-def may_have_changed(block: Block, w: WorldModel) -> bool:
+def may_have_changed(block: Block, w: WorldModel, now: tuple) -> bool:
     """Whether what blocked it can have changed (A169): a walk given up for
-    it may be walked again, or the state the planner saw is not the state now."""
+    it may be walked again, or the state the planner saw is not ``now`` (``seen``)."""
     if block.retry_at is not None and w.tick >= block.retry_at:
         return True
-    return bool(block.seen) and block.seen != seen(w)
+    return bool(block.seen) and block.seen != now
 
 
 def lift_changed(blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None) -> list[str]:
     """Lift every block whose awaited state has come, or whose blocker can
     have changed (``may_have_changed``); the keys lifted."""
     lifted, lines = [], None
+    now = seen(world, kb) if any(b.seen for b in blocks.values()) else ()
     for key, block in list(blocks.items()):
         if block.named:
             lines = lines if lines is not None else watch_lines(world, kb)
-        if (block.named and lifts(block, world, lines)) or may_have_changed(block, world):
+        if (block.named and lifts(block, world, lines)) or may_have_changed(block, world, now):
             blocks.lift(key)
             lifted.append(key)
     return lifted

@@ -228,8 +228,9 @@ def walk(
     default): the ADK's guided walk, sent as a paced queue of the path ahead.
     Occupants on the way are no obstacle (A169): the walk goes round them,
     else waits for them to move, a wait the clock clears (``Act.waits``) up
-    to ``stuck.OCCUPANT_WAIT_TICKS``, after which the walk is over but its
-    target is not given up: only terrain makes a target unreachable. With
+    to the ADK's cap (``stuck.OCCUPANT_WAIT_TICKS``, ``stuck.occupants_held``),
+    after which the walk is over but its target is not given up: only
+    terrain makes a target unreachable. With
     no step otherwise, it waits a round on a way whose first step is not
     open yet; else the target is given up for the ADK's backoff
     (``give_up_walk``) and the walk is over, so no op holds on it (A168).
@@ -259,11 +260,12 @@ def walk(
     if step is None:
         if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
             return given_up_act(ctx, goal, dest, key)
-        held = nav_stuck.occupant_wait(m, w, goal)
-        if held is not None and held < nav_stuck.OCCUPANT_WAIT_TICKS:
+        if nav_stuck.occupants_held(m, w, goal, since=ctx.started.tick):
+            # The ADK's cap on the wait (A169): over, its target not given up.
+            return Act(None, f"{goal}: the way to {dest} stayed held by occupants for "
+                             f"{nav_stuck.OCCUPANT_WAIT_TICKS} ticks", over=True)
+        if nav_stuck.occupant_wait(m, w, goal) is not None:
             return Act(None, f"{goal}: the way to {dest} is held by occupants, waiting", waits=True)
-        if held is not None:
-            return Act(None, f"{goal}: the way to {dest} stayed held by occupants for {held} ticks", over=True)
         if m.goal == goal and m.path:
             return Act(None, f"{goal}: the way to {dest} is taken, waiting")
         give_up_walk(ctx, goal, key)
@@ -370,8 +372,8 @@ def stand_by(w: WorldModel, p: Pos, reach: int) -> Pos:
     """Where to walk to act on ``p`` within ``reach``: ``p`` itself when it
     can be stood on, else the free cell within ``reach`` of it nearest her
     (a shelf, a seller, A169: a person is reached by interaction range, never
-    by standing on their cell). With every such cell held, ``p`` itself: the
-    walk then waits on the occupants (``walk``)."""
+    by standing on their cell). With every such cell held, the one nearest
+    her: the walk goes up to it and waits for its occupant (``walk``)."""
     held = w.occupied() | w.for_sale()
     if reach == 0 or (w.walkable(p) and p not in held):
         return p
@@ -380,7 +382,8 @@ def stand_by(w: WorldModel, p: Pos, reach: int) -> Pos:
     near = [
         (p[0] + dx, p[1] + dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1) if dx or dy
     ]
-    free = [n for n in near if w.walkable(n) and n not in held]
+    stand = [n for n in near if w.walkable(n) and n not in w.for_sale()]
+    free = [n for n in stand if n not in held] or stand
     return min(free, key=lambda n: (chebyshev(n, w.pos), n)) if free else p
 
 

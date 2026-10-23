@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply, carried_from_inventory, supplies_from_list, worn_ids_from_inventory
+from .item_table import DEFAULT_CARRY_CAPACITY, NON_TRANSFERABLE, InventorySupply, carried_from_inventory, supplies_from_list, worn_ids_from_inventory
 from .supplies import afloat, chest_capacity, fords, worn_armor_defense
 from .threat import (
     ThreatTable,
@@ -89,8 +89,11 @@ class Passage:
 class DeathChest:
     """A chest one of our deaths dropped, remembered until it is seen empty or gone (A122).
 
-    ``contents`` are the subtype codes last seen in it, None until it was
-    seen in reach. ``died`` is the tick it dropped: the largest is the newest.
+    ``contents`` are its subtype codes, None while unknown. On ``Died`` they
+    are what the character carried then, all but the starting kit, which is
+    kept (Manual §11 Death, lives, and ending; A167): ``seen`` False, the
+    contents expected. Once it is seen in reach, what it holds replaces them
+    and ``seen`` is True. ``died`` is the tick it dropped: the largest is the newest.
     Kept across runs (``knowledge_base.death_chests``). A chest says neither
     whose it is nor when it goes (API Snapshots), so only our own deaths add
     one and only a look at it drops one.
@@ -100,6 +103,7 @@ class DeathChest:
     pos: Pos
     died: int
     contents: list[str] | None = None
+    seen: bool = False
 
 
 @dataclass
@@ -831,11 +835,39 @@ class WorldModel:
             return None
         return max(self.death_chests.items(), key=lambda kv: (kv[1].died, kv[0]))
 
-    def remember_death_chest(self, chest_id: int, map_id: int, at: Pos, died: int | None = None) -> None:
-        """Remember a chest one of our deaths dropped at tick ``died`` (now when not known);
-        one already known keeps what was seen of it."""
-        if chest_id not in self.death_chests and chest_id not in self.death_chests_gone:
-            self.death_chests[chest_id] = DeathChest(map_id, at, self.tick if died is None else died)
+    def remember_death_chest(
+        self, chest_id: int, map_id: int, at: Pos, died: int | None = None, expected: list[str] | None = None
+    ) -> None:
+        """Remember a chest one of our deaths dropped at tick ``died`` (now when not known),
+        expected to hold ``expected`` (A167); one already known keeps what was seen of it."""
+        if chest_id in self.death_chests_gone:
+            return
+        chest = self.death_chests.setdefault(chest_id, DeathChest(map_id, at, self.tick if died is None else died))
+        if expected and not chest.seen:
+            chest.contents = list(expected)
+
+    def carried_at_death(self, dropped_ids: object = None) -> list[str] | None:
+        """What a death drops (A167): the codes carried (held, stowed, armed,
+        worn) less the starting kit, which is kept (Manual §11 Death, lives,
+        and ending). With ``Died``'s ``dropped_supply_ids``, a supply whose id
+        is known counts only when it is named there. None while no inventory
+        was read: what was carried is unknown. Call before the death's
+        observation, which brings the empty inventory."""
+        if not self.inventory_read:
+            return None
+        named = {i for i in dropped_ids if isinstance(i, int)} if isinstance(dropped_ids, list) else None
+        carried = [(s.id, s.code) for s in self.held_supplies + self.chest_supplies]
+        if self.armed_code:
+            carried.append((self.armed_id, self.armed_code))
+        carried += [(self.worn_ids.get(slot), code) for slot, code in self.worn_codes.items()]
+        return sorted(
+            code
+            for sid, code in carried
+            if code
+            and code not in NON_TRANSFERABLE
+            and sid not in self.undroppable
+            and (named is None or sid is None or sid in named)
+        )
 
     def _refresh_death_chests(self) -> None:
         """Note what is seen of each remembered death chest on this map (A122):
@@ -853,7 +885,7 @@ class WorldModel:
                 del self.death_chests[chest_id]
                 self.death_chests_gone.append(chest_id)
             elif contents is not None:
-                chest.contents = [s.code for s in contents]
+                chest.contents, chest.seen = [s.code for s in contents], True
 
     def _apply_vitals(self, body: dict, complete: bool) -> None:
         """Reads health and max health from a snapshot or a delta.
@@ -986,7 +1018,11 @@ class WorldModel:
                     self.placed = self.woke = False  # off the map until Respawned: no position read can answer (A5)
                     if ev.get("chest_id"):
                         self.remember_death_chest(
-                            int(ev["chest_id"]), int(ev["map_id"]), (int(ev["x"]), int(ev["y"])), int(ev.get("tick", group["tick"]))
+                            int(ev["chest_id"]),
+                            int(ev["map_id"]),
+                            (int(ev["x"]), int(ev["y"])),
+                            int(ev.get("tick", group["tick"])),
+                            self.carried_at_death(ev.get("dropped_supply_ids")),
                         )
                 elif kind == "Respawned":
                     self.placed, self.attacked_tick = True, None

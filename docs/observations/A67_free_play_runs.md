@@ -2162,7 +2162,7 @@ The bogmaw holds the island at (4–6, 3–5). Both doors and their tiles are wi
 2. **A food break runs under attack.** At 1/10 with two hostiles within 6 cells he stopped to cut a berry bush that heals 1. **Rule:** food is never sought while a hostile that can reach the character before the food heals it is near.
 3. **Retreat's first step goes toward the hostiles it retreats from.** The goal was a safe tile 220 cells away, and the path started through the pack. **Rule:** a retreat's path must not close on a hostile it runs from; a goal that needs that is not a refuge.
 4. **An `equip` op with no code holds for its full 30 s stall clock with nothing sent.** **Rule:** an executor that has nothing to send on its first decision finishes or drops its op at once with the reason, and never waits on the stall clock.
-5. **A death chest is never weighed against buying the same item.** State shows its contents as "unknown", so the planner pays 15 gems for a sword its chest holds 200 cells away. **Rule:** State says what a death chest holds when the death dropped it, so a reclaim can be weighed against a buy.
+5. **A death chest is never weighed against buying the same item.** State shows its contents as "unknown", so the planner pays 15 gems for a sword its chest holds 200 cells away. **Rule:** State says what a death chest holds when the death dropped it, so a reclaim can be weighed against a buy. Filed as A167.
 
 ### Lorraine run 1: a smoke test on the goal tree, stopped at 136 s in a silent hold on her first gather
 

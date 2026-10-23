@@ -10,10 +10,12 @@ State ``death_chests`` and Recover as if dropped this run.
 Stored per character, since a chest is its dropper's to come back for::
 
     "death_chests": {"<character id>": {"<chest id>": {"map_id", "x", "y",
-                                                       "died", "contents"}}}
+                                                       "died", "contents", "seen"}}}
 
-``contents`` is the subtype codes last seen in it, absent until it was seen
-in reach. The ids of chests seen empty or gone are kept too, the latest
+``contents`` is the subtype codes it holds, absent while unknown: expected
+from what the character carried at the death (``seen`` false, A167), or last
+seen in reach (``seen`` true; a row written before A167 has no ``seen`` and
+was seen). The ids of chests seen empty or gone are kept too, the latest
 ``GONE_KEPT`` per character, so a served ``death_chest`` that still names one
 never brings it back in a later run::
 
@@ -85,7 +87,7 @@ def _set_of_character(kb: KnowledgeBase, key: str, w: WorldModel, value: Any) ->
 def _row(c: DeathChest) -> dict[str, Any]:
     row: dict[str, Any] = {"map_id": c.map_id, "x": c.pos[0], "y": c.pos[1], "died": c.died}
     if c.contents is not None:
-        row["contents"] = list(c.contents)
+        row["contents"], row["seen"] = list(c.contents), c.seen
     return row
 
 
@@ -99,5 +101,5 @@ def _chest(key: str, row: Any) -> tuple[int, DeathChest] | None:
         return None
     contents = row.get("contents")
     if isinstance(contents, list) and all(isinstance(c, str) for c in contents):
-        chest.contents = list(contents)
+        chest.contents, chest.seen = list(contents), row.get("seen", True) is not False
     return chest_id, chest

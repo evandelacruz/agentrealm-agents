@@ -28,17 +28,13 @@ from typing import Any
 
 from typing import TYPE_CHECKING
 
-from .item_table import DEFAULT_CARRY_CAPACITY, InventorySupply
+from .item_table import DEFAULT_CARRY_CAPACITY, NON_TRANSFERABLE, InventorySupply
 from .supplies import chest_capacity, heals, is_life
 from .world import Entity, Pos, WorldModel
 
 if TYPE_CHECKING:
     from .knowledge_base import KnowledgeBase
 
-# The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3,
-# §11). The Supplies reference does not say which supplies are transferable,
-# so this stays a seed.
-NON_TRANSFERABLE = frozenset({"pocket_knife"})
 # Observed on the wire (GAME_NOTES.md, docs/observations/A20_live_play.md).
 GEM_SUPPLY_CODES: frozenset[str] = frozenset({"gem"})
 # Steps of walk a gem pile is worth: a sure gem, where a cut may drop none.

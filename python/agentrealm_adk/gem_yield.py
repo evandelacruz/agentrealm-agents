@@ -112,6 +112,21 @@ FAIR_SAMPLE_CUTS = 20
 GEM_CODE = "gem"  # a ground gem (GAME_NOTES.md Gems)
 GEM_CACHE_PREFIX = "gem_cache"  # gem_cache_5/7/10 (GAME_NOTES.md Gems)
 
+# What the minutes to earn gems read while the gather's measured rate is 0.
+NO_GEMS_EARNED = "never at gems_per_min 0"
+
+
+def minutes_at(gems_short: int, gems_per_min: float | None) -> float | str | None:
+    """The minutes ``gems_short`` takes at the current gather's gems a minute
+    (A121, A124): None with no rate measured, and ``NO_GEMS_EARNED`` while the
+    rate shown is 0 and gems are still short. The one gem-time estimate: State
+    and the death-chest rule (A167) both read it."""
+    if gems_per_min is None:
+        return None
+    if gems_per_min > 0:
+        return round(gems_short / gems_per_min, 1)
+    return NO_GEMS_EARNED if gems_short else 0.0
+
 
 def take_raises_gems(code: str | None) -> bool:
     """A ``Take`` that can raise the gem counter: a gem, a gem cache, or a

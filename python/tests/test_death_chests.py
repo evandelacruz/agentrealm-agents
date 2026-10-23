@@ -191,12 +191,12 @@ class StateLineTest(unittest.TestCase):
         die(w, 5, 80, 0)
         die(w, 6, 81, 13)
         die(w, 7, 82, 4, map_id=9)
-        w.death_chests[81].contents = ["bronze_sword"]
+        w.death_chests[81].contents, w.death_chests[81].seen = ["torch"], True
         rows = json.loads(death_chests_line(w).removeprefix("death_chests="))
         self.assertEqual(
             rows,
             [
-                {"chest_id": 81, "cell": "7:13,0 (3 cells east)", "contents": ["bronze_sword"], "in_view": True},
+                {"chest_id": 81, "cell": "7:13,0 (3 cells east)", "contents": [{"code": "torch"}], "contents_are": "seen", "in_view": True},
                 {"chest_id": 80, "cell": "7:0,0 (10 cells west)", "contents": "unknown", "in_view": False},
                 {"chest_id": 82, "cell": "9:4,0 (another map)", "contents": "unknown", "in_view": False},
             ],

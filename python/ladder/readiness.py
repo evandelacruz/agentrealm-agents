@@ -23,7 +23,12 @@ being worked, counting only the heals usable now (``now``).
 **What is missing.** :func:`missing` lists what the next level still needs
 bought, from either branch of the tree: the item its entrance needs (a look's
 or a clue's, ``entrance_needs``, A147) and the gear and heals that would close
-its risk, each priced from a known seller (``sellers.sellers_of``, A131).
+its risk, each priced from a known seller (``sellers.sellers_of``, A131). An
+item one of her death chests on this map holds is taken back from it instead,
+ahead of buying, while the walk there takes no longer than earning its price
+(``chest_sources.source_for``, A167; she measures no gather rate, so the
+chest wins while it is fresh): it is listed under ``chests``, costing no
+gems.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
+from agentrealm_adk.chest_sources import ChestItem, chest_items, is_source, source_for
 from agentrealm_adk.discovery import seen_prices
 from agentrealm_adk.entrance_needs import lying_in_sight, meets, unmet_need
 from agentrealm_adk.equip import hunting_ceiling, weapon_rank
@@ -52,6 +58,8 @@ from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_sales
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from agentrealm_adk.knowledge_base import KnowledgeBase
 
 # The value-to-risk rule: the share of health plus held heals a goal may be
@@ -295,12 +303,22 @@ class Purchase:
     why: str
 
 
+@dataclass(frozen=True)
+class ChestTake:
+    """An item to take back from one of her death chests instead of buying it (A167)."""
+
+    item: ChestItem
+    why: str
+
+
 @dataclass
 class Missing:
-    """What the next level still needs bought, priced, and what has no known seller."""
+    """What the next level still needs bought, priced, what has no known
+    seller, and what her death chests hold for it (taken back, no gems)."""
 
     buys: list[Purchase] = field(default_factory=list)
     unpriced: list[str] = field(default_factory=list)
+    chests: list[ChestTake] = field(default_factory=list)
 
     @property
     def gems(self) -> int:
@@ -364,21 +382,40 @@ def need_of_next_level(w: WorldModel, kb: KnowledgeBase | None) -> str | None:
     return unmet_need(w, kb, *entrance) if entrance else None
 
 
-def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missing:
+def missing(
+    w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal, unreachable: Collection[tuple[int, Pos]] = ()
+) -> Missing:
     """What the next level still needs bought: its entrance's need (unless
-    it lies in sight for the taking), then the cheapest gear and heals, by
-    slack gained per gem, that bring ``level``'s risk within its share."""
+    it lies in sight for the taking, or a death chest of hers is its source,
+    A167), then the cheapest gear and heals, by slack gained per gem, that
+    bring ``level``'s risk within its share, once what her death chests
+    hold toward it is counted as hers. A chest at a cell of ``unreachable``
+    (a walk to it given up and backed off) is not counted."""
     out = Missing()
     sale = for_sale(w, kb)
     need = need_of_next_level(w, kb)
     if need and lying_in_sight(w, need) is None:
         offers = sorted((p, c) for c, p in sale.items() if meets(c, need))
-        if offers:
+        chest = source_for(need, w, offers[0][0] if offers else None, matches=lambda want, code: meets(code, want), unreachable=unreachable)
+        if chest is not None:
+            out.chests.append(ChestTake(chest, NEED_WHY.format(need)))
+        elif offers:
             out.buys.append(Purchase(offers[0][1], offers[0][0], NEED_WHY.format(need)))
         else:
             out.unpriced.append(need)
     lo = best_owned(w, kb)
     budget = risk_budget(level, w, kb, lo)
+    # Each copy a chest that is a source holds, once, under its own code: three potions are three heals.
+    for item in chest_items(w):
+        if budget.ok:
+            break
+        if not is_source(item, w, sale.get(item.code), unreachable=unreachable):
+            continue
+        gain = risk_budget(level, w, kb, _with(lo, item.code, w, kb)).slack - budget.slack
+        if gain > 0:
+            out.chests.append(ChestTake(item, RISK_WHY))
+            lo = _with(lo, item.code, w, kb)
+            budget = risk_budget(level, w, kb, lo)
     for _ in range(MOST_RISK_BUYS):
         if budget.ok:
             break

@@ -65,11 +65,13 @@ from agentrealm_adk.executor import (
 from agentrealm_adk.fording import ford_gate, loadout_memory
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
 from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
 from agentrealm_adk.knowledge_maps import record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from agentrealm_adk.level_order import minimap_due, note_door_step, settle_entry
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation.rejection import learn_step_rejection
+from agentrealm_adk.navigation.stuck import given_up_dests
 from agentrealm_adk.navigation.stuck import on_rejection as nav_on_rejection
 from agentrealm_adk.navigation.stuck import on_step as nav_on_step
 from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
@@ -80,7 +82,7 @@ from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, sa
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
-from .act import Act, Ctx, Started, act
+from .act import FETCH_GOAL, Act, Ctx, Started, act
 from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, seen, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 from .readiness import ORDINARY
@@ -139,6 +141,7 @@ class LadderRunner:
         self.trace = Trace(cfg.trace_path(cid), cfg.profile, out)
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_our_drops(knowledge, self.world)  # supplies this character dropped: no shop's (A158)
+        load_death_chests(knowledge, self.world)  # chests earlier deaths left: a source of items (A122, A167)
         self.root: Node = tree()
         self.blocks = Blocks()
         self.turn: Turn | None = None  # the last walk of the tree
@@ -199,6 +202,7 @@ class LadderRunner:
                 sync_world_maps(self.knowledge, w)
                 save_hostiles(self.knowledge, w, self._loaded_hostiles)
                 save_our_drops(self.knowledge, w)
+                save_death_chests(self.knowledge, w)
             self.trace.close()
 
     def on_error(self, call: str, e: ApiError) -> bool:
@@ -413,7 +417,9 @@ class LadderRunner:
             self.log("planner", f"{key}: block lifted, what it waited on came or its blocker may have changed")
             self.own_blocks.discard(key)
             self.asked_for = None  # the next walk asks afresh
-        self.turn = turn = walk(w, self.knowledge, self.blocks, self.root)
+        # A death chest her walk to gave up on is no source the tree picks (A167).
+        unreachable = given_up_dests(self.mem.nav_stuck, w.tick, FETCH_GOAL)
+        self.turn = turn = walk(w, self.knowledge, self.blocks, self.root, unreachable)
         if self.goal_since[0] != (turn.goal.key if turn.goal is not None else None):
             self.goal_since = (turn.goal.key if turn.goal is not None else None, w.tick)
         if turn.goal is None:

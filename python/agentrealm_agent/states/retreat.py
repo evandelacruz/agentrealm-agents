@@ -5,7 +5,8 @@ Priority 1. Runs with a hostile in range, somewhere safe to head for
 nearest one a path reaches outside every known hostile's ground, the refuge
 Flee also runs toward, ``pathing.retreat_safe_goal``), and
 ``should_retreat`` from health and the threat table; never on a safe tile or
-during a boss fight (A38).
+during a boss fight (A38). Under attack it never steps toward a hostile
+closing on us, and never walks to a refuge further than the chase (A165).
 """
 
 from __future__ import annotations
@@ -18,13 +19,16 @@ from agentrealm_adk.hostile_ground import ground_by_hostile, off_safe
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import cost_path, no_way, oscillation
 from agentrealm_adk.navigation import stuck as nav_stuck
-from agentrealm_adk.pathing import grid_params, nav_search, next_step, plan_sets, retreat_safe_goal
+from agentrealm_adk.pathing import flee_step, grid_params, nav_search, next_step, plan_sets, remaining_walk_cells, retreat_safe_goal
 from agentrealm_adk.survival import (
     LOSING_NAV,
     RETREAT_NAV,
+    beats_the_chase,
+    closing_hostiles,
     hostiles_reaching,
     is_attacker,
     on_safe_tile,
+    opens_distance,
     pursuer_peaks,
     retreat_goal,
     safe_goals,
@@ -61,7 +65,20 @@ class RetreatState(State):
     ``on_hostile = fight`` it retreats from a group that is coming for us
     when the engagement's decision is not to fight, the decision Fight and
     Flee read. With no refuge outside every known hostile's ground
-    it sends nothing, and Flee's escape runs."""
+    it sends nothing, and Flee's escape runs.
+
+    Hostiles closing on us (``survival.closing_hostiles``) bound the walk
+    (A165). Its first step opens distance from every one of them
+    (``survival.opens_distance``): a step that does not is planned round,
+    and with none left it sends nothing. And since a chaser keeps our pace
+    (A162), running is found not to work when hits land and the gap to the
+    nearest of them does not grow (``losing_ground``); the engagement is
+    then decided again (``engagement.cannot_outrun``), and when it says fight
+    a refuge further than the chase (``survival.beats_the_chase``) is not
+    walked to: Retreat swings at the hitter in reach, else sends nothing and
+    Fight closes. A drink comes first (Heal, above Retreat). When it still
+    says the fight is lost, the walk to the refuge is the run left, and
+    Retreat walks it."""
 
     name = "Retreat"
 
@@ -142,14 +159,26 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         # fight-back) runs next (A44). Never a safe cell a pursuer gets to
         # first: walking back toward it is the pacing run 7 died of.
         return StateOutcome(None, "no refuge outside hostile ground", state=state)
-    losing = losing_ground(w, ctx, goal)
-    if losing:
-        if out := _turn_on_losing(w, ctx, state):
-            m.retreat_paused = (goal, w.tick)  # a drink or a swing is not the walk getting stuck
+    closing = closing_hostiles(w, policy)
+    losing = losing_ground(w, ctx, goal, closing)
+    if losing and (out := _turn_on_losing(w, ctx, state)):
+        m.retreat_paused = (goal, w.tick)  # a drink or a swing is not the walk getting stuck
+        return out
+    e = m.engagement
+    if e is not None and e.cannot_outrun and e.fight and not beats_the_chase(w.pos, goal, closing):
+        # Running does not open distance and the chase keeps our pace: a walk
+        # to this refuge is one under its hits all the way, and the
+        # engagement, decided again on that, says fight. Fight carries it out.
+        if not losing and (out := _turn_on_losing(w, ctx, state, "cannot outrun to the refuge")):
             return out
+        return StateOutcome(None, f"safe {goal} is further than the chase: fight", state=state)
+    if losing:
         m.path = []  # replan below, weighing no hostile
     elif not escape and m.held_queue is not None and m.state == state and m.retreat_walk == goal:
-        return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
+        ahead = remaining_walk_cells(w, m)
+        if not ahead or opens_distance(w.pos, ahead[0], closing):
+            return StateOutcome(None, f"retreat → safe {goal}: queue under way", state=state, wait=True)
+        m.path = []  # the queue's next step closes on a hostile: plan again below
     pursuers = pursuer_peaks(w, policy, everyone=losing)
     # Ground a hostile it is not running from holds, in view or remembered,
     # costs a detour, but for a known safe block, where no hit lands, and a
@@ -170,6 +199,15 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
     if step is None and m.path:
         m.path = cost_path(w, goal, params, nav=nav) or []
         step = next_step(w, plan_avoid, m.path)
+    if step is not None and not opens_distance(w.pos, step, closing):
+        # Never a step toward a hostile closing on us: plan round every one.
+        toward = {p for p in w.open_neighbours(w.pos, plan_avoid) if not opens_distance(w.pos, p, closing)}
+        params = dataclasses.replace(params, avoid=params.avoid | toward)
+        m.path = cost_path(w, goal, params, nav=nav) or []
+        m.planned_threats = hostiles_reaching(w, policy, m.path, skip=pursuers)
+        step = next_step(w, plan_avoid | toward, m.path)
+        if step is None:
+            return _hemmed_in(w, ctx, state, goal, closing, plan_avoid)
     if step is None:
         if m.path:
             # A path whose first cell is not open this decision (someone stands on it, or it is unseen): wait.
@@ -229,36 +267,43 @@ def no_progress(w: WorldModel, m: Memory, goal: Pos) -> bool:
     return True
 
 
-def losing_ground(w: WorldModel, ctx: PlayContext, goal: Pos) -> bool:
-    """Over the last ``RETREAT_PROBE_TICKS``, the distance to ``goal`` has not
-    shrunk and a hostile hit landed (A9).
+def losing_ground(w: WorldModel, ctx: PlayContext, goal: Pos, closing: list[Entity] | None = None) -> bool:
+    """Over the last ``RETREAT_PROBE_TICKS`` a hostile hit landed, and either
+    the distance to ``goal`` has not shrunk (A9) or the gap to the nearest of
+    ``closing`` has not grown: a chase that keeps our pace (A162, A165), as
+    Flee's probe asks running to open distance.
 
-    Samples the distance at each call; a new goal, or a gap longer than the
-    window since the last sample, starts the record over. Once it reports
-    losing, the window starts over, so the fallback runs once per window.
+    Samples both at each call; a new goal, or a gap longer than the window
+    since the last sample, starts the record over. Once it reports losing,
+    the window starts over, so the fallback runs once per window.
     """
     m = ctx.memory
     gap = chebyshev(w.pos, goal)
+    chase = min((chebyshev(w.pos, h.pos) for h in closing or ()), default=None)
     since = w.tick - RETREAT_PROBE_TICKS
     if m.retreat_to != goal or not m.retreat_gaps or m.retreat_gaps[-1][0] < since:
         m.retreat_to, m.retreat_gaps = goal, []
-    m.retreat_gaps.append((w.tick, gap))
+    m.retreat_gaps.append((w.tick, gap, chase))
     # Keep one sample at or before the window's start, nothing older.
     while len(m.retreat_gaps) > 1 and m.retreat_gaps[1][0] <= since:
         del m.retreat_gaps[0]
-    start_tick, start_gap = m.retreat_gaps[0]
+    start_tick, start_gap, start_chase = m.retreat_gaps[0]
     hit = w.attacked_tick is not None and w.attacked_tick > since and w.damage_since(since + 1) > 0
-    if start_tick > since or gap < start_gap or not hit:
+    kept_up = chase is not None and start_chase is not None and chase <= start_chase
+    if start_tick > since or not hit or (gap < start_gap and not kept_up):
         return False
-    m.retreat_gaps = [(w.tick, gap)]
+    m.retreat_gaps = [(w.tick, gap, chase)]
     return True
 
 
-def _turn_on_losing(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome | None:
-    """Losing ground: the engagement decides again on running not working;
-    then drink or eat what we carry (a potion when that decision says the
-    drink turns the fight, or health is low), else, when it says fight, fight
-    back the hitter in weapon reach; else None."""
+def _turn_on_losing(
+    w: WorldModel, ctx: PlayContext, state: str, why: str = "retreat losing ground"
+) -> StateOutcome | None:
+    """Running is not working (losing ground, or a refuge further than the
+    chase, A165): the engagement decides again on that; then drink what we
+    carry (a potion when that decision says the drink turns the fight, or
+    health is low), else, when it says fight, fight back the hitter in
+    weapon reach; else None."""
     e = cannot_outrun(w, ctx.memory, ctx.policy, ctx.params)
     out = use_carried_heal(w, ctx)
     if out is None:
@@ -267,8 +312,28 @@ def _turn_on_losing(w: WorldModel, ctx: PlayContext, state: str) -> StateOutcome
     if out is None or not out.intents:
         return None
     out.state, out.reflex = state, True
-    out.reason = f"retreat losing ground: {out.reason}"
+    out.reason = f"{why}: {out.reason}"
     return out
+
+
+def _hemmed_in(
+    w: WorldModel, ctx: PlayContext, state: str, goal: Pos, closing: list[Entity], blocked: set[Pos]
+) -> StateOutcome:
+    """Every step on the way to ``goal`` closes on a hostile closing on us
+    (A165): standing still only takes the hits, so Retreat swings at the
+    hitter in weapon reach, else takes the best step away from them all
+    (``pathing.flee_step``), else holds for Flee's cornered move."""
+    hitter = _hitter_in_reach(w, ctx)
+    out = engage(w, ctx, hitter, state) if hitter is not None else None
+    if out is not None and out.intents:
+        out.state, out.reflex = state, True
+        out.reason = f"safe {goal}: hemmed in: {out.reason}"
+        return out
+    away = flee_step(w, closing, blocked)
+    if away is not None:
+        ctx.memory.path, ctx.memory.retreat_walk = [], None  # one step, no walk queue
+        return StateOutcome([set_position(away)], f"safe {goal}: hemmed in: step away", reflex=True, state=state)
+    return StateOutcome(None, f"safe {goal}: every step closes on a hostile", state=state)
 
 
 def _hitter_in_reach(w: WorldModel, ctx: PlayContext) -> Entity | None:

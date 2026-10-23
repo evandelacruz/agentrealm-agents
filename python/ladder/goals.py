@@ -6,6 +6,8 @@ The tree, walked from the top every turn::
     └─ beat the next level            the lowest level not cleared (A145)
        ├─ hold what it requires       its entrance's need: a key, sandals, a bomb (A147)
        └─ ready for its risk          heals, weapon, armor against its expected danger
+                                      (both take back what a death chest of hers holds
+                                      for it ahead of buying it, A167)
           └─ hold the gems for what's missing   from either branch, priced from known sellers (A131)
              └─ gather
                 └─ stay alive         the risk budget of the goal above
@@ -52,12 +54,12 @@ from agentrealm_adk.entrance_needs import lying_in_sight, meets
 from agentrealm_adk.level_order import target_level
 from agentrealm_adk.supplies import heal_of, is_potion
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
-from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, Pos, WorldModel
 
 from . import readiness as r
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     from agentrealm_adk.knowledge_base import KnowledgeBase
 
@@ -83,6 +85,7 @@ class Reading:
 
     world: WorldModel
     kb: KnowledgeBase | None
+    unreachable: Collection[tuple[int, Pos]] = ()  # cells a walk gave up on: no chest there is a source (A167)
     checks: dict[str, Check] = field(default_factory=dict)
     missing_for: dict[str, r.Missing] = field(default_factory=dict)
 
@@ -93,7 +96,7 @@ class Reading:
 
     def missing(self, level: Node) -> r.Missing:
         if level.key not in self.missing_for:
-            self.missing_for[level.key] = r.missing(self.world, self.kb, level)
+            self.missing_for[level.key] = r.missing(self.world, self.kb, level, self.unreachable)
         return self.missing_for[level.key]
 
 
@@ -228,8 +231,18 @@ def get_what_it_requires(node: Node, rd: Reading) -> GoalOp | None:
     lying = lying_in_sight(w, need)
     if lying is not None:
         return {"op": "fetch_item", "code": lying.code, "x": lying.pos[0], "y": lying.pos[1]}
-    buy = next((p for p in rd.missing(node.serves).buys if meets(p.code, need)), None)
+    m = rd.missing(node.serves)
+    chest = next((t for t in m.chests if t.why == r.NEED_WHY.format(need)), None)
+    if chest is not None:
+        return from_chest(chest)
+    buy = next((p for p in m.buys if meets(p.code, need)), None)
     return {"op": "buy", "code": buy.code} if buy else _explore(w)
+
+
+def from_chest(take: r.ChestTake) -> GoalOp:
+    """Take an item back from one of her death chests (A167): ``fetch_item`` names the chest."""
+    item = take.item
+    return {"op": "fetch_item", "code": item.code, "x": item.pos[0], "y": item.pos[1], "chest_id": item.chest_id}
 
 
 def ready_for_its_risk(node: Node, rd: Reading) -> Check:
@@ -239,13 +252,18 @@ def ready_for_its_risk(node: Node, rd: Reading) -> Check:
 
 
 def get_ready_for_its_risk(node: Node, rd: Reading) -> GoalOp:
-    """Arm and wear the best gear owned first, then buy what closes the risk,
+    """Arm and wear the best gear owned first, then take back what a death
+    chest of hers holds toward the risk (A167), then buy what closes it,
     else look for a seller of it."""
     w = rd.world
     now, best = r.Loadout.now(w), r.best_owned(w, rd.kb)
     if (best.weapon, best.armor) != (now.weapon, now.armor):
         return {"op": "equip"}
-    buy = next((p for p in rd.missing(node.serves).buys if p.why == r.RISK_WHY), None)
+    m = rd.missing(node.serves)
+    chest = next((t for t in m.chests if t.why == r.RISK_WHY), None)
+    if chest is not None:
+        return from_chest(chest)
+    buy = next((p for p in m.buys if p.why == r.RISK_WHY), None)
     return {"op": "buy", "code": buy.code} if buy else _explore(w)
 
 
@@ -352,7 +370,13 @@ def find(key: str, root: Node) -> Node:
     raise KeyError(key)
 
 
-def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node | None = None) -> Turn:
+def walk(
+    world: WorldModel,
+    kb: KnowledgeBase | None,
+    blocks: Blocks | None = None,
+    root: Node | None = None,
+    unreachable: Collection[tuple[int, Pos]] = (),
+) -> Turn:
     """The turn's goal: from the root, into the first child not ready, until a
     node whose children are all ready; only such a node is ever the goal.
 
@@ -364,10 +388,11 @@ def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = No
     with the child's reason: the walk tries the parent's next child not
     ready, and with none the parent gives no goal. ``goal`` is None when the
     world is beaten or every way down is blocked. ``root`` defaults to a
-    fresh ``tree()``."""
+    fresh ``tree()``. ``unreachable`` is the cells her walks gave up on and
+    are backed off from: a death chest there is no source (A167)."""
     root = root if root is not None else tree()
     blocks = blocks if blocks is not None else Blocks()
-    rd = Reading(world, kb)
+    rd = Reading(world, kb, unreachable)
     skipped: list[tuple[Node, Block]] = []
 
     def down(n: Node, path: list[Node], past: bool = False) -> tuple[Node | None, list[Node], Block | None]:

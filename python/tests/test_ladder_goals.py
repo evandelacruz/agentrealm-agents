@@ -303,16 +303,14 @@ class TreeAsDataTest(unittest.TestCase):
 
 
 class BlocksTest(unittest.TestCase):
-    def test_a_blocked_goal_is_skipped_with_its_reason_and_its_ready_children_do_nothing(self):
+    def test_a_blocked_goal_is_skipped_with_its_reason_and_the_tree_gathers_under_it(self):
         w = geared()  # every child of the level ready
         blocks = Blocks()
         blocks.mark("level", "the door will not open", now=w.tick)
         turn = walk(w, knowledge(), blocks)
-        self.assertIsNone(turn.goal)  # no explore or equip for a risk already met
-        self.assertEqual(
-            [(n.key, b.reason) for n, b in turn.skipped],
-            [("level", "the door will not open"), ("world", "beat the next level: the door will not open")],
-        )
+        self.assertEqual(turn.goal.key, "gather")  # no explore or equip for a risk already met, but gems (A169)
+        self.assertEqual(turn.op(), {"op": "gather_gems", "count": goals.GEMS_AHEAD})
+        self.assertEqual([(n.key, b.reason) for n, b in turn.skipped], [("level", "the door will not open")])
 
     def test_a_ready_node_below_a_block_has_nothing_to_do(self):
         w = geared()  # gems short, stay alive ready
@@ -329,6 +327,7 @@ class BlocksTest(unittest.TestCase):
         kb = knowledge(door_need="fords", sells={"raft": 30})
         blocks = Blocks()
         blocks.mark("requires", "the shop is shut", now=w.tick)
+        blocks.mark("risk", "no potion sold", now=w.tick)  # its sibling blocked too: below the blocks
         turn = walk(w, kb, blocks)
         self.assertEqual(turn.goal.key, "alive")
         self.assertEqual([n.key for n in turn.path], ["world", "level", "requires", "gems", "gather", "alive"])
@@ -375,15 +374,16 @@ class BlocksTest(unittest.TestCase):
         blocks.lift("alive")
         self.assertEqual(walk(w, kb, blocks).goal.key, "gather")
 
-    def test_gems_in_hand_leave_nothing_to_gather(self):
+    def test_gems_in_hand_and_the_buy_blocked_gather_past_them(self):
         w = geared(gems=40)  # the raft is affordable
         kb = knowledge(door_need="fords", sells={"raft": 30})
         blocks = Blocks()
         blocks.mark("requires", "the shop is shut", now=0)
         turn = walk(w, kb, blocks)
-        self.assertIsNone(turn.goal)  # no gather_gems that is done on arrival
-        gather = find("gather", goals.tree())
-        self.assertIsNone(gather.op(gather, goals.Reading(w, kb)))
+        self.assertEqual(turn.goal.key, "gather")  # a blocked goal never ends the tree's work (A169)
+        self.assertEqual(turn.op(), {"op": "gather_gems", "count": 40 + goals.GEMS_AHEAD})  # never done on arrival
+        holds = find("gems", goals.tree())
+        self.assertIsNone(holds.op(holds, goals.Reading(w, kb)))  # "hold the gems" itself has none to gather
 
     def test_gather_counts_up_to_what_is_missing(self):
         w = geared(gems=10)

@@ -20,7 +20,8 @@ A128) but the ones a fight with which fits her risk budget now
 No op holds in silence (A168): a walk with no step gives its target up for
 the ADK's backoff (``navigation.stuck``, A90) and is over, so the loop moves
 on; an op with more than one target (gather, explore) takes the next-best
-one that has a step first, and is over only once none has.
+one that has a step first, and is over only once none has. Occupants on the
+way are no reason to give a walk up (A169): only terrain is.
 """
 
 from __future__ import annotations
@@ -109,13 +110,14 @@ class Ctx:
 class Act:
     """One round of an op: the intents to send (None: nothing), why, whether
     it is over, and whether nothing is sent only on a wait the clock clears
-    (``waits``: a weapon cooldown, or her place not read yet). Such a round
-    is no stall and its repeat never ends the op (A168)."""
+    (``waits``: a weapon cooldown, her place not read yet, or occupants on
+    her way, A169). Such a round is no stall and its repeat never ends the op (A168)."""
 
     intents: list[dict] | None
     why: str
     over: bool = False
     waits: bool = False
+    retry_at: int | None = None  # over on a walk given up: the tick it may be walked again (A169)
 
 
 def act(op: GoalOp, ctx: Ctx) -> Act:
@@ -224,8 +226,13 @@ def walk(
 ) -> Act:
     """One round of a walk to ``dest`` (on ``dest_map``, this map by
     default): the ADK's guided walk, sent as a paced queue of the path ahead.
-    With no step, it waits a round only on a way whose first step is taken
-    (an occupant); else the target is given up for the ADK's backoff
+    Occupants on the way are no obstacle (A169): the walk goes round them,
+    else waits for them to move, a wait the clock clears (``Act.waits``) up
+    to the ADK's cap (``stuck.OCCUPANT_WAIT_TICKS``, ``stuck.occupants_held``),
+    after which the walk is over but its target is not given up: only
+    terrain makes a target unreachable. With
+    no step otherwise, it waits a round on a way whose first step is not
+    open yet; else the target is given up for the ADK's backoff
     (``give_up_walk``) and the walk is over, so no op holds on it (A168).
     ``toward`` is the hostile a fight walks to and ``passing`` the hostiles
     a pass is covered for (``walk_sets``), whose ground it does not keep off."""
@@ -235,7 +242,7 @@ def walk(
     dest_map = w.map_id if dest_map is None else dest_map
     key = nav_stuck.goal_key(goal, dest_map, dest)
     if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
-        return Act(None, f"{goal}: the walk to {dest} was given up", over=True)
+        return given_up_act(ctx, goal, dest, key)
     avoid, costly, reach = walk_sets(ctx, toward, passing)
 
     def params():
@@ -252,12 +259,73 @@ def walk(
     )
     if step is None:
         if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
-            return Act(None, f"{goal}: the walk to {dest} was given up", over=True)
+            return given_up_act(ctx, goal, dest, key)
+        if nav_stuck.occupants_held(m, w, goal, since=ctx.started.tick):
+            # The ADK's cap on the wait (A169): over, its target not given up.
+            return Act(None, f"{goal}: the way to {dest} stayed held by occupants for "
+                             f"{nav_stuck.OCCUPANT_WAIT_TICKS} ticks", over=True)
+        if nav_stuck.occupant_wait(m, w, goal) is not None:
+            return Act(None, f"{goal}: the way to {dest} is held by occupants, waiting", waits=True)
         if m.goal == goal and m.path:
             return Act(None, f"{goal}: the way to {dest} is taken, waiting")
         give_up_walk(ctx, goal, key)
-        return Act(None, f"{goal}: no step toward {dest}, given up", over=True)
+        rec = m.nav_stuck.given_up.get(key)
+        return Act(None, f"{goal}: no step toward {dest}, given up", over=True, retry_at=rec.until if rec else None)
     return Act(walk_queue(ctx, step), f"{goal} → {dest}")
+
+
+def given_up_act(ctx: Ctx, goal: str, dest: Pos, key: str) -> Act:
+    """A walk to a target given up and still backed off: over, with when it may be walked again."""
+    rec = ctx.mem.nav_stuck.given_up[key]
+    return Act(None, f"{goal}: the walk to {dest} was given up until tick {rec.until}", over=True, retry_at=rec.until)
+
+
+# Her walks' goals: what she gave up on, which the tree and the planner never point back at (A169).
+OWN_WALKS = "lorraine:"
+
+
+def given_up_near(ctx: Ctx, map_id: int | None, p: Pos, reach: int = 0) -> nav_stuck.GiveUp | None:
+    """A walk of hers given up on a cell within ``reach`` of ``p`` and still
+    backed off (A90), the one that is backed off longest; None when none is.
+    A walk to a seller stands next to it, so its give-up is near, not on, it."""
+    tick = ctx.world.tick
+    near = [
+        g for g in ctx.mem.nav_stuck.given_up.values()
+        if g.goal.startswith(OWN_WALKS) and g.map_id == map_id and chebyshev(g.target, p) <= reach and tick < g.until
+    ]
+    return max(near, key=lambda g: g.until) if near else None
+
+
+def given_up_lines(m: Memory, tick: int) -> list[str]:
+    """Each walk target of hers given up and still backed off, for the
+    planner (A169): where, why each level of the walk failed, and until when."""
+    recs = sorted(
+        (g for g in m.nav_stuck.given_up.values() if g.goal.startswith(OWN_WALKS) and tick < g.until),
+        key=lambda g: (g.until, g.map_id, g.target),
+    )
+    return [
+        f"{g.goal.removeprefix(OWN_WALKS)} to map {g.map_id} at {g.target[0]},{g.target[1]} until tick {g.until}"
+        + (f" ({', '.join(g.reasons)})" if g.reasons else "")
+        for g in recs
+    ]
+
+
+def given_up_target(op: GoalOp, ctx: Ctx) -> str:
+    """Why ``op`` points back at a target her walk gave up and is still backed
+    off from (A169), or "": its cell, or for a ``buy`` every seller of its item."""
+    w = ctx.world
+    if op.get("op") == "buy":
+        sellers = [s for s in sellers_of(op.get("code", ""), w, ctx.kb, op) if s.in_stock]
+        ups = [given_up_near(ctx, s.map_id, s.pos, NEAR) for s in sellers]
+        if sellers and all(ups):
+            return f"every seller of {op.get('code')} is given up until tick {min(g.until for g in ups)}"
+        return ""
+    if _int(op.get("x")) and _int(op.get("y")):
+        map_id = op["map_id"] if _int(op.get("map_id")) else w.map_id
+        g = given_up_near(ctx, map_id, (op["x"], op["y"]), NEAR)
+        if g is not None:
+            return f"the walk to {op['x']},{op['y']} is given up until tick {g.until}"
+    return ""
 
 
 def give_up_walk(ctx: Ctx, goal: str, key: str) -> None:
@@ -302,11 +370,21 @@ def walk_queue(ctx: Ctx, step: Pos) -> list[dict]:
 
 def stand_by(w: WorldModel, p: Pos, reach: int) -> Pos:
     """Where to walk to act on ``p`` within ``reach``: ``p`` itself when it
-    can be stood on, else its nearest open neighbour (a shelf, an NPC)."""
-    if reach == 0 or (w.walkable(p) and p not in w.occupied() and p not in w.for_sale()):
+    can be stood on, else the free cell within ``reach`` of it nearest her
+    (a shelf, a seller, A169: a person is reached by interaction range, never
+    by standing on their cell). With every such cell held, the one nearest
+    her: the walk goes up to it and waits for its occupant (``walk``)."""
+    held = w.occupied() | w.for_sale()
+    if reach == 0 or (w.walkable(p) and p not in held):
         return p
-    near = w.open_neighbours(p)
-    return min(near, key=lambda n: (chebyshev(n, w.pos), n)) if near and w.pos is not None else p
+    if w.pos is None:
+        return p
+    near = [
+        (p[0] + dx, p[1] + dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1) if dx or dy
+    ]
+    stand = [n for n in near if w.walkable(n) and n not in w.for_sale()]
+    free = [n for n in stand if n not in held] or stand
+    return min(free, key=lambda n: (chebyshev(n, w.pos), n)) if free else p
 
 
 def reach_and(
@@ -408,8 +486,9 @@ def from_chest(op: GoalOp, ctx: Ctx) -> Act:
 
 def buy(op: GoalOp, ctx: Ctx) -> Act:
     """Take the item off a shelf in sight, else walk to the nearest seller
-    known for it and not sold out (``sellers.sellers_of``, A131, A159); over
-    once it is hers or no seller is left to try."""
+    known for it, not sold out (``sellers.sellers_of``, A131, A159) and not
+    given up by her walk (``given_up_near``, A169); over once it is hers or
+    no seller is left to try."""
     w, code = ctx.world, op.get("code", "")
     if gained(ctx, code):
         return Act(None, f"bought {code}", over=True)
@@ -422,6 +501,13 @@ def buy(op: GoalOp, ctx: Ctx) -> Act:
         # A seller reached with no shelf of it in sight does not sell it now.
         ctx.started.searched |= {(s.map_id, s.pos) for s in sellers if s.map_id == w.map_id and chebyshev(w.pos, s.pos) <= NEAR}
     left = [s for s in sellers if s.in_stock and (s.map_id, s.pos) not in ctx.started.searched]
+    # A seller her walk gave up on is not walked to again until its backoff ends (A90, A169).
+    ups = [g for s in left if (g := given_up_near(ctx, s.map_id, s.pos, NEAR)) is not None]
+    walkable = [s for s in left if given_up_near(ctx, s.map_id, s.pos, NEAR) is None]
+    if not walkable and ups:
+        until = min(g.until for g in ups)
+        return Act(None, f"every seller of {code} left is given up until tick {until}", over=True, retry_at=until)
+    left = walkable
     if not left:
         return Act(None, f"no seller of {code} left to try", over=True)
     seller = min(left, key=lambda s: walk_order(s, w))

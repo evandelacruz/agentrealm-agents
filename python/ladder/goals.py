@@ -31,13 +31,18 @@ it is the planner's answer at "gather" (A140).
 
 **Blocked nodes.** A node the planner says it cannot work (A140) is marked
 in ``Blocks`` with its reason and an expiry; the walk never makes it the
-goal, notes it as skipped with that reason, and descends into its children,
-taking the first with a node not ready under it; a ready node has nothing to
-do, so it is never the goal. A node not ready whose whole way
-down is blocked blocks its parent too, with its reason, so a node is the
-goal only while all its children are ready. A block lapses at its expiry,
-or earlier once the part of the node's state its reason named changes
-(``ask.lift_changed``).
+goal and notes it as skipped with that reason. Its siblings come first, in
+tree order (A169); with none to work, the walk descends into its children,
+taking the first with a node not ready anywhere under it, under a ready
+child too: a blocked goal never ends the tree's work, and "gather" is
+never ready and always has an op, so while a gather target exists the
+tree has work. A ready node has nothing to do, so it is never the goal. A
+node not ready whose whole way down is blocked blocks its parent too, with
+its reason, so a node is the goal only while all its children are ready. A
+block lapses at its expiry, or earlier once what it may wait on has changed
+(``ask.lift_changed``): the part of the node's state its reason named, the
+state the planner saw (her region, what she carries, her health), or the
+backoff of a walk given up for it.
 """
 
 from __future__ import annotations
@@ -61,6 +66,9 @@ if TYPE_CHECKING:
 
 # How long a planner's ``cannot`` keeps a node blocked, in ticks (5 minutes at 10 Hz).
 BLOCK_TICKS = 3000
+# Gems "gather" works for past what is missing, when what is above it is
+# blocked or bought: more gems are never wasted (A169).
+GEMS_AHEAD = 10
 
 
 @dataclass(frozen=True)
@@ -79,6 +87,7 @@ class Reading:
     world: WorldModel
     kb: KnowledgeBase | None
     unreachable: Collection[tuple[int, Pos]] = ()  # cells a walk gave up on: no chest there is a source (A167)
+    given_up: tuple[str, ...] = ()  # her walk targets given up, as the planner is told them (A169)
     checks: dict[str, Check] = field(default_factory=dict)
     missing_for: dict[str, r.Missing] = field(default_factory=dict)
 
@@ -126,13 +135,18 @@ class Block:
     until: int  # the tick it lapses
     named: str = ""  # what it waits on: an ``ask.watch_lines`` key or ``gems``; "" holds to the expiry
     was: str = ""  # what that line read when the block was marked, or the gem count awaited
+    seen: tuple = ()  # the state the planner saw when it was marked (``ask.seen``); () watches none
+    retry_at: int | None = None  # the tick a walk given up for it may be walked again
 
 
 class Blocks(dict[str, Block]):
     """The nodes the planner said it cannot work, by key (A140 sets them)."""
 
-    def mark(self, key: str, reason: str, now: int, ticks: int = BLOCK_TICKS, named: str = "", was: str = "") -> None:
-        self[key] = Block(reason, now + ticks, named, was)
+    def mark(
+        self, key: str, reason: str, now: int, ticks: int = BLOCK_TICKS, named: str = "", was: str = "",
+        seen: tuple = (), retry_at: int | None = None,
+    ) -> None:
+        self[key] = Block(reason, now + ticks, named, was, seen, retry_at)
 
     def active(self, key: str, now: int) -> Block | None:
         """The block on ``key`` still in force at ``now``; a lapsed one is forgotten."""
@@ -270,8 +284,16 @@ def gather_for_it(node: Node, rd: Reading) -> GoalOp | None:
     return {"op": "gather_gems", "count": need} if need > (rd.world.gems or 0) else None
 
 
+def gather_more(node: Node, rd: Reading) -> GoalOp:
+    """Gather up to the gems what is missing costs, or ``GEMS_AHEAD`` past
+    what is held when none are short: the walk comes here then only because
+    what is above is blocked, and gathering is always workable (A169)."""
+    need, held = rd.missing(node.serves).gems, rd.world.gems or 0
+    return {"op": "gather_gems", "count": need if need > held else held + GEMS_AHEAD}
+
+
 def gathered(node: Node, rd: Reading) -> Check:
-    """Gathering is never done: it is reached only while gems are short."""
+    """Gathering is never done: gems are always worth earning."""
     return Check(False, "gems are earned by gathering")
 
 
@@ -326,7 +348,7 @@ def tree() -> Node:
         subject=level,
     )
     gems = Node("gems", "hold the gems for what's missing", holds_the_gems, gather_for_it, ops=("gather_gems",), subject=level)
-    gather = Node("gather", "gather", gathered, gather_for_it, ops=("gather_gems",), subject=level, danger=r.foes_here)
+    gather = Node("gather", "gather", gathered, gather_more, ops=("gather_gems",), subject=level, danger=r.foes_here)
     alive = Node(
         "alive", "stay alive", alive_margin, restore_margin, ops=("fetch_item", "buy", "travel"), subject=gather
     )
@@ -360,9 +382,12 @@ def walk(
     """The turn's goal: from the root, into the first child not ready, until a
     node whose children are all ready; only such a node is ever the goal.
 
-    A node marked blocked is skipped with its reason and the walk descends
-    into its children, all ready, taking the first with a node not ready
-    under it: a ready node has nothing to do and is never the goal. A
+    A node marked blocked is skipped with its reason. The walk first takes
+    the goal it reaches without going below any block, so a blocked node's
+    siblings come first in tree order (A169); with none, it descends into
+    each blocked node's children, all ready, taking the first with a node
+    not ready anywhere under it (``past``: a ready node is walked through):
+    a ready node has nothing to do and is never the goal. A
     child not ready whose whole way down is blocked blocks its parent too,
     with the child's reason: the walk tries the parent's next child not
     ready, and with none the parent gives no goal. ``goal`` is None when the
@@ -374,17 +399,20 @@ def walk(
     rd = Reading(world, kb, unreachable)
     skipped: list[tuple[Node, Block]] = []
 
-    def down(n: Node, path: list[Node]) -> tuple[Node | None, list[Node], Block | None]:
-        """The goal under ``n``, the path to it, and why there is none."""
+    def down(n: Node, path: list[Node], through: bool, past: bool = False) -> tuple[Node | None, list[Node], Block | None]:
+        """The goal under ``n``, the path to it, and why there is none.
+        ``through``: the walk may go on below a blocked node; ``past``: it is
+        below one, where a ready child is walked through too."""
         path = [*path, n]
         under: Block | None = None
         for c in n.children:
-            if rd.check(c).ready:
+            ready = rd.check(c).ready
+            if ready and not past:
                 continue
-            goal, to, why = down(c, path)
+            goal, to, why = down(c, path, through, past)
             if goal is not None:
                 return goal, to, None
-            if under is None and why is not None:
+            if under is None and why is not None and not ready:
                 under = Block(f"{c.title}: {why.reason}", why.until)
         if under is not None:
             skipped.append((n, under))
@@ -395,15 +423,19 @@ def walk(
             working = not rd.check(n).ready and n.op(n, rd) is not None
             return (n, path, None) if working else (None, path, None)
         skipped.append((n, block))
-        for c in n.children:
-            goal, to, _ = down(c, path)
+        for c in n.children if through else ():
+            goal, to, _ = down(c, path, through, past=True)
             if goal is not None:
                 return goal, to, None
         return None, path, block
 
     if rd.check(root).ready:
         return Turn(None, [root], skipped, rd)
-    goal, path, _ = down(root, [])
+    # A blocked node's siblings first, in tree order; only then the nodes below the blocks (A169).
+    goal, path, _ = down(root, [], through=False)
+    if goal is None:
+        skipped.clear()
+        goal, path, _ = down(root, [], through=True)
     return Turn(goal, path if goal else [root], skipped, rd)
 
 

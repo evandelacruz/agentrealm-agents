@@ -13,6 +13,7 @@ from agentrealm_adk.travel.knowledge import iter_shop_cells, record_shop_cell, s
 from agentrealm_adk.world import Entity, WorldModel
 from agentrealm_agent.strategist import Strategist, StrategistConfig
 from ladder import goals
+from ladder import ask
 from ladder.ask import CONTRACT, Planner, Reply, answer, lift_changed, node_state, question, read_reply
 from ladder.goals import Blocks, find, walk
 from ladder.play import LadderRunner
@@ -133,7 +134,7 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(blocks["requires"].reason, "the shop is shut")
         self.assertEqual(blocks["requires"].until, w.tick + goals.BLOCK_TICKS)
         after = walk(w, kb, blocks)
-        self.assertEqual(after.goal.key, "alive")
+        self.assertEqual(after.goal.key, "risk")  # its sibling first, in tree order (A169)
         self.assertEqual([(n.key, b.reason) for n, b in after.skipped][0], ("requires", "the shop is shut"))
 
     def test_an_op_blocks_nothing(self):
@@ -174,10 +175,39 @@ class BlockTest(unittest.TestCase):
             with self.subTest(until=until):
                 w, kb, blocks = self.block(until)
                 self.assertEqual((blocks["requires"].named, blocks["requires"].until), ("", w.tick + goals.BLOCK_TICKS))
-                w.pos, w.health, w.gems = (9, 9), 1, 500
-                w.held_supplies = [InventorySupply(9, "raft")]
+                w.pos, w.gems = (6, 6), 500  # a step within the region, and gems: neither is what the planner saw
                 self.assertEqual(lift_changed(blocks, w, kb), [])  # held to its expiry
                 self.assertIn("requires", blocks)
+
+    def test_a_block_is_retried_once_the_state_the_planner_saw_changes(self):
+        """A169: her region, what she carries, or her health crossing her risk budget's line."""
+        changes = {
+            "region": lambda w: setattr(w, "pos", (5 + ask.REGION_CELLS, 5)),
+            "held": lambda w: setattr(w, "held_supplies", [InventorySupply(9, "raft")]),
+            "health": lambda w: (setattr(w, "max_health", 20), setattr(w, "health", 20)),  # the rat in reach now fits
+        }
+        for name, change in changes.items():
+            with self.subTest(change=name):
+                w, kb, blocks = self.block("ticks 2000")
+                self.assertEqual(lift_changed(blocks, w, kb), [])
+                change(w)
+                self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+
+    def test_a_hit_that_crosses_no_line_of_her_risk_budget_lifts_no_block(self):
+        w, kb, blocks = self.block("ticks 2000")
+        w.health -= 1  # 2 to 1: short of the margin before and after
+        self.assertEqual(lift_changed(blocks, w, kb), [])
+        self.assertIn("requires", blocks)
+
+    def test_a_block_is_retried_once_the_walk_given_up_for_it_may_be_walked_again(self):
+        w, kb = short_of_a_raft()
+        blocks = Blocks()
+        turn = walk(w, kb, blocks)
+        answer(turn.goal, Reply(cannot="the walk to the shop was given up"), blocks, turn.reading, retry_at=w.tick + 300)
+        w.tick += 299
+        self.assertEqual(lift_changed(blocks, w, kb), [])
+        w.tick += 1
+        self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
 
     def test_a_gems_wait_already_met_is_no_wait(self):
         w, kb, blocks = self.block("gems 40")  # 40 held already
@@ -320,17 +350,21 @@ class PlayTest(unittest.TestCase):
         r = self.runner(p, w, kb)
         self.assertIsNone(settle(r))
         self.assertEqual(settle(r), {"op": "travel", "to": "town"})
-        self.assertIn("goal: stay alive", fake.messages[1][1]["content"])
+        self.assertIn("goal: ready for its risk", fake.messages[1][1]["content"])  # its sibling (A169)
 
     def test_a_cannot_is_not_asked_again_on_the_next_tick(self):
-        w = geared()  # the level is the goal, and nothing under it to work
-        p, fake = planner('{"cannot": "the door will not open"}')
+        w = geared()  # the level is the goal; under it only gathering is left (A169)
+        gather = '{"op": {"op": "gather_gems", "count": 10, "x": 2, "y": 5}}'
+        p, fake = planner('{"cannot": "the door will not open"}', gather)
         r = self.runner(p, w, knowledge())
         self.assertIsNone(settle(r))
+        self.assertEqual(settle(r), {"op": "gather_gems", "count": 10, "x": 2, "y": 5})
         for _ in range(5):
             w.tick += 1
-            self.assertIsNone(settle(r))
-        self.assertEqual(len(fake.messages), 1)
+            settle(r)
+        self.assertEqual(len(fake.messages), 2)  # the level once, then the gather worked instead
+        self.assertIn("goal: beat the next level", fake.messages[0][1]["content"])
+        self.assertIn("goal: gather", fake.messages[1][1]["content"])
 
     def test_a_new_state_asks_again(self):
         w, kb = short_of_a_raft()
@@ -371,8 +405,10 @@ class PlayTest(unittest.TestCase):
         for _ in range(3):
             settle(r)
         about = [m[1]["content"].splitlines()[0] for m in fake.messages]
-        self.assertEqual(about.count("goal: hold what it requires"), 2)  # once, then once more: no loop
-        self.assertEqual(len(about), len(set(about)) + 1)  # each goal the walk moves on to asked once
+        # once, then once more: no loop; and once all is blocked, asked about it with why (A169)
+        self.assertEqual(about.count("goal: hold what it requires"), 3)
+        self.assertIn("every way down is blocked", fake.messages[-1][1]["content"])
+        self.assertEqual(len(about), len(set(about)) + 2)  # each goal the walk moves on to asked once
 
     def test_after_a_block_lifts_the_goal_is_asked_again(self):
         w, kb = short_of_a_raft()

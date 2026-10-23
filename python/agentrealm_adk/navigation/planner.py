@@ -240,7 +240,10 @@ class _Grid:
             base += COSTLY_STEP
         if not safe:
             base += params.priced.get(p, 0) * KNOWN_WALKABLE
-        if p in self.occupied:
+        # An occupant on the one goal of a search changes no route there, so
+        # it is not priced (A169): priced, a goal ringed by occupants spends
+        # the search's budget and leaves a partial path round them.
+        if p in self.occupied and not (goal and self.goal is not None):
             base += OCCUPANT
         return base + self.danger(p)
 

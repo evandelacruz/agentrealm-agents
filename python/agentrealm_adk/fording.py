@@ -38,7 +38,10 @@ Flee's cornered move).
 
 A ``would_strand`` refusal marks the cell the character stood on when it
 was refused as water (``note_would_strand``, ``Memory.water_cells``), so a
-cell the map did not show as water is not tried again.
+cell the map did not show as water is not tried again at once. The mark is
+one refusal's word, and the position it was filed against can be one the
+character had already left: it lapses after ``WATER_MARK_TICKS``, and a cell
+the map shows as ground is then ground again until another refusal (A166).
 """
 
 from __future__ import annotations
@@ -60,6 +63,10 @@ WOULD_STRAND = "would_strand"
 REARM_LOOKAHEAD = 8
 # The cells a ``would_strand`` refusal marked that are kept, newest last.
 WATER_CELLS_KEPT = 64
+# How long a ``would_strand`` mark counts a cell as water (5 s at 10
+# ticks/s): long enough that the refused change is not sent again at once,
+# short enough that a mark filed against a stale position frees the cell.
+WATER_MARK_TICKS = 50
 # Memory a state writes for an ``Arm`` (or ``Use`` after it) it decides:
 # put back when ``ford_queue`` cuts that ``Arm``.
 LOADOUT_MEMORY = ("break_rearm", "break_pending", "solve_rearm", "self_use", "self_use_rearm", "gather_rearm")
@@ -72,15 +79,19 @@ def note_would_strand(w: WorldModel, m: Memory, code: str | None) -> None:
         return
     cells = m.water_cells
     cells.pop((w.map_id, w.pos), None)
-    cells[(w.map_id, w.pos)] = None
+    cells[(w.map_id, w.pos)] = w.tick
     while len(cells) > WATER_CELLS_KEPT:
         del cells[next(iter(cells))]
 
 
 def on_water(w: WorldModel, m: Memory | None, p: Pos) -> bool:
     """Whether ``p`` on the current map is water: the map says so, or a
-    ``would_strand`` refusal came from it (none known without ``m``)."""
-    return w.view.tiles.get(p) == WATER or (m is not None and (w.map_id, p) in m.water_cells)
+    ``would_strand`` refusal came from it within ``WATER_MARK_TICKS`` (none
+    known without ``m``)."""
+    if w.view.tiles.get(p) == WATER:
+        return True
+    marked = None if m is None else m.water_cells.get((w.map_id, p))
+    return marked is not None and w.tick - marked < WATER_MARK_TICKS
 
 
 def loadout_memory(m: Memory) -> dict:

@@ -542,7 +542,7 @@ class WaterCellsOnlyTest(unittest.TestCase):
         m = Memory()
         self.assertTrue(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight, "ground: fought")
         m.engagement = None
-        m.water_cells[(w.map_id, (1, 1))] = None  # a would_strand came from it
+        m.water_cells[(w.map_id, (1, 1))] = w.tick  # a would_strand came from it
         self.assertFalse(sync_engagement(w, m, POLICY, dict(PARAM_DEFAULTS)).fight)
 
 

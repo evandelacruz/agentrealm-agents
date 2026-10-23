@@ -77,7 +77,7 @@ class SafeWalkWithNoProgressTest(unittest.TestCase):
         safe(w, STUCK, OPEN)
         outs = []
         for _ in range(nav_stuck.PROGRESS_TICK_LIMIT // 10 + 1):
-            hit(w)
+            hit(w, npc_id=9)  # from a hostile out of view: the chaser is not closing on us (A165)
             outs.append(dispatch(w, c))
             w.tick += 10
         self.assertEqual(outs[0].reason, f"retreat → safe {STUCK}")

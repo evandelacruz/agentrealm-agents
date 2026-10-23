@@ -340,13 +340,22 @@ def fetch_item(op: GoalOp, ctx: Ctx) -> Act:
 
 
 def from_chest(op: GoalOp, ctx: Ctx) -> Act:
-    """``fetch_item``'s walk to a chest and its withdraw (A167)."""
+    """``fetch_item``'s walk to a chest and its withdraw (A167). A withdraw
+    that leaves the item in the chest (the pack full, or the withdraw
+    refused) backs off a walk to the chest, as a given-up walk is, so the
+    tree passes it over (``goals.walk``'s ``unreachable``) and buys. A chest
+    seen without the item, or gone from its cell, needs no mark: the world's
+    look replaces what it holds, or drops it."""
     w, code, chest_id = ctx.world, op.get("code", ""), op["chest_id"]
     contents = w.chest_contents.get(chest_id)
     if contents is not None:
         if not any(s.code == code for s in contents):
             return Act(None, f"chest {chest_id} holds no {code}", over=True)
         if ctx.started.target == chest_id:
+            chest = w.death_chests.get(chest_id)
+            if chest is not None and ctx.mem is not None:
+                key = nav_stuck.goal_key(FETCH_GOAL, chest.map_id, chest.pos)
+                nav_stuck.remember_give_up(ctx.mem.nav_stuck, key, FETCH_GOAL, w.tick)
             return Act(None, f"withdrew from chest {chest_id}; {code} did not fit", over=True)
         ctx.started.target = chest_id
         return Act([withdraw(chest_id)], f"take {code} back from chest {chest_id}")

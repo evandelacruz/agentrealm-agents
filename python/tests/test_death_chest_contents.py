@@ -3,6 +3,9 @@
 import json
 import unittest
 
+from agentrealm_adk.memory import Memory
+from agentrealm_adk.navigation.stuck import given_up_dests
+
 from agentrealm_adk.chest_sources import SOURCE_TICKS, chest_items, refuse_chest_held, source_for
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
@@ -130,6 +133,12 @@ class ChestBeforeBuyTest(unittest.TestCase):
         self.assertIsNotNone(source_for("bronze_sword", w, 15))  # no rate measured: nothing to weigh, the chest wins
         self.assertIsNotNone(source_for("bronze_sword", w, 15, gems_per_min=0))  # never earned
         self.assertEqual([i.code for i in chest_items(w)], ["bronze_sword"])
+
+    def test_a_buy_goes_through_when_the_chest_was_seen_still_holding_it(self):
+        w = self.chest_at(30)
+        w.death_chests[80].seen = True  # in reach once: Recover took what fit, and this did not
+        kept, refused = refuse_chest_held([{"op": "buy", "code": "bronze_sword"}], w, {"bronze_sword": 15}, gems_per_min=6)
+        self.assertEqual((len(kept), refused), (1, []))
 
     def test_a_buy_goes_through_once_a_walk_to_the_chest_was_given_up(self):
         w = self.chest_at(30)
@@ -274,12 +283,27 @@ class LorraineTest(unittest.TestCase):
         w = self.world()
         w.death_chests[80] = DeathChest(self.MAP, (6, 5), 5, ["raft"])
         w.chest_contents[80] = [InventorySupply(9, "raft")]
-        ctx = Ctx(w, None, None, None, Started.now(w))
+        ctx = Ctx(w, Memory(), None, None, Started.now(w))
         out = act({"op": "fetch_item", "code": "raft", "x": 6, "y": 5, "chest_id": 80}, ctx)
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80}])
         again = act({"op": "fetch_item", "code": "raft", "x": 6, "y": 5, "chest_id": 80}, ctx)
         self.assertTrue(again.over)
         self.assertIn("did not fit", again.why)
+
+    def test_a_withdraw_that_did_not_fit_drops_the_chest_as_a_source(self):
+        from ladder.act import FETCH_GOAL
+
+        w, m = self.world(gems=40), Memory()
+        w.pos = (14, 5)
+        w.death_chests[80] = DeathChest(self.MAP, (15, 5), 5, ["raft"], seen=True)
+        w.chest_contents[80] = [InventorySupply(9, "raft")]
+        self.assertEqual(walk(w, self.kb()).op()["chest_id"], 80)
+        ctx = Ctx(w, m, None, None, Started.now(w))
+        op = {"op": "fetch_item", "code": "raft", "x": 15, "y": 5, "chest_id": 80}
+        act(op, ctx)  # the withdraw; the pack is full, so the raft stays in the chest
+        self.assertIn("did not fit", act(op, ctx).why)
+        unreachable = given_up_dests(m.nav_stuck, w.tick, FETCH_GOAL)
+        self.assertEqual(walk(w, self.kb(), unreachable=unreachable).op(), {"op": "buy", "code": "raft"})
 
 
 if __name__ == "__main__":

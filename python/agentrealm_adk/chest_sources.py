@@ -140,16 +140,19 @@ def refuse_chest_held(
     holds, out of reach, with the walk there no longer than earning its
     price (:func:`source_for`), are left out, each with why: the chest is the
     source ahead of buying (A167). One in reach is the withdraw's to take;
-    one ``unreachable`` or stale lets the buy through."""
+    one ``unreachable`` or stale lets the buy through. So does one seen
+    holding it: it was in reach, where Recover withdraws all that fits, so
+    the item is still there only because it did not fit; the planner weighs
+    it from State (a drop to make room, say)."""
     kept, refused = [], []
     for g in goals:
         code = g.get("code") if g.get("op") == "buy" else None
         item = source_for(code, w, prices.get(code), gems_per_min, unreachable=unreachable) if isinstance(code, str) else None
-        if item is None or in_reach(item, w):
+        if item is None or in_reach(item, w) or item.seen:
             kept.append(g)
             continue
         price = prices.get(code)
-        held = "holds" if item.seen else "is expected to hold (what was carried at the death)"
+        held = "is expected to hold (what was carried at the death)"
         earn_s = None if price is None else earn_seconds(price, gems_per_min)
         if price is None:
             earn = "it has no known price"

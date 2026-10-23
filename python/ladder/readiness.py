@@ -37,7 +37,7 @@ import math
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
-from agentrealm_adk.chest_sources import ChestItem, chest_items, source_for
+from agentrealm_adk.chest_sources import ChestItem, chest_items, is_source, source_for
 from agentrealm_adk.discovery import seen_prices
 from agentrealm_adk.entrance_needs import lying_in_sight, meets, unmet_need
 from agentrealm_adk.equip import hunting_ceiling, weapon_rank
@@ -393,16 +393,16 @@ def missing(
             out.unpriced.append(need)
     lo = best_owned(w, kb)
     budget = risk_budget(level, w, kb, lo)
-    for code in [i.code for i in chest_items(w)]:  # each copy: three potions are three heals
+    # Each copy a chest that is a source holds, once, under its own code: three potions are three heals.
+    for item in chest_items(w):
         if budget.ok:
             break
-        chest = source_for(code, w, sale.get(code), unreachable=unreachable)
-        if chest is None:
+        if not is_source(item, w, sale.get(item.code), unreachable=unreachable):
             continue
-        gain = risk_budget(level, w, kb, _with(lo, code, w, kb)).slack - budget.slack
+        gain = risk_budget(level, w, kb, _with(lo, item.code, w, kb)).slack - budget.slack
         if gain > 0:
-            out.chests.append(ChestTake(chest, RISK_WHY))
-            lo = _with(lo, code, w, kb)
+            out.chests.append(ChestTake(item, RISK_WHY))
+            lo = _with(lo, item.code, w, kb)
             budget = risk_budget(level, w, kb, lo)
     for _ in range(MOST_RISK_BUYS):
         if budget.ok:

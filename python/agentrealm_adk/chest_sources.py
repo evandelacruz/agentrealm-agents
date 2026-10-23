@@ -100,15 +100,28 @@ def source_for(
     against (no price, no rate measured). A chest a walk was given up or
     stalled on (a cell of ``unreachable`` within a step of it), or one
     dropped more than ``SOURCE_TICKS`` ago, is never chosen."""
-    for item in chest_items(w):
-        if item.steps is None or not matches(code, item.code) or w.tick - item.died > SOURCE_TICKS:
-            continue
-        if any(mid == item.map_id and chebyshev(pos, item.pos) <= 1 for mid, pos in unreachable):
-            continue
-        earn = None if price is None else earn_seconds(price, gems_per_min)
-        if earn is None or walk_seconds(w, item.pos) <= earn:
-            return item
-    return None
+    return next(
+        (i for i in chest_items(w) if matches(code, i.code) and is_source(i, w, price, gems_per_min, unreachable)),
+        None,
+    )
+
+
+def is_source(
+    item: ChestItem,
+    w: WorldModel,
+    price: int | None,
+    gems_per_min: float | None = None,
+    unreachable: Collection[tuple[int, Pos]] = (),
+) -> bool:
+    """``item`` is a source ahead of buying at ``price`` (:func:`source_for`'s
+    rule, for one copy in one chest): on this map, fresh, not at a cell of
+    ``unreachable``, and walked to no slower than ``price`` gems are earned."""
+    if item.steps is None or w.tick - item.died > SOURCE_TICKS:
+        return False
+    if any(mid == item.map_id and chebyshev(pos, item.pos) <= 1 for mid, pos in unreachable):
+        return False
+    earn = None if price is None else earn_seconds(price, gems_per_min)
+    return earn is None or walk_seconds(w, item.pos) <= earn
 
 
 def in_reach(item: ChestItem, w: WorldModel) -> bool:

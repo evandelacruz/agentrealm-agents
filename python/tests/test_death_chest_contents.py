@@ -230,6 +230,19 @@ class LorraineTest(unittest.TestCase):
         self.assertEqual(m.buys, [])
         self.assertTrue(all(t.why == readiness.RISK_WHY for t in m.chests))
 
+    def test_only_copies_a_source_chest_holds_count_toward_risk(self):
+        from agentrealm_adk.chest_sources import SOURCE_TICKS
+
+        w = self.world(armed_code="sword", worn_codes={}, held_supplies=[])
+        w.tick = SOURCE_TICKS + 100
+        w.death_chests[80] = DeathChest(self.MAP, (15, 5), w.tick, ["small_potion"])  # fresh
+        w.death_chests[81] = DeathChest(self.MAP, (16, 5), 0, ["large_potion", "large_potion"])  # stale
+        w.death_chests[82] = DeathChest(9, (3, 3), w.tick, ["large_potion"])  # another map
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances[entrance_key(self.MAP, self.DOOR)] = {"level": 1}
+        m = readiness.missing(w, kb, goals.find("level", goals.tree()), unreachable={(self.MAP, (40, 40))})
+        self.assertEqual([(t.item.chest_id, t.item.code) for t in m.chests], [(80, "small_potion")])
+
     def test_a_chest_item_that_closes_no_risk_is_not_taken(self):
         w = self.world()  # geared already: nothing to close
         w.death_chests[80] = DeathChest(self.MAP, (15, 5), 5, ["torch"])

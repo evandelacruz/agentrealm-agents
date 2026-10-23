@@ -16,6 +16,11 @@ asks afresh. A new op goes in ``OPS``.
 A walk keeps off the ground of every known hostile (``hostile_ground.walk_reach``,
 A128) but the ones a fight with which fits her risk budget now
 (``readiness.fits_now``): her one risk function, never a threshold of the walk's.
+
+No op holds in silence (A168): a walk with no step gives its target up for
+the ADK's backoff (``navigation.stuck``, A90) and is over, so the loop moves
+on; an op with more than one target (gather, explore) takes the next-best
+one that has a step first, and is over only once none has.
 """
 
 from __future__ import annotations
@@ -36,7 +41,7 @@ from agentrealm_adk.executor import (
     use_cooldown_ticks,
 )
 from agentrealm_adk.gem_yield import GATHER_BLOCKS, take_raises_gems
-from agentrealm_adk.hostile_ground import off_safe, walk_reach
+from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, hostiles_within, off_safe, walk_reach
 from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import walk_toward
@@ -51,13 +56,18 @@ from agentrealm_adk.travel.ops import travel_op_from_plan_goal
 from agentrealm_adk.travel.resolve import resolve_travel
 from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 
-from .readiness import ORDINARY, fits_now, owned
+from .readiness import ORDINARY, Foes, fits_now, margin_now, owned
 
 # Most cells one walk queue carries; the walk is re-planned once they have run.
 WALK_CELLS = 8
 # The goal a fetch_item's walk runs under: the given-up walks to a death chest
 # the tree reads back (A167).
 FETCH_GOAL = "lorraine:fetch_item"
+# Most targets an op with many (gather, explore) tries in one round before it
+# yields the round; the ones with no step are given up, so the next round
+# tries the next ones.
+TARGETS_TRIED = 6
+GATHER, EXPLORE = "lorraine:gather", "lorraine:explore"
 
 
 @dataclass
@@ -97,11 +107,15 @@ class Ctx:
 
 @dataclass(frozen=True)
 class Act:
-    """One round of an op: the intents to send (None: nothing), why, and whether it is over."""
+    """One round of an op: the intents to send (None: nothing), why, whether
+    it is over, and whether nothing is sent only on a wait the clock clears
+    (``waits``: a weapon cooldown, or her place not read yet). Such a round
+    is no stall and its repeat never ends the op (A168)."""
 
     intents: list[dict] | None
     why: str
     over: bool = False
+    waits: bool = False
 
 
 def act(op: GoalOp, ctx: Ctx) -> Act:
@@ -188,34 +202,41 @@ def use_self() -> dict:
 # The walk every op takes.
 
 
-def walk_sets(ctx: Ctx, toward: Entity | None = None) -> tuple[set[Pos], set[Pos], frozenset[Pos]]:
+def walk_sets(
+    ctx: Ctx, toward: Entity | None = None, passing: tuple[Entity, ...] = ()
+) -> tuple[set[Pos], set[Pos], frozenset[Pos]]:
     """``avoid``, ``costly`` and the hostile ground an op's walk keeps out
     of: every known hostile's (``walk_reach``) but those in view a fight with
-    which fits her margin now (``readiness.fits_now``), and the one the walk
-    goes ``toward`` (a fight's)."""
+    which fits her margin now (``readiness.fits_now``), the one the walk goes
+    ``toward`` (a fight's), and the ones ``passing`` names, whose pass her
+    margin covers together (a gather target beside them)."""
     w, m = ctx.world, ctx.mem
     _, avoid, costly = plan_sets(w, m, ctx.policy, ctx.kb)
     fit = {(e.kind, e.id) for e in w.entities if is_hostile(w, ctx.policy, e) and fits_now(e, w, ctx.kb, ctx.value)}
-    if toward is not None:
-        fit.add((toward.kind, toward.id))
+    fit |= {(e.kind, e.id) for e in (toward, *passing) if e is not None}
     reach = frozenset(off_safe(w, walk_reach(w, ctx.policy, skip=fit)))  # nothing hurts on a safe block (A162)
     return avoid, costly | reach, reach
 
 
-def walk(ctx: Ctx, goal: str, dest: Pos, dest_map: int | None = None, toward: Entity | None = None) -> Act:
+def walk(
+    ctx: Ctx, goal: str, dest: Pos, dest_map: int | None = None, toward: Entity | None = None,
+    passing: tuple[Entity, ...] = (),
+) -> Act:
     """One round of a walk to ``dest`` (on ``dest_map``, this map by
     default): the ADK's guided walk, sent as a paced queue of the path ahead.
-    Nothing to send when no step is found (the stuck ladder takes it from
-    there); over once the walk is given up and backed off. ``toward`` is the
-    hostile a fight walks to, whose ground it does not keep off."""
+    With no step, it waits a round only on a way whose first step is taken
+    (an occupant); else the target is given up for the ADK's backoff
+    (``give_up_walk``) and the walk is over, so no op holds on it (A168).
+    ``toward`` is the hostile a fight walks to and ``passing`` the hostiles
+    a pass is covered for (``walk_sets``), whose ground it does not keep off."""
     w, m = ctx.world, ctx.mem
     if w.pos is None or w.map_id is None:
-        return Act(None, f"{goal}: unplaced")
+        return Act(None, f"{goal}: unplaced", waits=True)
     dest_map = w.map_id if dest_map is None else dest_map
     key = nav_stuck.goal_key(goal, dest_map, dest)
     if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
         return Act(None, f"{goal}: the walk to {dest} was given up", over=True)
-    avoid, costly, reach = walk_sets(ctx, toward)
+    avoid, costly, reach = walk_sets(ctx, toward, passing)
 
     def params():
         return grid_params(ctx.policy, avoid, costly, allow_goal_door=True, m=m, w=w, knowledge=ctx.kb)
@@ -230,8 +251,28 @@ def walk(ctx: Ctx, goal: str, dest: Pos, dest_map: int | None = None, toward: En
         m, w, goal, target, avoid, attempt_plan(m, w, ctx.policy, avoid, costly, ctx.kb), ctx.kb, params=params, reach=reach
     )
     if step is None:
-        return Act(None, f"{goal}: no step toward {dest}")
+        if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
+            return Act(None, f"{goal}: the walk to {dest} was given up", over=True)
+        if m.goal == goal and m.path:
+            return Act(None, f"{goal}: the way to {dest} is taken, waiting")
+        give_up_walk(ctx, goal, key)
+        return Act(None, f"{goal}: no step toward {dest}, given up", over=True)
     return Act(walk_queue(ctx, step), f"{goal} → {dest}")
+
+
+def give_up_walk(ctx: Ctx, goal: str, key: str) -> None:
+    """Give up the walk target ``key`` names (``navigation.stuck.goal_key``)
+    for the ADK's backoff (A90): through its attempt when one is tracked, so
+    its path is dropped and the ``stuck`` signal raised, else the record alone."""
+    m, w = ctx.mem, ctx.world
+    stuck = m.nav_stuck
+    if nav_stuck.is_backed_off(stuck, key, w.tick):
+        return
+    att = next((a for a in stuck.attempts.values() if (a.backoff_key or a.key) == key), None)
+    if att is not None:
+        nav_stuck.give_up(m, w, att, "no_step")
+    else:
+        nav_stuck.remember_give_up(stuck, key, goal, w.tick)
 
 
 def walk_queue(ctx: Ctx, step: Pos) -> list[dict]:
@@ -269,14 +310,15 @@ def stand_by(w: WorldModel, p: Pos, reach: int) -> Pos:
 
 
 def reach_and(
-    ctx: Ctx, goal: str, p: Pos, reach: int, then: Callable[[], list[dict]], why: str, toward: Entity | None = None
+    ctx: Ctx, goal: str, p: Pos, reach: int, then: Callable[[], list[dict]], why: str, toward: Entity | None = None,
+    passing: tuple[Entity, ...] = (),
 ) -> Act:
     """``then``'s intents once ``p`` is within ``reach``, else a walk there."""
     w = ctx.world
     if w.pos is not None and chebyshev(w.pos, p) <= reach:
         intents = then()
-        return Act(intents or None, why if intents else f"{why}: waiting on a cooldown")
-    return walk(ctx, goal, stand_by(w, p, reach), toward=toward)
+        return Act(intents or None, why if intents else f"{why}: waiting on a cooldown", waits=not intents)
+    return walk(ctx, goal, stand_by(w, p, reach), toward=toward, passing=passing)
 
 
 def gained(ctx: Ctx, code: str) -> bool:
@@ -354,8 +396,7 @@ def from_chest(op: GoalOp, ctx: Ctx) -> Act:
         if ctx.started.target == chest_id:
             chest = w.death_chests.get(chest_id)
             if chest is not None and ctx.mem is not None:
-                key = nav_stuck.goal_key(FETCH_GOAL, chest.map_id, chest.pos)
-                nav_stuck.remember_give_up(ctx.mem.nav_stuck, key, FETCH_GOAL, w.tick)
+                give_up_walk(ctx, FETCH_GOAL, nav_stuck.goal_key(FETCH_GOAL, chest.map_id, chest.pos))
             return Act(None, f"withdrew from chest {chest_id}; {code} did not fit", over=True)
         ctx.started.target = chest_id
         return Act([withdraw(chest_id)], f"take {code} back from chest {chest_id}")
@@ -399,24 +440,79 @@ def equip(op: GoalOp, ctx: Ctx) -> Act:
     return Act([remove(up.slot), wear(up.supply_id)] if up.remove_first else [wear(up.supply_id)], f"wear {up.code}")
 
 
+@dataclass(frozen=True)
+class Target:
+    """One place an op with many may work: the cell, the reach it is worked
+    from, what is sent there, why, and the hostiles beside it whose pass her
+    margin covers (``gather_targets``)."""
+
+    cell: Pos
+    reach: int
+    then: Callable[[], list[dict]]
+    why: str
+    foes: tuple[Entity, ...] = ()
+
+
 def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
-    """Until ``count`` gems are held: take a gem in sight, else cut the
-    nearest grass with the cutter ``equip.weapon_to_arm`` picks, else explore
-    the region the op names."""
-    w, m = ctx.world, ctx.mem
+    """Until ``count`` gems are held: work the best gather target that has a
+    step (``gather_targets``), else explore the region the op names; over
+    once neither has (A168)."""
+    w = ctx.world
     count = op.get("count", 0)
     if (w.gems or 0) >= count:
         return Act(None, f"{w.gems} gems held", over=True)
-    gems = [e for e in w.entities if e.kind == "supply" and e.gem_price is None and take_raises_gems(e.code)]
-    if gems and w.pos is not None:
-        gem = min(gems, key=lambda e: (chebyshev(w.pos, e.pos), e.id))
-        return reach_and(ctx, "lorraine:gather", gem.pos, NEAR, lambda: [take(gem.id)], "take a gem")
-    grass = sorted(p for p, b in w.view.tiles.items() if b in GATHER_BLOCKS)
-    grass = [p for p in grass if not nav_stuck.backed_off(m, "lorraine:gather", w.map_id, p, w.tick)]
-    if grass and w.pos is not None:
-        cell = min(grass, key=lambda p: (chebyshev(w.pos, p), p))
-        return reach_and(ctx, "lorraine:gather", cell, weapon_reach(w, ctx.kb), lambda: cut(ctx, cell), f"cut {cell}")
-    return explore_area({k: op[k] for k in ("x", "y", "radius") if k in op}, ctx)
+    a = first_with_a_step(ctx, GATHER, gather_targets(ctx))
+    if a is not None:
+        return a
+    a = explore_area({k: op[k] for k in ("x", "y", "radius") if k in op}, ctx)
+    return a if not a.over else Act(None, f"no gather target has a step ({a.why})", over=True)
+
+
+def gather_targets(ctx: Ctx) -> list[Target]:
+    """Where a gather may work, best first (A168): a gem in sight before
+    grass to cut (with the cutter ``equip.weapon_to_arm`` picks), nearest
+    first, none given up and still backed off. A target with known hostiles
+    beside it (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``)
+    comes after every other, and only when her margin now covers them all
+    (``readiness.margin_now``, A139); its walk then passes their ground."""
+    w, m = ctx.world, ctx.mem
+    if w.pos is None:
+        return []
+    here = w.pos
+    found: list[tuple[int, Pos, Target]] = []
+    for e in w.entities:
+        if e.kind == "supply" and e.gem_price is None and take_raises_gems(e.code):
+            found.append((0, e.pos, Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem")))
+    reach = weapon_reach(w, ctx.kb)
+    for p, b in w.view.tiles.items():
+        if b in GATHER_BLOCKS:
+            found.append((1, p, Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}")))
+    out: list[tuple[tuple, Target]] = []
+    for kind, p, t in found:
+        if nav_stuck.backed_off(m, GATHER, w.map_id, stand_by(w, p, t.reach), w.tick):
+            continue
+        foes = tuple(hostiles_within(w, ctx.policy, p, GATHER_HOSTILE_RADIUS))
+        if foes and not margin_now(Foes(foes, ctx.value), w, ctx.kb).ok:
+            continue
+        if foes:
+            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes)
+        out.append(((bool(foes), kind, chebyshev(here, p), p), t))
+    return [t for _, t in sorted(out, key=lambda x: x[0])]
+
+
+def first_with_a_step(ctx: Ctx, goal: str, targets: list[Target]) -> Act | None:
+    """The first of ``targets`` (best first) that sends something: one within
+    reach is worked, else walked to. Each with no step is given up by its
+    walk (``walk``) and the next tried, up to ``TARGETS_TRIED`` a round. None
+    when none of them is left; a round with no step among those tried says so,
+    and the next round tries the ones after."""
+    for tried, t in enumerate(targets):
+        if tried >= TARGETS_TRIED:
+            return Act(None, f"{goal}: no step toward {targets[0].cell} nor the next {tried - 1} targets, given up")
+        a = reach_and(ctx, goal, t.cell, t.reach, t.then, t.why, passing=t.foes)
+        if not a.over:
+            return a
+    return None
 
 
 def cut(ctx: Ctx, cell: Pos) -> list[dict]:
@@ -459,18 +555,27 @@ def swings(ctx: Ctx, foe: Entity, count: int = 1) -> list[dict]:
 
 def explore_area(op: GoalOp, ctx: Ctx) -> Act:
     """Walk to the nearest frontier cell in the area (``targets.explore_targets``)
-    not given up nor stood on already, kept until reached; over when none is left."""
+    not given up nor stood on already, kept until reached; one with no step
+    is given up and the next nearest taken (A168); over when none is left."""
     w, m, st = ctx.world, ctx.mem, ctx.started
     if w.pos is None:
-        return Act(None, "explore: unplaced")
+        return Act(None, "explore: unplaced", waits=True)
     st.stood.add(w.pos)
     area = {"x": w.pos[0], "y": w.pos[1], "radius": EXPLORE_ANYWHERE, **op}
     cells = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(area, w), w.tick) - st.stood
+    cells = {p for p in cells if not nav_stuck.backed_off(m, EXPLORE, w.map_id, p, w.tick)}
     if st.target not in cells:
-        st.target = min(cells, key=lambda p: (chebyshev(w.pos, p), p)) if cells else None
-    if st.target is None:
-        return Act(None, "nothing left to explore there", over=True)
-    return walk(ctx, "lorraine:explore", st.target)
+        st.target = None
+    order = sorted(cells, key=lambda p: (p != st.target, chebyshev(w.pos, p), p))
+    for tried, p in enumerate(order):
+        if tried >= TARGETS_TRIED:
+            return Act(None, f"{EXPLORE}: no step toward {order[0]} nor the next {tried - 1} frontier cells, given up")
+        a = walk(ctx, EXPLORE, p)
+        if not a.over:
+            st.target = p
+            return a
+    st.target = None
+    return Act(None, "nothing left to explore there", over=True)
 
 
 def fight(op: GoalOp, ctx: Ctx) -> Act:
@@ -479,7 +584,7 @@ def fight(op: GoalOp, ctx: Ctx) -> Act:
     a ``fight_boss`` with no boss in sight walks to its door."""
     w, st = ctx.world, ctx.started
     if w.pos is None:
-        return Act(None, "fight: unplaced")
+        return Act(None, "fight: unplaced", waits=True)
     foe = next((e for e in w.entities if e.kind == "npc" and e.id == st.target), None)
     if foe is None and st.target is not None:
         return Act(None, f"npc {st.target} gone", over=True)

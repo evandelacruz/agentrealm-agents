@@ -26,8 +26,9 @@ or a clue's, ``entrance_needs``, A147) and the gear and heals that would close
 its risk, each priced from a known seller (``sellers.sellers_of``, A131). An
 item one of her death chests on this map holds is taken back from it instead,
 ahead of buying, while the walk there takes no longer than earning its price
-(``chest_sources.source_for``, A167): it is listed under ``chests``, costing
-no gems.
+(``chest_sources.source_for``, A167; she measures no gather rate, so the
+chest wins while it is fresh): it is listed under ``chests``, costing no
+gems.
 """
 
 from __future__ import annotations
@@ -387,12 +388,14 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
             out.unpriced.append(need)
     lo = best_owned(w, kb)
     budget = risk_budget(level, w, kb, lo)
-    for code in sorted({i.code for i in chest_items(w)}):
+    for code in [i.code for i in chest_items(w)]:  # each copy: three potions are three heals
         if budget.ok:
             break
         chest = source_for(code, w, sale.get(code))
+        if chest is None:
+            continue
         gain = risk_budget(level, w, kb, _with(lo, code, w, kb)).slack - budget.slack
-        if chest is not None and gain > 0:
+        if gain > 0:
             out.chests.append(ChestTake(chest, RISK_WHY))
             lo = _with(lo, code, w, kb)
             budget = risk_budget(level, w, kb, lo)

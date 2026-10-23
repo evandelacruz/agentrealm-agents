@@ -3,14 +3,14 @@
 import json
 import unittest
 
-from agentrealm_adk.chest_sources import FIELD_GEMS_PER_MIN, chest_items, refuse_chest_held, source_for
+from agentrealm_adk.chest_sources import SOURCE_TICKS, chest_items, refuse_chest_held, source_for
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
 from agentrealm_adk.travel.knowledge import entrance_key, record_shop_cell
 from agentrealm_adk.world import DeathChest, WorldModel
 from agentrealm_agent.strategist import death_chests_line
-from ladder import goals
+from ladder import goals, readiness
 from ladder.act import Ctx, Started, act
 from ladder.goals import walk
 
@@ -106,8 +106,8 @@ class ChestBeforeBuyTest(unittest.TestCase):
         return w
 
     def test_a_buy_is_left_out_while_the_chest_is_nearer_than_earning_the_gems(self):
-        w = self.chest_at(30)  # 12 s walk; 15 gems take 150 s at the field rate
-        kept, refused = refuse_chest_held([{"op": "buy", "code": "bronze_sword"}], w, {"bronze_sword": 15})
+        w = self.chest_at(30)  # 12 s walk; 15 gems take 150 s at 6 a minute
+        kept, refused = refuse_chest_held([{"op": "buy", "code": "bronze_sword"}], w, {"bronze_sword": 15}, gems_per_min=6)
         self.assertEqual(kept, [])
         self.assertIn("death chest 80", refused[0])
         self.assertIn("expected to hold", refused[0])
@@ -123,11 +123,33 @@ class ChestBeforeBuyTest(unittest.TestCase):
             kept, _ = refuse_chest_held([{"op": "buy", "code": "bronze_sword"}], w, {"bronze_sword": 15})
             self.assertEqual(len(kept), 1)
 
-    def test_the_field_rate_prices_the_gems_until_one_is_measured(self):
-        w = self.chest_at(30 * 60 // 60 * 15)  # 450 steps: 180 s, longer than 150 s
-        self.assertIsNone(source_for("bronze_sword", w, 15))
-        self.assertIsNotNone(source_for("bronze_sword", w, 15, gems_per_min=FIELD_GEMS_PER_MIN / 2))
+    def test_the_walk_is_weighed_against_the_measured_rate_only(self):
+        w = self.chest_at(450)  # 180 s walk
+        self.assertIsNone(source_for("bronze_sword", w, 15, gems_per_min=6))  # 150 s of gathering
+        self.assertIsNotNone(source_for("bronze_sword", w, 15, gems_per_min=3))  # 300 s
+        self.assertIsNotNone(source_for("bronze_sword", w, 15))  # no rate measured: nothing to weigh, the chest wins
+        self.assertIsNotNone(source_for("bronze_sword", w, 15, gems_per_min=0))  # never earned
         self.assertEqual([i.code for i in chest_items(w)], ["bronze_sword"])
+
+    def test_a_buy_goes_through_once_a_walk_to_the_chest_was_given_up(self):
+        w = self.chest_at(30)
+        kept, refused = refuse_chest_held(
+            [{"op": "buy", "code": "bronze_sword"}], w, {"bronze_sword": 15}, unreachable={(MAP, (29, 0))}
+        )
+        self.assertEqual((len(kept), refused), (1, []))
+
+    def test_a_stale_chest_lets_the_buy_through(self):
+        w = self.chest_at(30)
+        w.tick = 5 + SOURCE_TICKS + 1
+        self.assertIsNone(source_for("bronze_sword", w, 15))
+
+    def test_a_given_up_or_stalled_travel_to_the_chest_lets_the_strategist_buy(self):
+        from agentrealm_adk.stalled import StalledOp
+        from agentrealm_agent.strategist import stalled_cells
+
+        w = world(at=(0, 0))
+        stalled = StalledOp({"op": "travel", "to": "point", "x": 30, "y": 0}, "no progress", 1, None, MAP)
+        self.assertEqual(stalled_cells([stalled], w), [(MAP, (30, 0))])
 
 
 class GaryReplyTest(unittest.TestCase):
@@ -173,6 +195,50 @@ class LorraineTest(unittest.TestCase):
     def test_without_the_chest_she_buys(self):
         self.assertEqual(walk(self.world(gems=40), self.kb()).op(), {"op": "buy", "code": "raft"})
 
+    def test_her_risk_node_takes_gear_from_a_death_chest_ahead_of_buying(self):
+        w = self.world(armed_code="sword", worn_codes={}, held_supplies=[])
+        w.death_chests[80] = DeathChest(
+            self.MAP, (15, 5), 5, ["adamant_mail", "adamant_sword", "large_potion", "large_potion", "large_potion"]
+        )
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances[entrance_key(self.MAP, self.DOOR)] = {"level": 1}
+        for i, (code, price) in enumerate({"large_potion": 20, "adamant_sword": 200, "adamant_mail": 150}.items()):
+            record_shop_cell(kb, self.MAP, (20 + i, 20), code, price)
+        turn = walk(w, kb)
+        self.assertEqual(turn.goal.key, "risk")
+        op = turn.op()
+        self.assertEqual((op["op"], op["chest_id"]), ("fetch_item", 80))
+        m = turn.reading.missing(goals.find("level", goals.tree()))
+        self.assertEqual(m.buys, [])
+        self.assertTrue(all(t.why == readiness.RISK_WHY for t in m.chests))
+
+    def test_a_chest_item_that_closes_no_risk_is_not_taken(self):
+        w = self.world()  # geared already: nothing to close
+        w.death_chests[80] = DeathChest(self.MAP, (15, 5), 5, ["torch"])
+        kb = KnowledgeBase.empty("sandbox")
+        kb.entrances[entrance_key(self.MAP, self.DOOR)] = {"level": 1}
+        self.assertEqual(readiness.missing(w, kb, goals.find("level", goals.tree())).chests, [])
+
+    def fetch(self, w, chest=80, cell=(6, 5)):
+        ctx = Ctx(w, None, None, None, Started.now(w))
+        op = {"op": "fetch_item", "code": "raft", "x": cell[0], "y": cell[1], "chest_id": chest}
+        return ctx, op
+
+    def test_fetch_ends_when_the_chest_in_reach_holds_none(self):
+        w = self.world()
+        w.chest_contents[80] = [InventorySupply(9, "torch")]
+        ctx, op = self.fetch(w)
+        out = act(op, ctx)
+        self.assertTrue(out.over)
+        self.assertIn("holds no raft", out.why)
+
+    def test_fetch_ends_when_the_chest_is_not_at_its_cell(self):
+        w = self.world()
+        ctx, op = self.fetch(w)
+        out = act(op, ctx)
+        self.assertTrue(out.over)
+        self.assertIn("not here", out.why)
+
     def test_fetch_from_a_chest_withdraws_once_in_reach(self):
         w = self.world()
         w.death_chests[80] = DeathChest(self.MAP, (6, 5), 5, ["raft"])
@@ -182,6 +248,7 @@ class LorraineTest(unittest.TestCase):
         self.assertEqual(out.intents, [{"verb": "WithdrawFromChest", "chest_id": 80}])
         again = act({"op": "fetch_item", "code": "raft", "x": 6, "y": 5, "chest_id": 80}, ctx)
         self.assertTrue(again.over)
+        self.assertIn("did not fit", again.why)
 
 
 if __name__ == "__main__":

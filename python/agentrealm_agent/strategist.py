@@ -139,7 +139,7 @@ from agentrealm_adk.entrance_needs import CLUE_NEEDS, CLUE_WHY, NEEDS, record_ne
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import entrance_routes
-from agentrealm_adk.gem_yield import RATE_MIN_SECONDS, keep_gather_region, summary as gem_yield_summary
+from agentrealm_adk.gem_yield import NO_GEMS_EARNED, RATE_MIN_SECONDS, keep_gather_region, minutes_at, summary as gem_yield_summary
 from agentrealm_adk.healing import (
     FOOD_REACH,
     POTION_RULE,
@@ -263,7 +263,7 @@ Held items and purchases: State held lists each item the character carries, with
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's, equip's or use_item's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool, and a key for every enter_level or travel through a locked entrance: a locked door uses up its key on every pass, so a plan that comes back through one keeps a spare). Making room never drops a reserved item. A dropped item the world prices costs its price again to pick up, wherever it lies, a shop cell no different, so dropping a bought item forfeits what it cost: the choices name what each drop forfeits. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
-Death chests: a death drops what the character carried into a chest where it fell, which anyone may empty and which otherwise stays; the starting kit is kept, and the character respawns with the starting chest (10 slots): a bigger chest applied before is lost with the death and must be applied again. State death_chests lists every one of the character's death chests still remembered, nearest first: chest_id, cell with distance and direction (or another map), contents, contents_are and in_view. contents lists each item it holds with its price (where one is seen for sale) and needed (why a goal wants it now: a buy on the stack, an upgrade over the best owned for its slot, potions below the stage 2 bar); unknown when what it holds is not known. contents_are is expected (what the character carried when it died, all but the starting kit, which is kept) until the character stands next to it, then seen (what it holds now; someone may have emptied it). To take one back, travel to "point" at its x, y (with its map_id when on another map): once it is in reach the character withdraws all that fits by itself, best items first with a full pack. An item a death chest holds is already the character's: weigh the walk there and the ground on the way against buying it again, its price in gems and the minutes those take. A buy of an item a death chest on this map holds is left out (last_reply_rejected says why) while the walk to the chest takes no longer than earning the item's price (at gather_run gems_per_min, else about 6 gems a minute): travel to the chest first, and buy it only once the chest is seen without it.
+Death chests: a death drops what the character carried into a chest where it fell, which anyone may empty and which otherwise stays; the starting kit is kept, and the character respawns with the starting chest (10 slots): a bigger chest applied before is lost with the death and must be applied again. State death_chests lists every one of the character's death chests still remembered, nearest first: chest_id, cell with distance and direction (or another map), contents, contents_are and in_view. contents lists each item it holds with its price (where one is seen for sale) and needed (why a goal wants it now: a buy on the stack, an upgrade over the best owned for its slot, potions below the stage 2 bar); unknown when what it holds is not known. contents_are is expected (what the character carried when it died, all but the starting kit, which is kept) until the character stands next to it, then seen (what it holds now; someone may have emptied it). To take one back, travel to "point" at its x, y (with its map_id when on another map): once it is in reach the character withdraws all that fits by itself, best items first with a full pack. An item a death chest holds is already the character's: weigh the walk there and the ground on the way against buying it again, its price in gems and the minutes those take. A buy of an item a death chest on this map holds is left out (last_reply_rejected says why) while the walk to the chest takes no longer than earning the item's price at gather_run gems_per_min (with no rate measured, the chest is chosen): travel to the chest first, and buy it only once the chest is seen without it. The buy goes through once a travel to the chest was given up or stalled, or once the chest dropped over 10 minutes ago (anyone may have emptied it): then weigh it yourself.
 
 Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage a second wins (a swing's damage over the weapon's attack cooldown, cooldown_ms under held: a mallet hits harder than a sword of its tier but swings 1.3 s apart, not 1 s); with no ceiling known, damage a second alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
 
@@ -283,7 +283,6 @@ Examples:
 READY_HEALTH_FRACTION = 0.8
 READY_POTIONS = 3
 # A check's minutes while the gather's rate shows 0 gems a minute (A121).
-NO_GEMS_EARNED = "never at gems_per_min 0"
 
 PROGRESSION = f"""# Progression
 
@@ -1009,6 +1008,18 @@ def chest_item_need(
     return None
 
 
+def stalled_cells(stalled_ops: Collection[StalledOp], w: WorldModel) -> list[tuple[int, Pos]]:
+    """The cells a stalled op with an x, y was walking to, on its map (A167:
+    a death chest there is no source the buy refusal picks)."""
+    out = []
+    for s in stalled_ops:
+        x, y = s.target.get("x"), s.target.get("y")
+        map_id = s.target.get("map_id", s.map_id if s.map_id is not None else w.map_id)
+        if isinstance(x, int) and isinstance(y, int) and isinstance(map_id, int):
+            out.append((map_id, (x, y)))
+    return out
+
+
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
     """Every item seen for sale (``items`` rows with a ``gem_price``, and
     priced supplies in sight), cheapest first, against the gems held."""
@@ -1243,17 +1254,6 @@ def cost_to_close(
             row["minutes"] = minutes
         rows[check] = row
     return rows
-
-
-def minutes_at(gems_short: int, gems_per_min: float | None) -> float | str | None:
-    """The minutes ``gems_short`` takes at the current gather's gems a minute
-    (A121, A124): None with no rate measured, and ``NO_GEMS_EARNED`` while the
-    rate shown is 0 and gems are still short."""
-    if gems_per_min is None:
-        return None
-    if gems_per_min > 0:
-        return round(gems_short / gems_per_min, 1)
-    return NO_GEMS_EARNED if gems_short else 0.0
 
 
 def health_to_close(
@@ -1799,7 +1799,9 @@ class Strategist:
             record["no_seller_refused"] = unsold
             self.rejected = [*self.rejected, *unsold]
         rate = runner.gem_cuts.run_counts(runner.world.tick, runner.tick_hz).get("gems_per_min")
-        goals, in_chest = refuse_chest_held(goals, runner.world, known_prices(runner.world, runner.knowledge), rate)
+        # A chest a travel was given up or stalled on is no source the rule picks: the planner weighs it.
+        unreachable = {*given_up, *stalled_cells(runner.mem.stalled_ops, runner.world)}
+        goals, in_chest = refuse_chest_held(goals, runner.world, known_prices(runner.world, runner.knowledge), rate, unreachable)
         if in_chest:
             # A death chest of ours holding the item is its source ahead of buying (A167).
             record["chest_held_refused"] = in_chest

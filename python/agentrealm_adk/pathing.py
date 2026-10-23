@@ -704,12 +704,42 @@ def _walk(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list
     return next_step(w, avoid, path)
 
 
-def _wait(m: Memory, att: NavAttempt, path: list[Pos]) -> None:
-    """A route exists but its first step is taken (an occupant, A14): no move.
+# A way round the occupants on a walk's next step is taken over waiting for
+# them when it is at most this many cells longer (A169).
+ROUND_OCCUPANTS_CELLS = 8
 
-    The level is not failed yet; its window runs out if the way stays shut.
+
+def held_by_occupant(w: WorldModel, avoid: set[Pos], path: list[Pos] | None) -> bool:
+    """The path's first step is ground she could stand on but for an occupant
+    on it (a character, an NPC): it clears when they move (A169)."""
+    prefix = known_prefix(path or [], w)
+    if not prefix or w.pos is None:
+        return False
+    p = prefix[0]
+    if p in avoid or p not in w.occupied() or chebyshev(w.pos, p) > w.movement:
+        return False
+    return w.view.tiles.get(p) in DOORS or w.walkable(p)
+
+
+def _wait(m: Memory, w: WorldModel, att: NavAttempt, avoid: set[Pos], path: list[Pos], grid: CostGridParams) -> Pos | None:
+    """A route exists but its first step is taken (A14).
+
+    When occupants hold it (A169), a way round them at most
+    ``ROUND_OCCUPANTS_CELLS`` longer is walked; else the walk waits for them
+    to move, and the wait never fails its window (``stuck.wait_on_occupants``):
+    occupants move, so only terrain makes a target unreachable. Any other
+    step not open: no move; the level's window runs out if the way stays shut.
     """
     m.path, m.goal = path, att.goal
+    if not held_by_occupant(w, avoid, path):
+        return None
+    clear = dataclasses.replace(grid, avoid=set(grid.avoid) | (w.occupied() - {att.target}))
+    around = cost_path(w, att.target, clear)
+    if around and len(around) <= len(path) + ROUND_OCCUPANTS_CELLS and next_step(w, avoid, around):
+        m.path = around
+        nav_stuck.observe(att, w, around, nav_stuck.corridor_for(m, w, att))
+        return next_step(w, avoid, around)
+    nav_stuck.wait_on_occupants(att, w.tick)
     return None
 
 
@@ -721,6 +751,8 @@ def escalation_step(
     plan: AttemptPlan,
     reason: str | None,
     knowledge: KnowledgeBase | None = None,
+    *,
+    params: Callable[[], CostGridParams] | None = None,
 ) -> Pos | None:
     """Climb the A15 ladder from a failed window (``reason``), or carry on a reveal.
 
@@ -745,7 +777,7 @@ def escalation_step(
                 nav_stuck.walk_again(att, w, nav_stuck.ALT_ROUTE)
                 return _walk(m, w, att, avoid, found)
             if found:
-                return _wait(m, att, found)
+                return _wait(m, w, att, avoid, found, _walk_grid(params, avoid))
             if not nav_stuck.escalate(m, w, att, "no_path"):
                 return None
             continue
@@ -780,7 +812,7 @@ def escalation_step(
             if next_step(w, avoid, found):
                 return _walk(m, w, att, avoid, found)
             if found:
-                return _wait(m, att, found)
+                return _wait(m, w, att, avoid, found, _walk_grid(params, avoid))
             reason = "no_path"
 
 
@@ -852,7 +884,7 @@ def guided_step(
             nav_stuck.observe(att, w, found, nav_stuck.corridor_for(m, w, att))
             return next_step(w, avoid, found)
         if found:
-            return _wait(m, att, found)
+            return _wait(m, w, att, avoid, found, _walk_grid(params, avoid))
         reason = "no_path"
     barred: list[int] = []
 
@@ -863,7 +895,7 @@ def guided_step(
             barred.append(a.level)
         return found
 
-    step = escalation_step(m, w, att, avoid, held if reach else plan, reason, knowledge)
+    step = escalation_step(m, w, att, avoid, held if reach else plan, reason, knowledge, params=params)
     if barred or (step is not None and enters_reach(w, [step], reach, leg.target)):
         return _hold_for_reach(m, att, w.tick)  # a level's plan, or a reveal step, into the reach
     return step

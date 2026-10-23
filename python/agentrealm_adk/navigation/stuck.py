@@ -24,6 +24,15 @@ progress window, so a level is left only when its own window fails:
 - Step 5: give up, back off ``BACKOFF_BASE_TICKS * 2**n`` and queue a strategist
   ``stuck`` signal.
 
+Occupants are no obstacle (A169): a plan whose first step is held by a
+character or an NPC goes round them when a way round is near
+(``pathing.guided_step``), else waits for them to move
+(``wait_on_occupants``). The time spent waiting never counts toward a
+window's time, so no level fails and no target is given up while only
+occupants stand in the way; how long to wait (``OCCUPANT_WAIT_TICKS``) is
+the caller's to read (``occupant_wait``). Only terrain makes a target
+unreachable.
+
 A walk must make net progress (A125): each level's window counts progress
 only when the plan's measure falls below the lowest the walk has had since
 it was taken up (``NavAttempt.net_best``), not just below that level's own.
@@ -90,6 +99,12 @@ RESET_PROGRESS_CELLS = 5
 # Escalation step 5: exponential backoff before retrying the goal (§4.5).
 BACKOFF_BASE_TICKS = 300
 
+# Longest a walk waits for occupants (characters, NPCs) to clear its way
+# before its caller lets the walk go (A169), 15 s at 10 ticks/s. Occupants
+# move, so the wait never fails a window and never gives the target up:
+# only terrain makes a target unreachable.
+OCCUPANT_WAIT_TICKS = 150
+
 # Lapsed give-ups kept for their power beyond this many are forgotten,
 # oldest first. A give-up still backed off is never forgotten.
 GIVE_UPS_KEPT = 64
@@ -149,6 +164,9 @@ class NavAttempt:
     # Net progress (A125): the lowest measure since the walk was taken up or
     # found a new way, across every level. A window makes progress only below it.
     net_best: int | None = None
+    # The tick the walk began waiting for occupants to clear its next step
+    # (A169); None while it walks. The wait never counts toward the window.
+    occupied_since: int | None = None
 
 
 class Leg(NamedTuple):
@@ -295,6 +313,7 @@ def track(m: Memory, w: WorldModel, goal: str, target: Pos | Leg) -> NavAttempt 
         att.goal = goal
         att.window_tick = w.tick  # only time spent pursuing it counts
         att.net_best = None  # nor its bar: another walk may have led it away
+        att.occupied_since = None  # nor a wait from when it was last pursued
     m.nav_stuck.active = att.key
     return att
 
@@ -466,8 +485,13 @@ def corridor_for(m: Memory, w: WorldModel, att: NavAttempt) -> NavSearchState | 
 
 def observe(att: NavAttempt, w: WorldModel, path: list[Pos] | None, corridor: NavSearchState | None = None) -> None:
     """Progress is the remaining measure falling below the walk's net best (A125).
+    A walk walked again ends its wait on occupants, and its window moves on
+    by the wait's length, so the wait never counted (A169).
 
     ``corridor`` (``corridor_for``) prices the rest past the path's end."""
+    if att.occupied_since is not None:
+        att.window_tick = min(w.tick, att.window_tick + max(0, w.tick - att.occupied_since))
+        att.occupied_since = None
     _note_position(att, w)
     cost = measure(path, att.target, corridor)
     if cost is None:
@@ -501,11 +525,29 @@ def stuck_reason(att: NavAttempt, tick: int) -> str | None:
         return "rejections"
     if att.moves >= PROGRESS_MOVE_LIMIT:
         return "moves"
-    if tick - att.window_tick >= PROGRESS_TICK_LIMIT:
+    # Time waiting on occupants is not the walk's (A169): the clock stops at the wait.
+    since = att.occupied_since if att.occupied_since is not None else tick
+    if since - att.window_tick >= PROGRESS_TICK_LIMIT:
         return "time"
     if _oscillating(att.recent):
         return "oscillation"
     return None
+
+
+def wait_on_occupants(att: NavAttempt, tick: int) -> None:
+    """The walk's next step is held by an occupant and no way round is near:
+    it waits, from the first tick it found the step held (A169)."""
+    if att.occupied_since is None:
+        att.occupied_since = tick
+
+
+def occupant_wait(m: Memory, w: WorldModel, goal: str) -> int | None:
+    """Ticks ``goal``'s walk has waited for occupants to clear its next step,
+    or None when it is not waiting on them (A169)."""
+    att = active(m, w)
+    if att is None or att.goal != goal or att.occupied_since is None:
+        return None
+    return max(0, w.tick - att.occupied_since)
 
 
 def on_step(m: Memory, w: WorldModel) -> None:
@@ -578,6 +620,7 @@ def hold(m: Memory, att: NavAttempt, tick: int) -> None:
 
 def _fresh_window(att: NavAttempt, tick: int) -> None:
     att.best, att.moves, att.reject_streak, att.window_tick = None, 0, 0, tick
+    att.occupied_since = None
     att.arm_decisions = 0
     att.recent.clear()
 

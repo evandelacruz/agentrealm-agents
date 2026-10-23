@@ -20,7 +20,8 @@ A128) but the ones a fight with which fits her risk budget now
 No op holds in silence (A168): a walk with no step gives its target up for
 the ADK's backoff (``navigation.stuck``, A90) and is over, so the loop moves
 on; an op with more than one target (gather, explore) takes the next-best
-one that has a step first, and is over only once none has.
+one that has a step first, and is over only once none has. Occupants on the
+way are no reason to give a walk up (A169): only terrain is.
 """
 
 from __future__ import annotations
@@ -106,8 +107,8 @@ class Ctx:
 class Act:
     """One round of an op: the intents to send (None: nothing), why, whether
     it is over, and whether nothing is sent only on a wait the clock clears
-    (``waits``: a weapon cooldown, or her place not read yet). Such a round
-    is no stall and its repeat never ends the op (A168)."""
+    (``waits``: a weapon cooldown, her place not read yet, or occupants on
+    her way, A169). Such a round is no stall and its repeat never ends the op (A168)."""
 
     intents: list[dict] | None
     why: str
@@ -216,8 +217,12 @@ def walk(
 ) -> Act:
     """One round of a walk to ``dest`` (on ``dest_map``, this map by
     default): the ADK's guided walk, sent as a paced queue of the path ahead.
-    With no step, it waits a round only on a way whose first step is taken
-    (an occupant); else the target is given up for the ADK's backoff
+    Occupants on the way are no obstacle (A169): the walk goes round them,
+    else waits for them to move, a wait the clock clears (``Act.waits``) up
+    to ``stuck.OCCUPANT_WAIT_TICKS``, after which the walk is over but its
+    target is not given up: only terrain makes a target unreachable. With
+    no step otherwise, it waits a round on a way whose first step is not
+    open yet; else the target is given up for the ADK's backoff
     (``give_up_walk``) and the walk is over, so no op holds on it (A168).
     ``toward`` is the hostile a fight walks to and ``passing`` the hostiles
     a pass is covered for (``walk_sets``), whose ground it does not keep off."""
@@ -245,6 +250,11 @@ def walk(
     if step is None:
         if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
             return Act(None, f"{goal}: the walk to {dest} was given up", over=True)
+        held = nav_stuck.occupant_wait(m, w, goal)
+        if held is not None and held < nav_stuck.OCCUPANT_WAIT_TICKS:
+            return Act(None, f"{goal}: the way to {dest} is held by occupants, waiting", waits=True)
+        if held is not None:
+            return Act(None, f"{goal}: the way to {dest} stayed held by occupants for {held} ticks", over=True)
         if m.goal == goal and m.path:
             return Act(None, f"{goal}: the way to {dest} is taken, waiting")
         give_up_walk(ctx, goal, key)
@@ -294,11 +304,20 @@ def walk_queue(ctx: Ctx, step: Pos) -> list[dict]:
 
 def stand_by(w: WorldModel, p: Pos, reach: int) -> Pos:
     """Where to walk to act on ``p`` within ``reach``: ``p`` itself when it
-    can be stood on, else its nearest open neighbour (a shelf, an NPC)."""
-    if reach == 0 or (w.walkable(p) and p not in w.occupied() and p not in w.for_sale()):
+    can be stood on, else the free cell within ``reach`` of it nearest her
+    (a shelf, a seller, A169: a person is reached by interaction range, never
+    by standing on their cell). With every such cell held, ``p`` itself: the
+    walk then waits on the occupants (``walk``)."""
+    held = w.occupied() | w.for_sale()
+    if reach == 0 or (w.walkable(p) and p not in held):
         return p
-    near = w.open_neighbours(p)
-    return min(near, key=lambda n: (chebyshev(n, w.pos), n)) if near and w.pos is not None else p
+    if w.pos is None:
+        return p
+    near = [
+        (p[0] + dx, p[1] + dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1) if dx or dy
+    ]
+    free = [n for n in near if w.walkable(n) and n not in held]
+    return min(free, key=lambda n: (chebyshev(n, w.pos), n)) if free else p
 
 
 def reach_and(

@@ -175,7 +175,8 @@ class RevealTest(unittest.TestCase):
         )
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
 
-    def test_occupied_first_step_waits_out_the_window(self):
+    def test_an_occupied_first_step_waits_and_never_fails_the_window(self):
+        """Occupants move (A169): waiting on one is no failed level, however long."""
         w = grid(["#####", "....."], at=(0, 1))
         w.entities = [Entity("character", 5, (1, 1))]
         m = Memory()
@@ -183,9 +184,36 @@ class RevealTest(unittest.TestCase):
         self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
         att = nav_stuck.active(m, w)
         self.assertEqual(att.level, nav_stuck.WALK, "a taken cell is not a failed level")
-        w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+        w.tick += 3 * nav_stuck.PROGRESS_TICK_LIMIT
         self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
-        self.assertEqual((att.level, att.reasons), (nav_stuck.CAUTIOUS, ["time"]))
+        self.assertEqual((att.level, att.reasons), (nav_stuck.WALK, []))
+        self.assertEqual(nav_stuck.occupant_wait(m, w, "goto"), 3 * nav_stuck.PROGRESS_TICK_LIMIT)
+        self.assertNotIn(att.key, m.nav_stuck.given_up)
+        w.entities = []  # the occupant moved on: the walk goes, and the wait never counted
+        self.assertEqual(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path), (1, 1))
+        self.assertIsNone(nav_stuck.occupant_wait(m, w, "goto"))
+        self.assertIsNone(nav_stuck.stuck_reason(att, w.tick))
+
+    def test_a_way_round_an_occupant_near_as_short_is_walked(self):
+        w = grid([".....", ".....", "....."], at=(0, 1))
+        w.entities = [Entity("npc", 5, (1, 1))]
+        m = Memory()
+        path = [(1, 1), (2, 1), (3, 1)]
+        step = guided_step(m, w, "goto", (3, 1), set(), lambda _a: path)
+        self.assertIn(step, [(1, 0), (1, 2)])  # round the NPC, not a wait on it
+        self.assertIsNone(nav_stuck.occupant_wait(m, w, "goto"))
+
+    def test_a_way_shut_by_terrain_is_still_given_up(self):
+        """Only terrain makes a target unreachable (A169): with no route at all the ladder runs to its give-up."""
+        w = grid(["#####", "..#..", "#####"], at=(0, 1))
+        w.entities = [Entity("npc", 5, (1, 1))]  # an occupant beside the wall changes nothing
+        m = Memory()
+        for _ in range(12):
+            guided_step(m, w, "goto", (4, 1), set(), lambda _a: None)
+            w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+            if nav_stuck.backed_off(m, "goto", w.map_id, (4, 1), w.tick):
+                break
+        self.assertTrue(nav_stuck.backed_off(m, "goto", w.map_id, (4, 1), w.tick))
 
 
 class BreakResetTest(unittest.TestCase):

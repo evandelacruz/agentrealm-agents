@@ -21,8 +21,14 @@ unmet need; ``gems N``, lifted once N gems are held; or ``ticks N``, a
 shorter expiry. An ``until`` already met when the ``cannot`` comes (``gems
 N`` with N held, ``already_met``) is no wait: the block holds to its expiry
 and the caller asks once more, saying so. Where she stands, her health and the readiness text change
-every step or hit, so they are never watched. Anything else is dropped, and
-the block holds to its expiry (``lift_changed``).
+every step or hit, so no ``until`` names them. Anything else is dropped, and
+the block holds to its expiry.
+
+Whatever ``until`` says, a blocked goal is retried once its blocker can
+have changed (A169, ``lift_changed``): the state the planner saw changed
+(``seen``: the region she stands in, what she carries, her health), or the
+backoff of a walk given up for it ended (``Block.retry_at``); the next walk
+asks again.
 
 The call itself is the ADK's (``agentrealm_adk.llm``): the provider, the
 call budget and backoff Gary's planner has, and its reply parsing.
@@ -68,6 +74,8 @@ if TYPE_CHECKING:
 # The state lines a ``cannot`` may wait on (``watch_lines``), and the two with a number.
 UNTIL_LINES = ("held", "levels_cleared", "sellers", "entrance_needs")
 GEMS, TICKS = "gems", "ticks"
+# The side of the square a region is (``seen``): a block is retried once she stands in another.
+REGION_CELLS = 16
 
 CONTRACT = """# The question
 
@@ -103,6 +111,14 @@ def watch_lines(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, str]:
         "sellers": ", ".join(sorted(codes_with_sellers(w, kb, sold_codes()))),
         "entrance_needs": r.need_of_next_level(w, kb) or "",
     }
+
+
+def seen(w: WorldModel) -> tuple:
+    """The state the planner saw, as a block retries on it (A169): the
+    region she stands in, what she carries, and her health."""
+    where = (w.map_id, w.pos[0] // REGION_CELLS, w.pos[1] // REGION_CELLS) if w.pos is not None else None
+    carried = tuple(sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values()))
+    return (where, carried, w.health)
 
 
 def question_prefix(reference_sections: str = "") -> str:
@@ -183,10 +199,13 @@ def already_met(reply: Reply, w: WorldModel) -> bool:
 ALREADY_MET = "your last answer was cannot until {until}, which is already true; answer again"
 
 
-def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading) -> GoalOp | None:
+def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, retry_at: int | None = None) -> GoalOp | None:
     """Carry a reply out on the tree: an op is returned to run; a ``cannot``
     blocks the node with its reason and what it waits on (``UNTIL_LINES``,
-    ``gems N``, ``ticks N``); anything else it names is dropped."""
+    ``gems N``, ``ticks N``); anything else it names is dropped. The block
+    is retried as every block is (``lift_changed``): on the state the
+    planner saw (``seen``), and at ``retry_at``, when a walk given up for
+    the node may be walked again."""
     if reply.op is not None:
         return reply.op
     name, _, arg = reply.until.partition(" ")
@@ -197,7 +216,7 @@ def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading) -> GoalOp | No
         named, was = GEMS, arg
     elif name == TICKS and _count(arg) is not None:
         ticks = min(BLOCK_TICKS, _count(arg))
-    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was)
+    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world), retry_at=retry_at)
     return None
 
 
@@ -208,14 +227,22 @@ def lifts(block: Block, w: WorldModel, lines: dict[str, str]) -> bool:
     return block.named in lines and lines[block.named] != block.was
 
 
+def may_have_changed(block: Block, w: WorldModel) -> bool:
+    """Whether what blocked it can have changed (A169): a walk given up for
+    it may be walked again, or the state the planner saw is not the state now."""
+    if block.retry_at is not None and w.tick >= block.retry_at:
+        return True
+    return bool(block.seen) and block.seen != seen(w)
+
+
 def lift_changed(blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None) -> list[str]:
-    """Lift every block whose awaited state has come; the keys lifted."""
+    """Lift every block whose awaited state has come, or whose blocker can
+    have changed (``may_have_changed``); the keys lifted."""
     lifted, lines = [], None
     for key, block in list(blocks.items()):
-        if not block.named:
-            continue
-        lines = lines if lines is not None else watch_lines(world, kb)
-        if lifts(block, world, lines):
+        if block.named:
+            lines = lines if lines is not None else watch_lines(world, kb)
+        if (block.named and lifts(block, world, lines)) or may_have_changed(block, world):
             blocks.lift(key)
             lifted.append(key)
     return lifted

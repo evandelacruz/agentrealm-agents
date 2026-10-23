@@ -210,6 +210,18 @@ class One:
         return [self.foe]
 
 
+@dataclass(frozen=True)
+class Foes:
+    """Some hostiles together, valued as the goal she works: what a walk past
+    the ones beside a gather target prices their pass by (A168)."""
+
+    hostiles: tuple[Entity, ...]
+    value: str = ORDINARY
+
+    def foes(self, world: WorldModel, kb: KnowledgeBase | None) -> list[Entity]:
+        return list(self.hostiles)
+
+
 def fits_now(foe: Entity, world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> bool:
     """A fight with ``foe`` alone fits the margin now: a walk may cross its ground."""
     return margin_now(One(foe, value), world, kb).ok

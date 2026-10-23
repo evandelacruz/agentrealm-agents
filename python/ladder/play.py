@@ -23,8 +23,9 @@ owed, else a round trip (``POST tick``). Each round trip:
    is not run again for that goal, and the tree is asked afresh.
 5. **No silent hold** (A168): an op that sends nothing the same way two
    rounds in a row is over. Every round the op sends nothing and no reflex
-   holds is a stall; ``STALL_ROUNDS`` of them in a row block the goal with
-   why, and the next walk asks the planner once, saying so.
+   holds is a stall, but for one with the question about the goal still
+   out; ``STALL_ROUNDS`` of them in a row block the goal with why, and the
+   next walk asks the planner once, saying so.
 
 Every send, a reflex's or an op's, goes through the one water gate
 (``fording.ford_gate``, A133), as Gary's do.
@@ -270,11 +271,14 @@ class LadderRunner:
         """The round's decision (``choose``), watched for stalls (A168): a
         round the op sent nothing and no reflex held counts one, any other
         round ends the run of them, and ``STALL_ROUNDS`` in a row block the
-        goal (``stalled``)."""
+        goal (``stalled``). A round with the question about the turn's goal
+        still out is not counted, so a slow reply is never thrown away."""
         d = self.choose()
         if not d.stalled:
             self.stalls = 0
             return d
+        if self.asking_about_goal():
+            return d  # waiting on the planner is no stall: its answer may be the op
         self.stalls += 1
         if self.stalls >= STALL_ROUNDS:
             self.stalled(d.why)
@@ -316,6 +320,11 @@ class LadderRunner:
             self.end_op(a.why)
             op = self.goal_op()
         return Decision(None, "no op to work", "tree", stalled=self.turn is not None and self.turn.goal is not None)
+
+    def asking_about_goal(self) -> bool:
+        """The question about the turn's goal is out and not yet taken up."""
+        goal = self.turn.goal if self.turn is not None else None
+        return goal is not None and self.call is not None and self.call.node.key == goal.key
 
     def round_record(self, d: Decision) -> dict:
         """What a tick record names besides its intents (A168): the tree's

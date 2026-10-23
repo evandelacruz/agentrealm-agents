@@ -16,7 +16,7 @@ from ladder.act import Act
 from ladder.ask import Planner
 from ladder.play import STALL_ROUNDS, LadderRunner
 from tests.test_ladder_act import ctx, nearer, open_ground, short
-from tests.test_ladder_ask import FakeLLM, Clock
+from tests.test_ladder_ask import Clock, FakeLLM, HeldLLM
 from tests.test_ladder_goals import MAP, geared, hostile, knowledge, world
 from tests.test_starter_agent import FakeClient
 
@@ -182,6 +182,22 @@ class LoopHoldTest(unittest.TestCase):
         self.assertIn("goal: gather", fake.messages[-1][-1]["content"])
         self.assertNotIn("gather", r.blocks)
         self.assertEqual(r.op, {"op": "gather_gems", "count": 30, "x": 2, "y": 5})
+
+    def test_rounds_waiting_on_a_slow_reply_are_no_stalls_and_the_reply_is_taken(self):
+        fake = HeldLLM('{"op": {"op": "gather_gems", "count": 30, "x": 2, "y": 5}}')
+        self.addCleanup(fake.go.set)
+        r = self.gathering(Planner(client=fake, clock=Clock(), tokens_per_min=10**9))
+        self.assertEqual(r.call.node.key, "gather")  # the question is out, and not back
+        whys = iter(f"nothing sent, try {i}" for i in range(100))
+        with mock.patch.object(play, "act", side_effect=lambda op, c: Act(None, next(whys))):
+            for _ in range(STALL_ROUNDS + 2):
+                self.assertTrue(r.decide().stalled)
+        self.assertEqual(r.stalls, 0)
+        self.assertNotIn("gather", r.blocks)
+        fake.go.set()
+        r.call.wait()
+        r.goal_op()
+        self.assertEqual(r.op, {"op": "gather_gems", "count": 30, "x": 2, "y": 5})  # the late reply is the op
 
     def test_a_round_that_sends_ends_the_run_of_stalls(self):
         r = self.gathering()

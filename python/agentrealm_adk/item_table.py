@@ -51,6 +51,10 @@ Pos = tuple[int, int]
 # chest (10)"). The snapshot serves no capacity field, and how a bigger chest
 # changes it is unknown (docs/GAME_NOTES.md open questions).
 DEFAULT_CARRY_CAPACITY = 10
+# The Olympuff starting kit's pocket knife cannot change hands (Manual §5.3,
+# §11): kept through a death, never dropped. The Supplies reference does not
+# say which supplies are transferable, so this stays a seed.
+NON_TRANSFERABLE = frozenset({"pocket_knife"})
 
 
 class FragmentMeta:

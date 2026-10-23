@@ -149,6 +149,11 @@ def take(supply_id: int) -> dict:
     return {"verb": "Take", "supply_id": supply_id}
 
 
+def withdraw(chest_id: int) -> dict:
+    """Everything that fits out of a ground chest on or next to her block."""
+    return {"verb": "WithdrawFromChest", "chest_id": chest_id}
+
+
 def arm(supply_id: int) -> dict:
     return {"verb": "Arm", "supply_id": supply_id}
 
@@ -312,10 +317,15 @@ def enter_level(op: GoalOp, ctx: Ctx) -> Act:
 
 
 def fetch_item(op: GoalOp, ctx: Ctx) -> Act:
-    """Walk to the item and ``Take`` it; over once it is hers, or gone from sight."""
+    """Walk to the item and ``Take`` it; over once it is hers, or gone from
+    sight. With a ``chest_id``, from that chest (A167): walk next to it and
+    withdraw all that fits; over once the item is hers, or the chest is in
+    reach without it."""
     w, code = ctx.world, op.get("code", "")
     if gained(ctx, code):
         return Act(None, f"took {code}", over=True)
+    if _int(op.get("chest_id")):
+        return from_chest(op, ctx)
     cell = (op["x"], op["y"]) if isinstance(op.get("x"), int) and isinstance(op.get("y"), int) else None
     found = [e for e in lying(w, code, priced=False) if cell is None or e.pos == cell] or lying(w, code, priced=False)
     if not found:
@@ -324,6 +334,23 @@ def fetch_item(op: GoalOp, ctx: Ctx) -> Act:
         return Act(None, f"no {code} in sight", over=True)
     item = found[0]
     return reach_and(ctx, "lorraine:fetch_item", item.pos, NEAR, lambda: [take(item.id)], f"take {code}")
+
+
+def from_chest(op: GoalOp, ctx: Ctx) -> Act:
+    """``fetch_item``'s walk to a chest and its withdraw (A167)."""
+    w, code, chest_id = ctx.world, op.get("code", ""), op["chest_id"]
+    contents = w.chest_contents.get(chest_id)
+    if contents is not None:
+        if not any(s.code == code for s in contents):
+            return Act(None, f"chest {chest_id} holds no {code}", over=True)
+        if ctx.started.target == chest_id:
+            return Act(None, f"withdrew from chest {chest_id}; {code} did not fit", over=True)
+        ctx.started.target = chest_id
+        return Act([withdraw(chest_id)], f"take {code} back from chest {chest_id}")
+    cell = (op["x"], op["y"]) if _int(op.get("x")) and _int(op.get("y")) else None
+    if cell is None or (w.pos is not None and chebyshev(w.pos, cell) <= NEAR):
+        return Act(None, f"chest {chest_id} is not here", over=True)
+    return walk(ctx, "lorraine:fetch_item", stand_by(w, cell, NEAR))
 
 
 def buy(op: GoalOp, ctx: Ctx) -> Act:

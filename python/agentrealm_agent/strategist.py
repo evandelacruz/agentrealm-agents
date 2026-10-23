@@ -133,6 +133,7 @@ from agentrealm_adk.travel.resolve import given_up_travel, travel_dest, travel_g
 from agentrealm_adk.travel.strength import StrengthBracket
 from agentrealm_adk.discovery import DISCOVERY_GAP_S, Discoveries, seen_prices
 from agentrealm_adk.sellers import codes_with_sellers, refuse_unsold, sellers_line
+from agentrealm_adk.chest_sources import refuse_chest_held
 from agentrealm_adk.level_order import CLEARED, TARGET, UNKNOWN, entrance_level, entrance_rank, level_pending, order_line, refuse_barred
 from agentrealm_adk.entrance_needs import CLUE_NEEDS, CLUE_WHY, NEEDS, record_needs, refuse_unmet, unmet_need
 from agentrealm_adk.knowledge_base import KnowledgeBase
@@ -262,7 +263,7 @@ Held items and purchases: State held lists each item the character carries, with
 
 Pack room: State pack gives the carry slots used and the total (held, stowed, worn and armed each take one; gems and lives take none) and reserved, the carried items the stack's ops will use (a use_block's, equip's or use_item's code, a fight_boss's armed and worn, a compose's fragments, a break_block's tool, and a key for every enter_level or travel through a locked entrance: a locked door uses up its key on every pass, so a plan that comes back through one keeps a spare). Making room never drops a reserved item. A dropped item the world prices costs its price again to pick up, wherever it lies, a shop cell no different, so dropping a bought item forfeits what it cost: the choices name what each drop forfeits. The character never picks what to drop on its own: when a buy or fetch_item needs a slot and the pack is full, it drops only what the op names in drop, and an op that names nothing it may drop comes back to you as dropped, with the items it could drop. A bigger carried chest is the other way to make room: upgrades_for_sale lists any chest seen for sale with more slots than the pack has (carry slots now -> with it), so weigh its price against giving an item up. So before a buy into a full pack, weigh what each held item is good for (held: its use, such as attack, cut, smash or burn, and its damage, defense and heal) against the purchase, and name what to give up in drop. An item not used yet is not worthless: a mallet smashes rocks and fights, matches burn.
 
-Death chests: a death drops what the character carried into a chest where it fell, which anyone may empty and which otherwise stays; the starting kit is kept, and the character respawns with the starting chest (10 slots): a bigger chest applied before is lost with the death and must be applied again. State death_chests lists every one of the character's death chests still remembered, nearest first: chest_id, cell with distance and direction (or another map), contents (the item codes last seen in it, unknown until the character has stood next to it) and in_view. To take one back, travel to "point" at its x, y (with its map_id when on another map): once it is in reach the character withdraws all that fits by itself, best items first with a full pack. Weigh the walk and the ground on the way against what is in it.
+Death chests: a death drops what the character carried into a chest where it fell, which anyone may empty and which otherwise stays; the starting kit is kept, and the character respawns with the starting chest (10 slots): a bigger chest applied before is lost with the death and must be applied again. State death_chests lists every one of the character's death chests still remembered, nearest first: chest_id, cell with distance and direction (or another map), contents, contents_are and in_view. contents lists each item it holds with its price (where one is seen for sale) and needed (why a goal wants it now: a buy on the stack, an upgrade over the best owned for its slot, potions below the stage 2 bar); unknown when what it holds is not known. contents_are is expected (what the character carried when it died, all but the starting kit, which is kept) until the character stands next to it, then seen (what it holds now; someone may have emptied it). To take one back, travel to "point" at its x, y (with its map_id when on another map): once it is in reach the character withdraws all that fits by itself, best items first with a full pack. An item a death chest holds is already the character's: weigh the walk there and the ground on the way against buying it again, its price in gems and the minutes those take. A buy of an item a death chest on this map holds is left out (last_reply_rejected says why) while the walk to the chest takes no longer than earning the item's price (at gather_run gems_per_min, else about 6 gems a minute): travel to the chest first, and buy it only once the chest is seen without it.
 
 Weapons and the hunting ground: which weapon is armed follows one rule, by the job at hand. For fighting (an equip with no code), the best weapon held: one that keeps strength within the highest hunting-ground ceiling known beats one that would put it over; among those alike, more damage a second wins (a swing's damage over the weapon's attack cooldown, cooldown_ms under held: a mallet hits harder than a sword of its tier but swings 1.3 s apart, not 1 s); with no ceiling known, damage a second alone decides. For cutting grass (gather_gems), the best held item that cuts, by the same order. So a weapon that would put strength over the ceiling is not armed while a held weapon keeps it within, one armed over it is swapped back, and a weapon that cannot cut (a mallet) is put away while gathering and armed again once the gather work ends. State hunting_strength gives the strength as armed and worn now (attack power 2, plus the armed weapon's damage, plus worn armor's defense) and that ceiling; upgrades_for_sale lists weapons by the fighting rule, with cuts (whether it can cut grass). Weigh a weapon by the work it will do: one that cannot cut adds nothing to gem gathering. To arm or wear an item the rule does not pick (a stronger weapon for a level boss, say), name it: an equip with a code arms or wears exactly that held item, and a later equip with no code applies the rule again. A gather_gems arms by the cutting rule, so it can set aside a named weapon that cuts but would put strength over the ceiling, and does not arm it again afterwards; name it again once the gather work ends.
 
@@ -434,7 +435,7 @@ def build_prompt(
         f"stall={stall or 'none'}",
         f"ops_ended_recently={json.dumps(list(ended_ops), sort_keys=True) if ended_ops else 'none'}",
         *entrance_lines(w, knowledge),
-        death_chests_line(w),
+        death_chests_line(w, knowledge, plan.ops_left()),
         shop_price_line(w, knowledge),
         eaten_on_pickup_line(w, knowledge),
         no_seller_line(w, knowledge, plan.ops_left()),
@@ -947,28 +948,65 @@ def entrance_lines(w: WorldModel, knowledge: KnowledgeBase | None) -> list[str]:
 DEATH_CHESTS_SHOWN = 8
 
 
-def death_chests_line(w: WorldModel) -> str:
+def death_chests_line(
+    w: WorldModel, knowledge: KnowledgeBase | None = None, stack: Collection[dict[str, Any]] = ()
+) -> str:
     """Our remembered death chests (A122), nearest first, at most
-    ``DEATH_CHESTS_SHOWN`` and a count of the rest: cell and bearing,
-    the item codes last seen in it (``unknown`` until seen in reach), and
-    ``in_view`` while its cell is in sight. So the planner weighs going back
-    for one (a ``travel`` to its cell; Recover takes back what fits)."""
+    ``DEATH_CHESTS_SHOWN`` and a count of the rest: cell and bearing, what
+    it holds (``unknown`` while not known) and ``in_view`` while its cell
+    is in sight. Each item held is shown with its value (A167): its gem
+    price where one is seen, and ``needed`` with why when a goal wants it
+    now (:func:`chest_item_need`). ``contents_are`` says whether they were
+    ``seen`` in reach or are ``expected`` from what was carried at the
+    death. So the planner weighs going back for one (a ``travel`` to its
+    cell; Recover takes back what fits) against buying what it holds."""
+    prices = seen_prices(w, knowledge)
+    gains = upgrade_gains(w, knowledge)
     rows = []
     for chest_id, c in w.death_chests.items():
         here = w.map_id == c.map_id and w.pos is not None
         d = chebyshev(w.pos, c.pos) if here else 0
-        entry = {
+        entry: dict[str, Any] = {
             "chest_id": chest_id,
             "cell": _bearing(w, (c.map_id, c.pos)),
-            "contents": c.contents if c.contents is not None else "unknown",
+            "contents": "unknown",
             "in_view": here and d <= w.perception,
         }
+        if c.contents is not None:
+            items = []
+            for code in c.contents:
+                item: dict[str, Any] = {"code": code}
+                if code in prices:
+                    item["price"] = prices[code]
+                need = chest_item_need(code, w, stack, gains)
+                if need:
+                    item["needed"] = need
+                items.append(item)
+            entry["contents"] = items
+            entry["contents_are"] = "seen" if c.seen else "expected"
         rows.append(((0 if here else 1, d, c.map_id, chest_id), entry))
     if not rows:
         return "death_chests=none known"
     shown = [e for _, e in sorted(rows, key=lambda t: t[0])[:DEATH_CHESTS_SHOWN]]
     more = f" (+{len(rows) - len(shown)} more)" if len(rows) > len(shown) else ""
     return f"death_chests={json.dumps(shown, sort_keys=True)}{more}"
+
+
+def chest_item_need(
+    code: str, w: WorldModel, stack: Collection[dict[str, Any]], gains: Callable[[str], str | None]
+) -> str | None:
+    """Why a goal wants ``code`` now, or None (A167): a buy on the stack
+    buys it, it is gear that beats the best owned for its slot
+    (:func:`upgrade_gains`), or it is a potion while fewer than
+    ``READY_POTIONS`` are held."""
+    if any(op.get("op") == "buy" and isinstance(op.get("code"), str) and supply_matches(op["code"], code) for op in stack):
+        return "a buy on the stack wants it"
+    gain = gains(code)
+    if gain:
+        return f"an upgrade: {gain}"
+    if is_potion(code) and potion_count(w) < READY_POTIONS:
+        return f"potions held {potion_count(w)} of {READY_POTIONS}"
+    return None
 
 
 def shop_price_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
@@ -1065,6 +1103,30 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: f
     ``chest_capacity`` than the slots carried now (A102: room for a full
     pack), all by the Supplies reference. An item
     already owned is not listed. The first is what gems save toward."""
+    gains = upgrade_gains(w, knowledge)
+    gems = w.gems or 0
+    rows = []
+    for code, price in seen_prices(w, knowledge).items():
+        gain = gains(code)
+        if gain is None:
+            continue
+        extra: dict[str, Any] = {"cuts": does_job(code, CUT, knowledge)} if is_weapon(code) else {}
+        short = max(0, price - gems)
+        minutes = minutes_at(short, gems_per_min)
+        if minutes is not None:
+            extra["minutes"] = minutes
+        rows.append({"code": code, "price": price, "gains": gain, "gems_short": short, **extra})
+    if not rows:
+        return "upgrades_for_sale=none seen"
+    rows.sort(key=lambda e: (e["price"], e["code"]))
+    return f"upgrades_for_sale={json.dumps(rows[:UPGRADES_SHOWN], sort_keys=True)}"
+
+
+def upgrade_gains(w: WorldModel, knowledge: KnowledgeBase | None) -> Callable[[str], str | None]:
+    """What an item not owned would gain over the best owned for its slot,
+    or None when it gains nothing (:func:`upgrade_line`'s rule): a weapon
+    ranked above every owned one by Equip's rule, armor with more defense
+    than any owned for its slot, a chest with more slots than the pack."""
     carried = [s.code for s in w.held_supplies + w.chest_supplies]
     owned = {c for c in [*carried, w.armed_code, *w.worn_codes.values()] if c}
     ceiling = hunting_ceiling(w, knowledge)
@@ -1076,34 +1138,21 @@ def upgrade_line(w: WorldModel, knowledge: KnowledgeBase | None, gems_per_min: f
     def best_defense(slot: str) -> int:
         return max((armor_defense(c) or 0 for c in owned if worn_slot(c) == slot), default=0)
 
-    gems = w.gems or 0
-    rows = []
-    for code, price in seen_prices(w, knowledge).items():
+    def gain(code: str) -> str | None:
         if code in owned:
-            continue
+            return None
         damage, defense, slot = weapon_damage(code), armor_defense(code), worn_slot(code)
         rank = weapon_rank(code, w, ceiling)
-        extra: dict[str, Any] = {}
         if damage is not None and is_weapon(code) and rank > best_rank:
-            gain = f"damage {best_damage} -> {damage}, a second {best_dps:.2f} -> {damage_per_second(code):.2f}"
-            if rank[0] and not best_rank[0]:
-                gain += ", back within the hunting ceiling"
-            extra = {"cuts": does_job(code, CUT, knowledge)}
-        elif defense is not None and slot and defense > best_defense(slot):
-            gain = f"{slot} defense {best_defense(slot)} -> {defense}"
-        elif (capacity := chest_capacity(code)) is not None and capacity > w.carry_capacity:
-            gain = f"carry slots {w.carry_capacity} -> {capacity}"
-        else:
-            continue
-        short = max(0, price - gems)
-        minutes = minutes_at(short, gems_per_min)
-        if minutes is not None:
-            extra["minutes"] = minutes
-        rows.append({"code": code, "price": price, "gains": gain, "gems_short": short, **extra})
-    if not rows:
-        return "upgrades_for_sale=none seen"
-    rows.sort(key=lambda e: (e["price"], e["code"]))
-    return f"upgrades_for_sale={json.dumps(rows[:UPGRADES_SHOWN], sort_keys=True)}"
+            out = f"damage {best_damage} -> {damage}, a second {best_dps:.2f} -> {damage_per_second(code):.2f}"
+            return out + (", back within the hunting ceiling" if rank[0] and not best_rank[0] else "")
+        if defense is not None and slot and defense > best_defense(slot):
+            return f"{slot} defense {best_defense(slot)} -> {defense}"
+        if (capacity := chest_capacity(code)) is not None and capacity > w.carry_capacity:
+            return f"carry slots {w.carry_capacity} -> {capacity}"
+        return None
+
+    return gain
 
 
 def hunting_strength_line(w: WorldModel, knowledge: KnowledgeBase | None) -> str:
@@ -1749,6 +1798,12 @@ class Strategist:
             # A buy needs a known seller (A110, A131): never a walk to shops that do not sell it.
             record["no_seller_refused"] = unsold
             self.rejected = [*self.rejected, *unsold]
+        rate = runner.gem_cuts.run_counts(runner.world.tick, runner.tick_hz).get("gems_per_min")
+        goals, in_chest = refuse_chest_held(goals, runner.world, seen_prices(runner.world, runner.knowledge), rate)
+        if in_chest:
+            # A death chest of ours holding the item is its source ahead of buying (A167).
+            record["chest_held_refused"] = in_chest
+            self.rejected = [*self.rejected, *in_chest]
         goals, unmet = refuse_unmet(goals, runner.world, runner.knowledge)
         if unmet:
             # An entrance whose need is unmet is not entered: the item comes first (A147).

@@ -6,6 +6,8 @@ The tree, walked from the top every turn::
     └─ beat the next level            the lowest level not cleared (A145)
        ├─ hold what it requires       its entrance's need: a key, sandals, a bomb (A147)
        └─ ready for its risk          heals, weapon, armor against its expected danger
+                                      (both take back what a death chest of hers holds
+                                      for it ahead of buying it, A167)
           └─ hold the gems for what's missing   from either branch, priced from known sellers (A131)
              └─ gather
                 └─ stay alive         the risk budget of the goal above
@@ -216,8 +218,18 @@ def get_what_it_requires(node: Node, rd: Reading) -> GoalOp | None:
     lying = lying_in_sight(w, need)
     if lying is not None:
         return {"op": "fetch_item", "code": lying.code, "x": lying.pos[0], "y": lying.pos[1]}
-    buy = next((p for p in rd.missing(node.serves).buys if meets(p.code, need)), None)
+    m = rd.missing(node.serves)
+    chest = next((t for t in m.chests if t.why == r.NEED_WHY.format(need)), None)
+    if chest is not None:
+        return from_chest(chest)
+    buy = next((p for p in m.buys if meets(p.code, need)), None)
     return {"op": "buy", "code": buy.code} if buy else _explore(w)
+
+
+def from_chest(take: r.ChestTake) -> GoalOp:
+    """Take an item back from one of her death chests (A167): ``fetch_item`` names the chest."""
+    item = take.item
+    return {"op": "fetch_item", "code": item.code, "x": item.pos[0], "y": item.pos[1], "chest_id": item.chest_id}
 
 
 def ready_for_its_risk(node: Node, rd: Reading) -> Check:
@@ -227,13 +239,18 @@ def ready_for_its_risk(node: Node, rd: Reading) -> Check:
 
 
 def get_ready_for_its_risk(node: Node, rd: Reading) -> GoalOp:
-    """Arm and wear the best gear owned first, then buy what closes the risk,
+    """Arm and wear the best gear owned first, then take back what a death
+    chest of hers holds toward the risk (A167), then buy what closes it,
     else look for a seller of it."""
     w = rd.world
     now, best = r.Loadout.now(w), r.best_owned(w, rd.kb)
     if (best.weapon, best.armor) != (now.weapon, now.armor):
         return {"op": "equip"}
-    buy = next((p for p in rd.missing(node.serves).buys if p.why == r.RISK_WHY), None)
+    m = rd.missing(node.serves)
+    chest = next((t for t in m.chests if t.why == r.RISK_WHY), None)
+    if chest is not None:
+        return from_chest(chest)
+    buy = next((p for p in m.buys if p.why == r.RISK_WHY), None)
     return {"op": "buy", "code": buy.code} if buy else _explore(w)
 
 

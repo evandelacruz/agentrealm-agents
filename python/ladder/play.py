@@ -50,6 +50,7 @@ from agentrealm_adk.executor import (
 from agentrealm_adk.fording import ford_gate, loadout_memory
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_adk.knowledge_base import KnowledgeBase
+from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
 from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
 from agentrealm_adk.knowledge_maps import record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from agentrealm_adk.level_order import minimap_due, note_door_step, settle_entry
@@ -118,6 +119,7 @@ class LadderRunner:
         self.trace = Trace(cfg.trace_path(cid), cfg.profile, out)
         self._loaded_hostiles = load_hostiles(knowledge, self.world)
         load_our_drops(knowledge, self.world)  # supplies this character dropped: no shop's (A158)
+        load_death_chests(knowledge, self.world)  # chests earlier deaths left: a source of items (A122, A167)
         self.root: Node = tree()
         self.blocks = Blocks()
         self.turn: Turn | None = None  # the last walk of the tree
@@ -172,6 +174,7 @@ class LadderRunner:
                 sync_world_maps(self.knowledge, w)
                 save_hostiles(self.knowledge, w, self._loaded_hostiles)
                 save_our_drops(self.knowledge, w)
+                save_death_chests(self.knowledge, w)
             self.trace.close()
 
     def on_error(self, call: str, e: ApiError) -> bool:

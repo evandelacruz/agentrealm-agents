@@ -147,14 +147,6 @@ def drink_first(w: WorldModel, policy: Policy, params: Params) -> bool:
     return health_low(w, params) and under_attack(w, policy)
 
 
-def food_on_hold(w: WorldModel, policy: Policy) -> bool:
-    """Under attack, no walk goes for food (A165): not to food lying near, not
-    to a block that drops it, not on a detour. A heal of food is worth less
-    than the hits taken walking to it; a potion held is the heal there
-    (``drink_first``)."""
-    return under_attack(w, policy)
-
-
 def spend_potion(
     w: WorldModel,
     m: Memory,

@@ -19,7 +19,7 @@ from agentrealm_adk.hostile_ground import ground_by_hostile, off_safe
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import cost_path, no_way, oscillation
 from agentrealm_adk.navigation import stuck as nav_stuck
-from agentrealm_adk.pathing import grid_params, nav_search, next_step, plan_sets, remaining_walk_cells, retreat_safe_goal
+from agentrealm_adk.pathing import flee_step, grid_params, nav_search, next_step, plan_sets, remaining_walk_cells, retreat_safe_goal
 from agentrealm_adk.survival import (
     LOSING_NAV,
     RETREAT_NAV,
@@ -203,10 +203,11 @@ def retreat_step(w: WorldModel, ctx: PlayContext, state: str, paced: set[Pos] | 
         # Never a step toward a hostile closing on us: plan round every one.
         toward = {p for p in w.open_neighbours(w.pos, plan_avoid) if not opens_distance(w.pos, p, closing)}
         params = dataclasses.replace(params, avoid=params.avoid | toward)
-        m.path = cost_path(w, goal, params) or []
+        m.path = cost_path(w, goal, params, nav=nav) or []
+        m.planned_threats = hostiles_reaching(w, policy, m.path, skip=pursuers)
         step = next_step(w, plan_avoid | toward, m.path)
         if step is None:
-            return StateOutcome(None, f"safe {goal}: every step closes on a hostile", state=state)
+            return _hemmed_in(w, ctx, state, goal, closing, plan_avoid)
     if step is None:
         if m.path:
             # A path whose first cell is not open this decision (someone stands on it, or it is unseen): wait.
@@ -313,6 +314,26 @@ def _turn_on_losing(
     out.state, out.reflex = state, True
     out.reason = f"{why}: {out.reason}"
     return out
+
+
+def _hemmed_in(
+    w: WorldModel, ctx: PlayContext, state: str, goal: Pos, closing: list[Entity], blocked: set[Pos]
+) -> StateOutcome:
+    """Every step on the way to ``goal`` closes on a hostile closing on us
+    (A165): standing still only takes the hits, so Retreat swings at the
+    hitter in weapon reach, else takes the best step away from them all
+    (``pathing.flee_step``), else holds for Flee's cornered move."""
+    hitter = _hitter_in_reach(w, ctx)
+    out = engage(w, ctx, hitter, state) if hitter is not None else None
+    if out is not None and out.intents:
+        out.state, out.reflex = state, True
+        out.reason = f"safe {goal}: hemmed in: {out.reason}"
+        return out
+    away = flee_step(w, closing, blocked)
+    if away is not None:
+        ctx.memory.path, ctx.memory.retreat_walk = [], None  # one step, no walk queue
+        return StateOutcome([set_position(away)], f"safe {goal}: hemmed in: step away", reflex=True, state=state)
+    return StateOutcome(None, f"safe {goal}: every step closes on a hostile", state=state)
 
 
 def _hitter_in_reach(w: WorldModel, ctx: PlayContext) -> Entity | None:

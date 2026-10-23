@@ -155,9 +155,10 @@ def under_attack(w: WorldModel, policy: Policy) -> bool:
 
 
 def opens_distance(here: Pos, step: Pos, hostiles: Collection[Entity]) -> bool:
-    """``step`` from ``here`` is further from every one of ``hostiles`` (A165):
-    a retreat never steps toward a hostile closing on us."""
-    return all(chebyshev(step, h.pos) > chebyshev(here, h.pos) for h in hostiles)
+    """``step`` from ``here`` is no nearer any one of ``hostiles`` (A165): a
+    retreat never steps toward a hostile closing on us. A step that keeps
+    the distance (sideways, round a wall) is no step toward it."""
+    return all(chebyshev(step, h.pos) >= chebyshev(here, h.pos) for h in hostiles)
 
 
 def beats_the_chase(here: Pos, goal: Pos, chasers: Collection[Entity]) -> bool:

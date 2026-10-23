@@ -15,13 +15,13 @@ now (``can_try``).
 from __future__ import annotations
 
 from agentrealm_adk.break_memory import choice_at, given_up_blocks
-from agentrealm_adk.healing import carried_heal, drink_first, food_on_hold, hurt, in_combat, potion_count
+from agentrealm_adk.healing import carried_heal, drink_first, hurt, in_combat, potion_count
 from agentrealm_adk.memory import Memory, queue_signal
 from agentrealm_adk.navigation import cost_path
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk import targets as targets_mod
 from agentrealm_adk.pathing import bounded_step, nav_search
-from agentrealm_adk.survival import hostiles_in_range, hostiles_reaching
+from agentrealm_adk.survival import hostiles_in_range, hostiles_reaching, under_attack
 from agentrealm_adk.world import Pos, WorldModel, chebyshev
 
 from .base import PlayContext, State, StateOutcome
@@ -41,8 +41,9 @@ class HealState(State):
 
     1. In combat or about to be (``healing.in_combat``), a carried potion
        that is due goes first (A135).
-    2. Not under attack (``healing.food_on_hold``, A165), food lying within ``healing.FOOD_REACH`` that it is hurt by at least
-       the heal of (``healing.worth_eating``, A155), the cheapest by its
+    2. Not under attack (``survival.under_attack``, A165), food lying
+       within ``healing.FOOD_REACH`` that it is hurt by at least the heal
+       of (``healing.worth_eating``, A155), the cheapest by its
        walk on Heal's ground (``food.food_target``). Food is eaten on
        pickup, so the ``Take`` is the meal.
     3. Out of combat (so not under attack either), a block within that reach that drops such food (a
@@ -106,7 +107,7 @@ def _choose(w: WorldModel, ctx: PlayContext) -> StateOutcome:
     if fighting and (out := use_carried_heal(w, ctx)):
         return out
     # Under attack, no walk goes for food (A165): only the potion below heals.
-    if not food_on_hold(w, ctx.policy) and (out := _act_food(w, ctx)):
+    if not under_attack(w, ctx.policy) and (out := _act_food(w, ctx)):
         return out
     if not fighting and (out := _act_block(w, ctx)):
         return out

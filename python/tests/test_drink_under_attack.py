@@ -5,7 +5,7 @@ chase it cannot outrun is fought, not walked under."""
 import unittest
 
 from agentrealm_adk.engagement import Engagement
-from agentrealm_adk.healing import drink_first, food_on_hold
+from agentrealm_adk.healing import drink_first
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.survival import beats_the_chase, closing_hostiles, opens_distance, under_attack
 from agentrealm_adk.world import Entity, chebyshev
@@ -96,7 +96,7 @@ class NoFoodUnderAttackTest(unittest.TestCase):
     def test_no_walk_to_food_lying_near(self):
         self.w.entities = [berry(), self.npc]
         closing_in(self.w, self.npc, (5, 11))
-        self.assertTrue(food_on_hold(self.w, self.c.policy))
+        self.assertTrue(under_attack(self.w, self.c.policy))
         out = dispatch(self.w, self.c)
         self.assertNotIn("heal_food", out.reason)
         self.assertNotEqual(out.state, "Heal")
@@ -149,6 +149,40 @@ class RetreatStepsAwayTest(unittest.TestCase):
         out = dispatch(self.w, self.c)
         self.assertFalse(out.wait, "not left running into the pack")
         self.assertTrue(opens_distance(self.w.pos, step_of(out), self.pack))
+
+
+class RetreatKeepsMovingTest(unittest.TestCase):
+    """A step that keeps the distance is no step toward a hostile, and Retreat
+    hemmed in still sends something."""
+
+    def test_a_hostile_far_north_leaves_sideways_steps_open(self):
+        w, c = world(health=2), ctx()
+        apply_zone(w, MAP, 20, 10, {"safe": True})
+        for y in range(5, 10):
+            w.view.tiles[(12, y)] = "wall"  # the refuge east is round a wall
+        far = Entity("npc", 8, (10, 4), code="chaser")  # 6 north, closing
+        near = Entity("npc", 7, (9, 11), code="chaser")
+        w.entities = [near, far]
+        hit(w)
+        closing_in(w, far, (10, 3))
+        self.assertTrue(opens_distance(w.pos, (11, 10), [far]), "east keeps the distance")
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Retreat", out.yielded)
+        self.assertTrue(out.intents)
+        self.assertTrue(opens_distance(w.pos, step_of(out), closing_hostiles(w, c.policy)))
+
+    def test_hostiles_closing_from_both_sides_never_freeze_it(self):
+        w, c = world(health=2), ctx()
+        apply_zone(w, MAP, 20, 10, {"safe": True})
+        east, west = Entity("npc", 7, (12, 10), code="chaser"), Entity("npc", 8, (8, 10), code="chaser")
+        w.entities = [east, west]
+        hit(w)
+        closing_in(w, east, (13, 10))
+        closing_in(w, west, (7, 10))
+        out = dispatch(w, c)
+        self.assertEqual(out.state, "Retreat", out.yielded)
+        self.assertTrue(out.intents, out.reason)
+        self.assertTrue(opens_distance(w.pos, step_of(out), [east, west]), out.reason)
 
 
 class CannotOutrunTest(unittest.TestCase):

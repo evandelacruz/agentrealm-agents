@@ -192,6 +192,24 @@ class LorraineTest(unittest.TestCase):
         self.assertEqual(turn.op(), {"op": "fetch_item", "code": "raft", "x": 15, "y": 5, "chest_id": 80})
         self.assertEqual(turn.reading.missing(goals.find("level", goals.tree())).gems, 0)
 
+    def test_a_chest_her_walk_gave_up_on_is_passed_over_for_the_buy(self):
+        w = self.world(gems=40)
+        w.death_chests[80] = DeathChest(self.MAP, (15, 5), 5, ["raft"])
+        self.assertEqual(walk(w, self.kb(), unreachable={(self.MAP, (14, 5))}).op(), {"op": "buy", "code": "raft"})
+
+    def test_after_her_walk_to_the_chest_is_given_up_she_buys(self):
+        from agentrealm_adk.memory import Memory
+        from agentrealm_adk.navigation import stuck as nav_stuck
+        from ladder.act import FETCH_GOAL
+
+        w, m = self.world(gems=40), Memory()
+        w.death_chests[80] = DeathChest(self.MAP, (15, 5), 5, ["raft"])
+        nav_stuck.remember_give_up(m.nav_stuck, nav_stuck.goal_key(FETCH_GOAL, self.MAP, (15, 5)), FETCH_GOAL, w.tick)
+        out = act({"op": "fetch_item", "code": "raft", "x": 15, "y": 5, "chest_id": 80}, Ctx(w, m, None, None, Started.now(w)))
+        self.assertTrue(out.over)
+        unreachable = nav_stuck.given_up_dests(m.nav_stuck, w.tick, FETCH_GOAL)
+        self.assertEqual(walk(w, self.kb(), unreachable=unreachable).op(), {"op": "buy", "code": "raft"})
+
     def test_without_the_chest_she_buys(self):
         self.assertEqual(walk(self.world(gems=40), self.kb()).op(), {"op": "buy", "code": "raft"})
 

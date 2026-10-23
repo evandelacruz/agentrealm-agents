@@ -282,7 +282,6 @@ Examples:
 # The stage 2 readiness bar (PROGRESSION, stage 2).
 READY_HEALTH_FRACTION = 0.8
 READY_POTIONS = 3
-# A check's minutes while the gather's rate shows 0 gems a minute (A121).
 
 PROGRESSION = f"""# Progression
 

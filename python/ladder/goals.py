@@ -50,12 +50,12 @@ from agentrealm_adk.entrance_needs import lying_in_sight, meets
 from agentrealm_adk.level_order import target_level
 from agentrealm_adk.supplies import heal_of, is_potion
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
-from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, Pos, WorldModel
 
 from . import readiness as r
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Collection
 
     from agentrealm_adk.knowledge_base import KnowledgeBase
 
@@ -78,6 +78,7 @@ class Reading:
 
     world: WorldModel
     kb: KnowledgeBase | None
+    unreachable: Collection[tuple[int, Pos]] = ()  # cells a walk gave up on: no chest there is a source (A167)
     checks: dict[str, Check] = field(default_factory=dict)
     missing_for: dict[str, r.Missing] = field(default_factory=dict)
 
@@ -88,7 +89,7 @@ class Reading:
 
     def missing(self, level: Node) -> r.Missing:
         if level.key not in self.missing_for:
-            self.missing_for[level.key] = r.missing(self.world, self.kb, level)
+            self.missing_for[level.key] = r.missing(self.world, self.kb, level, self.unreachable)
         return self.missing_for[level.key]
 
 
@@ -349,7 +350,13 @@ def find(key: str, root: Node) -> Node:
     raise KeyError(key)
 
 
-def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = None, root: Node | None = None) -> Turn:
+def walk(
+    world: WorldModel,
+    kb: KnowledgeBase | None,
+    blocks: Blocks | None = None,
+    root: Node | None = None,
+    unreachable: Collection[tuple[int, Pos]] = (),
+) -> Turn:
     """The turn's goal: from the root, into the first child not ready, until a
     node whose children are all ready; only such a node is ever the goal.
 
@@ -360,10 +367,11 @@ def walk(world: WorldModel, kb: KnowledgeBase | None, blocks: Blocks | None = No
     with the child's reason: the walk tries the parent's next child not
     ready, and with none the parent gives no goal. ``goal`` is None when the
     world is beaten or every way down is blocked. ``root`` defaults to a
-    fresh ``tree()``."""
+    fresh ``tree()``. ``unreachable`` is the cells her walks gave up on and
+    are backed off from: a death chest there is no source (A167)."""
     root = root if root is not None else tree()
     blocks = blocks if blocks is not None else Blocks()
-    rd = Reading(world, kb)
+    rd = Reading(world, kb, unreachable)
     skipped: list[tuple[Node, Block]] = []
 
     def down(n: Node, path: list[Node]) -> tuple[Node | None, list[Node], Block | None]:

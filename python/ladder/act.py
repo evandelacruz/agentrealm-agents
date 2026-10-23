@@ -55,6 +55,9 @@ from .readiness import ORDINARY, fits_now, owned
 
 # Most cells one walk queue carries; the walk is re-planned once they have run.
 WALK_CELLS = 8
+# The goal a fetch_item's walk runs under: the given-up walks to a death chest
+# the tree reads back (A167).
+FETCH_GOAL = "lorraine:fetch_item"
 
 
 @dataclass
@@ -330,10 +333,10 @@ def fetch_item(op: GoalOp, ctx: Ctx) -> Act:
     found = [e for e in lying(w, code, priced=False) if cell is None or e.pos == cell] or lying(w, code, priced=False)
     if not found:
         if cell is not None and w.pos is not None and chebyshev(w.pos, cell) > w.perception:
-            return walk(ctx, "lorraine:fetch_item", cell)
+            return walk(ctx, FETCH_GOAL, cell)
         return Act(None, f"no {code} in sight", over=True)
     item = found[0]
-    return reach_and(ctx, "lorraine:fetch_item", item.pos, NEAR, lambda: [take(item.id)], f"take {code}")
+    return reach_and(ctx, FETCH_GOAL, item.pos, NEAR, lambda: [take(item.id)], f"take {code}")
 
 
 def from_chest(op: GoalOp, ctx: Ctx) -> Act:
@@ -350,7 +353,7 @@ def from_chest(op: GoalOp, ctx: Ctx) -> Act:
     cell = (op["x"], op["y"]) if _int(op.get("x")) and _int(op.get("y")) else None
     if cell is None or (w.pos is not None and chebyshev(w.pos, cell) <= NEAR):
         return Act(None, f"chest {chest_id} is not here", over=True)
-    return walk(ctx, "lorraine:fetch_item", stand_by(w, cell, NEAR))
+    return walk(ctx, FETCH_GOAL, stand_by(w, cell, NEAR))
 
 
 def buy(op: GoalOp, ctx: Ctx) -> Act:

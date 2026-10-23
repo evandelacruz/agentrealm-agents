@@ -58,6 +58,8 @@ from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_sales
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from agentrealm_adk.knowledge_base import KnowledgeBase
 
 # The value-to-risk rule: the share of health plus held heals a goal may be
@@ -368,18 +370,21 @@ def need_of_next_level(w: WorldModel, kb: KnowledgeBase | None) -> str | None:
     return unmet_need(w, kb, *entrance) if entrance else None
 
 
-def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missing:
+def missing(
+    w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal, unreachable: Collection[tuple[int, Pos]] = ()
+) -> Missing:
     """What the next level still needs bought: its entrance's need (unless
     it lies in sight for the taking, or a death chest of hers is its source,
     A167), then the cheapest gear and heals, by slack gained per gem, that
     bring ``level``'s risk within its share, once what her death chests
-    hold toward it is counted as hers."""
+    hold toward it is counted as hers. A chest at a cell of ``unreachable``
+    (a walk to it given up and backed off) is not counted."""
     out = Missing()
     sale = for_sale(w, kb)
     need = need_of_next_level(w, kb)
     if need and lying_in_sight(w, need) is None:
         offers = sorted((p, c) for c, p in sale.items() if meets(c, need))
-        chest = source_for(need, w, offers[0][0] if offers else None, matches=lambda want, code: meets(code, want))
+        chest = source_for(need, w, offers[0][0] if offers else None, matches=lambda want, code: meets(code, want), unreachable=unreachable)
         if chest is not None:
             out.chests.append(ChestTake(chest, NEED_WHY.format(need)))
         elif offers:
@@ -391,7 +396,7 @@ def missing(w: WorldModel, kb: KnowledgeBase | None, level: RiskyGoal) -> Missin
     for code in [i.code for i in chest_items(w)]:  # each copy: three potions are three heals
         if budget.ok:
             break
-        chest = source_for(code, w, sale.get(code))
+        chest = source_for(code, w, sale.get(code), unreachable=unreachable)
         if chest is None:
             continue
         gain = risk_budget(level, w, kb, _with(lo, code, w, kb)).slack - budget.slack

@@ -56,6 +56,7 @@ from agentrealm_adk.knowledge_maps import record_map_level, record_map_levels, r
 from agentrealm_adk.level_order import minimap_due, note_door_step, settle_entry
 from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation.rejection import learn_step_rejection
+from agentrealm_adk.navigation.stuck import given_up_dests
 from agentrealm_adk.navigation.stuck import on_rejection as nav_on_rejection
 from agentrealm_adk.navigation.stuck import on_step as nav_on_step
 from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
@@ -66,7 +67,7 @@ from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, sa
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
-from .act import Ctx, Started, act
+from .act import FETCH_GOAL, Ctx, Started, act
 from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 from .readiness import ORDINARY
@@ -330,7 +331,9 @@ class LadderRunner:
         for key in lift_changed(self.blocks, w, self.knowledge):
             self.log("planner", f"{key}: block lifted, what it waited on came")
             self.asked_for = None  # the next walk asks afresh
-        self.turn = turn = walk(w, self.knowledge, self.blocks, self.root)
+        # A death chest her walk to gave up on is no source the tree picks (A167).
+        unreachable = given_up_dests(self.mem.nav_stuck, w.tick, FETCH_GOAL)
+        self.turn = turn = walk(w, self.knowledge, self.blocks, self.root, unreachable)
         if turn.goal is None:
             self.set_op(None)
             self.asked_for = None

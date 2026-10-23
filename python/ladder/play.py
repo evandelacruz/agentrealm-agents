@@ -22,7 +22,9 @@ owed, else a round trip (``POST tick``). Each round trip:
    ADK's executor and pathing. An op over (done, or nothing left it can do)
    is not run again for that goal, and the tree is asked afresh.
 5. **No silent hold** (A168): an op that sends nothing the same way two
-   rounds in a row is over. Every round the op sends nothing and no reflex
+   rounds in a row is over, but for a wait the clock clears (a weapon
+   cooldown, her place unread: ``Act.waits``), which is neither a repeat
+   nor a stall. Every round the op sends nothing and no reflex
    holds is a stall, but for one with the question about the goal still
    out; ``STALL_ROUNDS`` of them in a row block the goal with why, and the
    next walk asks the planner once, saying so.
@@ -288,7 +290,8 @@ class LadderRunner:
         """The reflexes first; then the walk under way; then the op for the
         turn's goal. Everything sent goes through the water gate (``gate``).
         An op that sends nothing with the same why as the round before is
-        over (A168), so no empty round repeats."""
+        over (A168), so no empty round repeats, but for a wait the clock
+        clears (``Act.waits``: a cooldown, her place unread), which is no stall."""
         saved = loadout_memory(self.mem)
         fired = reflex(self.ctx(), lambda name, intents: self.gate(intents, saved, escape=name in ESCAPES)[0])
         if fired is not None:
@@ -312,6 +315,9 @@ class LadderRunner:
                 if intents:
                     self.empty = None
                     return self.send(intents, why, op["op"], op_key(op))
+                if a.waits and not cut:  # the clock clears it: no stall, and no repeat ends the op
+                    self.empty = None
+                    return Decision(None, why, op["op"])
                 if self.empty != (op_key(op), why):
                     self.empty = (op_key(op), why)
                     return Decision(None, why, op["op"], stalled=True)

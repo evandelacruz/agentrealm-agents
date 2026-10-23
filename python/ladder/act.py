@@ -104,11 +104,15 @@ class Ctx:
 
 @dataclass(frozen=True)
 class Act:
-    """One round of an op: the intents to send (None: nothing), why, and whether it is over."""
+    """One round of an op: the intents to send (None: nothing), why, whether
+    it is over, and whether nothing is sent only on a wait the clock clears
+    (``waits``: a weapon cooldown, or her place not read yet). Such a round
+    is no stall and its repeat never ends the op (A168)."""
 
     intents: list[dict] | None
     why: str
     over: bool = False
+    waits: bool = False
 
 
 def act(op: GoalOp, ctx: Ctx) -> Act:
@@ -219,7 +223,7 @@ def walk(
     a pass is covered for (``walk_sets``), whose ground it does not keep off."""
     w, m = ctx.world, ctx.mem
     if w.pos is None or w.map_id is None:
-        return Act(None, f"{goal}: unplaced")
+        return Act(None, f"{goal}: unplaced", waits=True)
     dest_map = w.map_id if dest_map is None else dest_map
     key = nav_stuck.goal_key(goal, dest_map, dest)
     if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
@@ -305,7 +309,7 @@ def reach_and(
     w = ctx.world
     if w.pos is not None and chebyshev(w.pos, p) <= reach:
         intents = then()
-        return Act(intents or None, why if intents else f"{why}: waiting on a cooldown")
+        return Act(intents or None, why if intents else f"{why}: waiting on a cooldown", waits=not intents)
     return walk(ctx, goal, stand_by(w, p, reach), toward=toward, passing=passing)
 
 
@@ -517,7 +521,7 @@ def explore_area(op: GoalOp, ctx: Ctx) -> Act:
     is given up and the next nearest taken (A168); over when none is left."""
     w, m, st = ctx.world, ctx.mem, ctx.started
     if w.pos is None:
-        return Act(None, "explore: unplaced")
+        return Act(None, "explore: unplaced", waits=True)
     st.stood.add(w.pos)
     area = {"x": w.pos[0], "y": w.pos[1], "radius": EXPLORE_ANYWHERE, **op}
     cells = nav_stuck.filter_frontiers(m.nav_stuck, w.map_id, explore_targets(area, w), w.tick) - st.stood
@@ -542,7 +546,7 @@ def fight(op: GoalOp, ctx: Ctx) -> Act:
     a ``fight_boss`` with no boss in sight walks to its door."""
     w, st = ctx.world, ctx.started
     if w.pos is None:
-        return Act(None, "fight: unplaced")
+        return Act(None, "fight: unplaced", waits=True)
     foe = next((e for e in w.entities if e.kind == "npc" and e.id == st.target), None)
     if foe is None and st.target is not None:
         return Act(None, f"npc {st.target} gone", over=True)

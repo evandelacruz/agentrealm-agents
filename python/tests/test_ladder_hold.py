@@ -9,6 +9,7 @@ from unittest import mock
 
 from agentrealm_adk import config
 from agentrealm_adk.config import CharacterConfig, Policy
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.navigation import stuck
 from agentrealm_adk.world import Entity
 from ladder import act, play, reflexes
@@ -198,6 +199,35 @@ class LoopHoldTest(unittest.TestCase):
         r.call.wait()
         r.goal_op()
         self.assertEqual(r.op, {"op": "gather_gems", "count": 30, "x": 2, "y": 5})  # the late reply is the op
+
+    def test_a_cooldown_longer_than_the_horizon_never_ends_the_fight(self):
+        w = open_ground(world(armed_code="small_potion", armed_id=3, held_supplies=[InventorySupply(4, "sword")]))
+        w.health = w.max_health = 100  # no reflex: the fight's own op swings
+        hostile(w, 50, (6, 5))
+        r = self.runner(w)
+        r.horizon = 2  # shorter than the sword's cooldown
+        r.op = {"op": "fight", "npc_id": 50}
+        r.mem.last_use_tick = w.tick
+        with mock.patch.object(r, "goal_op", return_value=r.op), mock.patch.object(play, "reflex", return_value=None):
+            for _ in range(STALL_ROUNDS + 2):
+                d = r.decide()
+                self.assertIn("waiting on a cooldown", d.why)
+                self.assertFalse(d.stalled)
+        self.assertEqual(r.done, [])  # never over on the wait
+        self.assertEqual(r.stalls, 0)
+        self.assertEqual(r.blocks, {})
+
+    def test_an_unplaced_wait_never_ends_the_op(self):
+        r = self.gathering()
+        r.op = {"op": "travel", "to": "point", "x": 9, "y": 5}
+        r.world.pos = None
+        with mock.patch.object(r, "goal_op", return_value=r.op), mock.patch.object(play, "reflex", return_value=None):
+            for _ in range(STALL_ROUNDS + 2):
+                d = r.decide()
+                self.assertIn("unplaced", d.why)
+                self.assertFalse(d.stalled)
+        self.assertEqual(r.done, [])
+        self.assertEqual(r.stalls, 0)
 
     def test_a_round_that_sends_ends_the_run_of_stalls(self):
         r = self.gathering()

@@ -278,7 +278,7 @@ class ParkTest(unittest.TestCase):
 class ParkStatesTest(unittest.TestCase):
     def test_only_survival_reflexes_and_park_run_while_parking(self):
         names = [s.name for s in PARK_STATES]
-        self.assertEqual(names, ["Sync", "Downed", "Escape", "Ashore", "Retreat", "Heal", "Fight", "Flee", "Park"])
+        self.assertEqual(names, ["Sync", "Downed", "Escape", "Ashore", "Heal", "Retreat", "Fight", "Flee", "Park"])
 
 
 class ParkSplitTest(unittest.TestCase):

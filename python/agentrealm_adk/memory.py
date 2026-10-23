@@ -143,10 +143,11 @@ class Memory:
     detour_skipped: set[int] = field(default_factory=set)
     # Retreat (A9): the goal of the walk queue it last sent, so a reflex probe
     # lets that queue run instead of replacing it; and (tick, distance to the
-    # goal) at each Retreat decision toward ``retreat_to``, to see it losing ground.
+    # goal, distance to the nearest hostile closing on us or None) at each
+    # Retreat decision toward ``retreat_to``, to see it losing ground (A165).
     retreat_walk: Pos | None = None
     retreat_to: Pos | None = None
-    retreat_gaps: list[tuple[int, int]] = field(default_factory=list)
+    retreat_gaps: list[tuple[int, int, int | None]] = field(default_factory=list)
     # (safe goal, tick) a losing Retreat last drank or fought back instead of
     # walking: the walk's stuck window does not count the time since (A9).
     retreat_paused: tuple[Pos, int] | None = None

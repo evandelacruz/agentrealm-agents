@@ -327,6 +327,7 @@ class BlocksTest(unittest.TestCase):
         kb = knowledge(door_need="fords", sells={"raft": 30})
         blocks = Blocks()
         blocks.mark("requires", "the shop is shut", now=w.tick)
+        blocks.mark("risk", "no potion sold", now=w.tick)  # its sibling blocked too: below the blocks
         turn = walk(w, kb, blocks)
         self.assertEqual(turn.goal.key, "alive")
         self.assertEqual([n.key for n in turn.path], ["world", "level", "requires", "gems", "gather", "alive"])

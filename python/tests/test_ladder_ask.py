@@ -134,7 +134,7 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(blocks["requires"].reason, "the shop is shut")
         self.assertEqual(blocks["requires"].until, w.tick + goals.BLOCK_TICKS)
         after = walk(w, kb, blocks)
-        self.assertEqual(after.goal.key, "alive")
+        self.assertEqual(after.goal.key, "risk")  # its sibling first, in tree order (A169)
         self.assertEqual([(n.key, b.reason) for n, b in after.skipped][0], ("requires", "the shop is shut"))
 
     def test_an_op_blocks_nothing(self):
@@ -344,7 +344,7 @@ class PlayTest(unittest.TestCase):
         r = self.runner(p, w, kb)
         self.assertIsNone(settle(r))
         self.assertEqual(settle(r), {"op": "travel", "to": "town"})
-        self.assertIn("goal: stay alive", fake.messages[1][1]["content"])
+        self.assertIn("goal: ready for its risk", fake.messages[1][1]["content"])  # its sibling (A169)
 
     def test_a_cannot_is_not_asked_again_on_the_next_tick(self):
         w = geared()  # the level is the goal; under it only gathering is left (A169)
@@ -399,8 +399,10 @@ class PlayTest(unittest.TestCase):
         for _ in range(3):
             settle(r)
         about = [m[1]["content"].splitlines()[0] for m in fake.messages]
-        self.assertEqual(about.count("goal: hold what it requires"), 2)  # once, then once more: no loop
-        self.assertEqual(len(about), len(set(about)) + 1)  # each goal the walk moves on to asked once
+        # once, then once more: no loop; and once all is blocked, asked about it with why (A169)
+        self.assertEqual(about.count("goal: hold what it requires"), 3)
+        self.assertIn("every way down is blocked", fake.messages[-1][1]["content"])
+        self.assertEqual(len(about), len(set(about)) + 2)  # each goal the walk moves on to asked once
 
     def test_after_a_block_lifts_the_goal_is_asked_again(self):
         w, kb = short_of_a_raft()

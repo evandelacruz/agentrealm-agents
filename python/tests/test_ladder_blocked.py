@@ -16,7 +16,7 @@ from ladder import act, ask
 from ladder.ask import Planner, seen
 from ladder.play import LadderRunner
 from tests.test_ladder_act import ctx, open_ground
-from tests.test_ladder_ask import Clock, FakeLLM
+from tests.test_ladder_ask import Clock, FakeLLM, HeldLLM
 from tests.test_ladder_goals import MAP, knowledge, world
 from tests.test_ladder_hold import no_step_to
 from tests.test_starter_agent import FakeClient
@@ -127,29 +127,45 @@ class BlockedGoalTest(Base):
                 # Retried: the buy ran again (its walk still backed off) and blocked it from the new state.
                 self.assertEqual(r.blocks["risk"].seen, seen(r.world))
 
-    def test_with_nothing_to_work_she_explores_then_asks_with_why(self):
-        """Rule 2: no goal while a block stands is never a silent hold."""
-        fake = FakeLLM('{"cannot": "nothing to do"}')
+    def test_with_nothing_to_work_she_always_asks_and_explores_only_alongside(self):
+        """Rule 2 (Evan): no op to work always asks the planner, with why; exploring fills the wait."""
+        fake = HeldLLM('{"cannot": "nothing to do"}', '{"cannot": "still nothing"}')
+        self.addCleanup(fake.go.set)
         r = self.runner(short_of_risk(), Planner(client=fake, clock=Clock(), tokens_per_min=10**9))
         for key in ("risk", "gather"):
             r.blocks.mark(key, f"{key}: cannot", r.world.tick)
         d = r.decide()
         self.assertIsNone(r.turn.goal)
-        self.assertEqual((d.by, bool(d.intents)), ("explore_area", True))  # the ground left to see
-        self.assertIsNone(r.call)
-        with mock.patch.object(act, "explore_targets", return_value=set()):
+        self.assertIsNotNone(r.call)  # asked at once, with ground still left to explore
+        self.assertEqual(r.call.node.key, "risk")
+        self.assertIn("every way down is blocked; ready for its risk: risk: cannot", r.call.note)
+        self.assertEqual((d.by, bool(d.intents)), ("explore_area", True))  # exploring alongside the ask
+        fake.go.set()
+        r.call.wait()
+        r.mem.pending_intents, r.queue_of = None, None
+        r.decide()  # the cannot taken: blocked again, and not asked again for this block
+        for _ in range(3):
+            r.mem.pending_intents, r.queue_of = None, None
+            r.decide()
+        self.assertEqual(len(fake.messages), 1)
+        r.blocks.lift("risk")  # a new episode: the risk worked, blocked again by its op, nothing to work again
+        r.blocks.mark("risk", "risk: cannot, again", r.world.tick + 1)
+        r.world.tick += 1
+        with mock.patch.object(act, "explore_targets", return_value=set()):  # nothing left to explore either
             r.mem.pending_intents, r.queue_of = None, None
             d = r.decide()
-        self.assertIn("no op to work: ready for its risk blocked, risk: cannot", d.why)
+        self.assertIn("no op to work: ready for its risk blocked", d.why)
         if r.call is not None:
             r.call.wait()
-        self.assertEqual(len(fake.messages), 1)  # nothing left to explore: the planner is asked, told why
-        self.assertIn("every way down is blocked; ready for its risk: risk: cannot", fake.messages[0][1]["content"])
-        with mock.patch.object(act, "explore_targets", return_value=set()):
-            for _ in range(3):
-                r.mem.pending_intents, r.queue_of = None, None
-                r.decide()
-        self.assertEqual(len(fake.messages), 1)  # its cannot is its answer: not asked again on every round
+        self.assertEqual(len(fake.messages), 2)  # every time there is nothing to work, the planner is asked
+
+    def test_a_blocked_node_leaves_its_siblings_workable(self):
+        """Blocking "hold what it requires" leaves "ready for its risk" to work."""
+        r = self.runner(short_of_risk())
+        r.knowledge.entrances[next(iter(r.knowledge.entrances))]["clue_needs"] = "fords"
+        r.blocks.mark("requires", "no seller of a raft", r.world.tick)
+        r.decide()
+        self.assertEqual(r.turn.goal.key, "risk")
 
 
 class OccupantsTest(Base):
@@ -224,6 +240,67 @@ class OccupantsTest(Base):
             w.tick += 10
         self.assertTrue(a.over)
         self.assertTrue(stuck.backed_off(c.mem, "lorraine:travel:point", MAP, (9, 5), w.tick))
+
+
+class GivenUpTest(Base):
+    """A given-up walk target is not chosen again until its backoff ends, by the tree or the planner (A169)."""
+
+    def given_up_seller(self):
+        r = self.runner(short_of_risk())
+        c = ctx(r.world, r.knowledge)
+        act.give_up_walk(c, "lorraine:buy", stuck.goal_key("lorraine:buy", MAP, SELLER))
+        r.mem = c.mem
+        return r, c
+
+    def test_a_buy_never_walks_back_to_a_seller_it_gave_up(self):
+        r, c = self.given_up_seller()
+        a = act.act({"op": "buy", "code": "large_potion"}, c)
+        self.assertTrue(a.over)
+        self.assertIn("given up until tick", a.why)
+        self.assertEqual(a.retry_at, r.mem.nav_stuck.given_up[stuck.goal_key("lorraine:buy", MAP, SELLER)].until)
+
+    def test_the_planner_is_told_the_targets_given_up_and_an_answer_back_to_one_is_not_run(self):
+        fake = FakeLLM('{"op": {"op": "buy", "code": "large_potion"}}')
+        r, _ = self.given_up_seller()
+        r.planner = Planner(client=fake, clock=Clock(), tokens_per_min=10**9)
+        settle(r)
+        sent = fake.messages[0][1]["content"]
+        self.assertIn("goal: ready for its risk", sent)
+        self.assertIn(f"- given_up: buy to map {MAP} at {SELLER[0]},{SELLER[1]} until tick", sent)
+        self.assertNotEqual(r.op, {"op": "buy", "code": "large_potion"})  # the planner's buy was not run
+        said = r.note + "".join(m[1]["content"] for m in fake.messages[1:])
+        self.assertIn("was not run: every seller of large_potion is given up", said)  # the next ask says why
+        self.assertIn("risk", r.blocks)  # the tree's own buy is over at once too: the goal blocked till the backoff ends
+        self.assertEqual(r.blocks["risk"].retry_at, r.mem.nav_stuck.given_up[stuck.goal_key("lorraine:buy", MAP, SELLER)].until)
+
+
+class RejectionTest(Base):
+    def test_a_step_refused_for_an_occupant_is_kept_off_for_one_decision_only(self):
+        """The cell an occupant refused her step on is avoided for that decision, not for good (A14)."""
+        r = self.runner(open_ground(world(pos=(2, 5)), width=20))
+        r.op = {"op": "travel", "to": "point", "x": 9, "y": 5}
+        with mock.patch.object(r, "goal_op", return_value=r.op):
+            d = r.decide()
+            r.apply({"tick": r.world.tick, "queue_id": 1, "intent_results": [
+                {"queue_id": 1, "index": 0, "tick": r.world.tick, "outcome": "rejected",
+                 "rejection": {"code": "block_occupied"}}]}, d)
+        self.assertIsNotNone(r.mem.nav.wait_tile)
+        with mock.patch.object(r, "goal_op", return_value=r.op):
+            r.decide()
+        self.assertIsNone(r.mem.nav.wait_tile)  # without this a seller's cell stayed shut and the walk gave up
+
+    def test_an_occupants_rejection_counts_toward_no_streak(self):
+        w = open_ground(world(pos=(2, 5)))
+        m = ctx(w).mem
+        att = stuck.track(m, w, "goto", (9, 5))
+        m.goal = "goto"
+        for _ in range(stuck.REJECT_STREAK_LIMIT):
+            stuck.on_rejection(m, "block_occupied")
+        self.assertEqual(att.reject_streak, 0)
+        self.assertIsNone(stuck.stuck_reason(att, w.tick))
+        for _ in range(stuck.REJECT_STREAK_LIMIT):
+            stuck.on_rejection(m, "not_traversable")
+        self.assertEqual(stuck.stuck_reason(att, w.tick), "rejections")  # terrain still counts
 
 
 if __name__ == "__main__":

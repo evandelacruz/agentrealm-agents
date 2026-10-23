@@ -31,9 +31,10 @@ it is the planner's answer at "gather" (A140).
 
 **Blocked nodes.** A node the planner says it cannot work (A140) is marked
 in ``Blocks`` with its reason and an expiry; the walk never makes it the
-goal, notes it as skipped with that reason, and descends into its children,
+goal and notes it as skipped with that reason. Its siblings come first, in
+tree order (A169); with none to work, the walk descends into its children,
 taking the first with a node not ready anywhere under it, under a ready
-child too (A169): a blocked goal never ends the tree's work, and "gather" is
+child too: a blocked goal never ends the tree's work, and "gather" is
 never ready and always has an op, so while a gather target exists the
 tree has work. A ready node has nothing to do, so it is never the goal. A
 node not ready whose whole way down is blocked blocks its parent too, with
@@ -86,6 +87,7 @@ class Reading:
     world: WorldModel
     kb: KnowledgeBase | None
     unreachable: Collection[tuple[int, Pos]] = ()  # cells a walk gave up on: no chest there is a source (A167)
+    given_up: tuple[str, ...] = ()  # her walk targets given up, as the planner is told them (A169)
     checks: dict[str, Check] = field(default_factory=dict)
     missing_for: dict[str, r.Missing] = field(default_factory=dict)
 
@@ -380,10 +382,12 @@ def walk(
     """The turn's goal: from the root, into the first child not ready, until a
     node whose children are all ready; only such a node is ever the goal.
 
-    A node marked blocked is skipped with its reason and the walk descends
-    into its children, all ready, taking the first with a node not ready
-    anywhere under it (``past``: a ready node is walked through, A169): a
-    ready node has nothing to do and is never the goal. A
+    A node marked blocked is skipped with its reason. The walk first takes
+    the goal it reaches without going below any block, so a blocked node's
+    siblings come first in tree order (A169); with none, it descends into
+    each blocked node's children, all ready, taking the first with a node
+    not ready anywhere under it (``past``: a ready node is walked through):
+    a ready node has nothing to do and is never the goal. A
     child not ready whose whole way down is blocked blocks its parent too,
     with the child's reason: the walk tries the parent's next child not
     ready, and with none the parent gives no goal. ``goal`` is None when the
@@ -395,16 +399,17 @@ def walk(
     rd = Reading(world, kb, unreachable)
     skipped: list[tuple[Node, Block]] = []
 
-    def down(n: Node, path: list[Node], past: bool = False) -> tuple[Node | None, list[Node], Block | None]:
+    def down(n: Node, path: list[Node], through: bool, past: bool = False) -> tuple[Node | None, list[Node], Block | None]:
         """The goal under ``n``, the path to it, and why there is none.
-        ``past``: below a block, where a ready child is walked through too."""
+        ``through``: the walk may go on below a blocked node; ``past``: it is
+        below one, where a ready child is walked through too."""
         path = [*path, n]
         under: Block | None = None
         for c in n.children:
             ready = rd.check(c).ready
             if ready and not past:
                 continue
-            goal, to, why = down(c, path, past)
+            goal, to, why = down(c, path, through, past)
             if goal is not None:
                 return goal, to, None
             if under is None and why is not None and not ready:
@@ -418,15 +423,19 @@ def walk(
             working = not rd.check(n).ready and n.op(n, rd) is not None
             return (n, path, None) if working else (None, path, None)
         skipped.append((n, block))
-        for c in n.children:
-            goal, to, _ = down(c, path, past=True)
+        for c in n.children if through else ():
+            goal, to, _ = down(c, path, through, past=True)
             if goal is not None:
                 return goal, to, None
         return None, path, block
 
     if rd.check(root).ready:
         return Turn(None, [root], skipped, rd)
-    goal, path, _ = down(root, [])
+    # A blocked node's siblings first, in tree order; only then the nodes below the blocks (A169).
+    goal, path, _ = down(root, [], through=False)
+    if goal is None:
+        skipped.clear()
+        goal, path, _ = down(root, [], through=True)
     return Turn(goal, path if goal else [root], skipped, rd)
 
 

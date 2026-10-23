@@ -183,8 +183,8 @@ def apply(
             m.path, m.goal = [], ""
         reveal(w, sc, map2=map2)
         return True
-    nav_stuck.on_rejection(m)
     code = "block_occupied" if occupied else "not_traversable"
+    nav_stuck.on_rejection(m, code)
     learn_step_rejection(m, w, None, cell, code, w.tick)
     return False
 

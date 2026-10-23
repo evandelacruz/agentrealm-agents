@@ -565,11 +565,20 @@ def on_step(m: Memory, w: WorldModel) -> None:
         att.reveal_left -= 1
 
 
-def on_rejection(m: Memory) -> None:
-    """A rejected Step of the active attempt's path. Call before the rejection clears the goal."""
+# Step rejections an occupant caused: it moves, so they never fail a window (A169).
+OCCUPANT_REJECTIONS = frozenset({"block_occupied", "conflict_lost"})
+
+
+def on_rejection(m: Memory, code: str | None = None) -> None:
+    """A rejected Step of the active attempt's path. Call before the rejection clears the goal.
+
+    One an occupant caused (``OCCUPANT_REJECTIONS``) counts toward no
+    streak: only terrain makes a target unreachable (A169)."""
     stuck = m.nav_stuck
     att = stuck.attempts.get(stuck.active) if stuck.active else None
     if att is None or m.goal != att.goal:
+        return
+    if code in OCCUPANT_REJECTIONS:
         return
     att.reject_streak += 1
     if att.level == REVEAL:

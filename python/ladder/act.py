@@ -58,7 +58,7 @@ from agentrealm_adk.gem_yield import GATHER_BLOCKS, region_of, region_yields
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, hostiles_within, off_safe, walk_reach
 from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
 from agentrealm_adk.memory import Memory
-from agentrealm_adk.navigation import cost_flood, walk_toward
+from agentrealm_adk.navigation import CostGridParams, cell_price, cost_flood, walk_toward
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.passage import went_through
 from agentrealm_adk.pathing import attempt_plan, grid_params, guided_step, plan_sets, route_ahead
@@ -320,25 +320,22 @@ def urgent(ctx: Ctx) -> bool:
     return under_attack(w, ctx.policy) or boss_clock.running(ctx.mem, w) or step_urgent(w, ctx.kb, ctx.value)
 
 
-def walk_costs(ctx: Ctx, cells: set[Pos]) -> dict[Pos, tuple[int, int]]:
-    """The cost grid's price of the cheapest walk from her to each of
-    ``cells`` she can reach, in steps, and how many steps that walk takes:
-    the price is one a clear step plus every surcharge her walk keeps (a
-    hostile's ground, a hazard, a break, fog; ``navigation.planner``), so
-    price less steps is the surcharges alone (``surcharges``)."""
+def walk_grid(ctx: Ctx) -> CostGridParams:
+    """The cost grid her walks plan on: one a clear step plus every
+    surcharge her walk keeps (a hostile's ground, a hazard, a break, fog;
+    ``navigation.planner``). Gather's prices (``walk_costs``) and a detour's
+    (``navigation.cell_price`` in ``value.extra_steps``) read the same one."""
+    avoid, costly, _ = walk_sets(ctx)
+    return grid_params(ctx.policy, avoid, costly, allow_goal_door=True, m=ctx.mem, w=ctx.world, knowledge=ctx.kb)
+
+
+def walk_costs(ctx: Ctx, cells: set[Pos]) -> dict[Pos, int]:
+    """The price of the cheapest walk from her to each of ``cells`` she can
+    reach, on her walk's cost grid (``walk_grid``), in steps."""
     w = ctx.world
     if w.pos is None or not cells:
         return {}
-    avoid, costly, _ = walk_sets(ctx)
-    params = grid_params(ctx.policy, avoid, costly, allow_goal_door=True, m=ctx.mem, w=w, knowledge=ctx.kb)
-    return {p: (c, len(path)) for p, (path, c) in cost_flood(w, cells, params).items()}
-
-
-def surcharges(cost: tuple[int, int]) -> int:
-    """The surcharges in a walk's price (``walk_costs``): its price less its
-    steps, never the steps round a wall, which the steps already count."""
-    price, steps = cost
-    return max(0, price - steps)
+    return {p: c for p, (_, c) in cost_flood(w, cells, walk_grid(ctx)).items()}
 
 
 def take_find(ctx: Ctx, f: Find) -> list[dict]:
@@ -352,8 +349,8 @@ def take_find(ctx: Ctx, f: Find) -> list[dict]:
 def detour(ctx: Ctx, goal: str, dest: Pos | None) -> Act | None:
     """A side find on the walk ``goal`` is under way on (A170), any op's:
     the find whose value (``value.finds``) less the steps going by it adds
-    (``value.extra_steps``, over the route ahead, and the surcharges on the
-    walk to it, ``walk_costs``) at the step price (``value.step_gems``)
+    (``value.extra_steps`` over the route ahead, on her walk's cost grid,
+    ``best_detour``) at the step price (``value.step_gems``)
     gains most, when it gains at all; none while ``urgent``.
     Once taken up it is kept until it is taken or gone, the step price makes
     it a loss, or its walk ends; a take sent for it is never sent again.
@@ -385,9 +382,10 @@ def detour(ctx: Ctx, goal: str, dest: Pos | None) -> Act | None:
 
 
 def best_detour(ctx: Ctx, goal: str, dest: Pos | None, step: float, candidates: list[Find]) -> Find | None:
-    """The find on this map worth the most over the steps it adds to the
-    route ahead of the walk ``goal`` and the surcharges on its way, when its
-    value beats them; never the walk's own target, nor one on the ground of
+    """The find on this map worth the most over what going by it adds to the
+    route ahead of the walk ``goal``, priced on her walk's cost grid (steps
+    and surcharges, ``value.extra_steps`` with ``navigation.cell_price``),
+    when its value beats it; never the walk's own target, nor one on the ground of
     a hostile the walk keeps off or a walk to it given up."""
     w, m = ctx.world, ctx.mem
     here = w.pos
@@ -401,15 +399,14 @@ def best_detour(ctx: Ctx, goal: str, dest: Pos | None, step: float, candidates: 
         and (dest is None or chebyshev(f.pos, dest) > NEAR)  # not the walk's own target
         and not nav_stuck.backed_off(m, DETOUR, w.map_id, stand_by(w, f.pos, NEAR), w.tick)
     ]
-    costs = walk_costs(ctx, {stand_by(w, f.pos, NEAR) for f in near})
+    price = cell_price(w, walk_grid(ctx)) if near else None
     best: tuple[float, int, Find] | None = None
     for f in near:
-        extra = extra_steps(w, here, f.pos, route, allowance(f.gems, step), ctx.policy.avoid_blocks)
-        cost = costs.get(stand_by(w, f.pos, NEAR))
-        if extra is None or cost is None:
+        # On her walk's own grid: the steps round a wall, and a surcharge the route pays anyway, count once.
+        extra = extra_steps(w, here, f.pos, route, allowance(f.gems, step), ctx.policy.avoid_blocks, price)
+        if extra is None:
             continue
-        # ``extra_steps`` counts the steps, walls and all; the walk adds only its surcharges.
-        gain = detour_gain(f.gems, extra + surcharges(cost), step)
+        gain = detour_gain(f.gems, extra, step)
         if gain > 0 and (best is None or (gain, -f.id) > best[:2]):
             best = (gain, -f.id, f)
     return best[2] if best is not None else None
@@ -749,7 +746,7 @@ def gather_targets(ctx: Ctx) -> list[Target]:
             continue
         if foes:
             t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems)
-        cost = costs[stand][0] if stand in costs else chebyshev(here, stand)
+        cost = costs.get(stand, chebyshev(here, stand))
         out.append(((bool(foes), -net(t.gems, cost), chebyshev(here, t.cell), t.cell), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
 

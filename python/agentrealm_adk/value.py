@@ -42,8 +42,10 @@ is partial: his allowance, Pickup and Gather do not read the value yet).
 
 from __future__ import annotations
 
+import heapq
+import itertools
 import math
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -332,7 +334,15 @@ def allowance(gems: float, step: float = STEP_GEMS) -> int:
     return math.floor(gems / step) if step > 0 else math.floor(gems * 10**6)
 
 
-def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: int, avoid: Collection[str] = ()) -> int | None:
+def extra_steps(
+    w: WorldModel,
+    here: Pos,
+    find: Pos,
+    route: list[Pos],
+    limit: int,
+    avoid: Collection[str] = (),
+    price: Callable[[Pos], int | None] | None = None,
+) -> int | None:
     """Steps going by ``find`` now adds to walking ``route`` from ``here``,
     rejoining it at its best cell; None when that is more than ``limit``, or
     when the walk to ``find`` is longer than the straight line plus ``limit``.
@@ -344,7 +354,13 @@ def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: in
     to ``here`` plus ``limit``. A find near in a straight line but far on
     foot (beside a later stretch of a route that winds round a wall) is no
     short insert from here: it is priced again as the walk comes by it. A
-    find beside the route within that search costs at most 2."""
+    find beside the route within that search costs at most 2.
+
+    ``price`` prices each cell as the cost grid does (``navigation.cell_price``:
+    one a clear step plus its surcharges, None where no walk goes), the
+    route's own cells too, so the result is in the grid's steps: a surcharge
+    the route pays anyway, and the steps round a wall, count once. Without
+    it every open cell is one step."""
     if not route:
         return None
     # Straight lines never overestimate a walk: past the limit on them, no search.
@@ -353,26 +369,34 @@ def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: in
         return None
     on_route = set(route) | {here}
 
-    def open_(p: Pos) -> bool:
+    def cost(p: Pos) -> int | None:
+        if price is not None:
+            c = price(p)
+            return c if c is not None else (1 if p in on_route else None)
         tile = w.view.tiles.get(p)
-        return p in on_route or (tile not in avoid and (w.walkable(p) or tile in DOORS))
+        return 1 if p in on_route or (tile not in avoid and (w.walkable(p) or tile in DOORS)) else None
 
-    dist, frontier = {find: 0}, [find]
-    for steps in range(1, reach + limit + 1):
-        nxt = []
-        for x, y in frontier:
-            for dx, dy in NEIGHBOURS:
-                p = (x + dx, y + dy)
-                if p not in dist and open_(p):
-                    dist[p] = steps
-                    nxt.append(p)
-        frontier = nxt
-        if not frontier:
-            break
+    walked = [cost(p) or 1 for p in route]
+    before = list(itertools.accumulate(walked))  # what the route costs up to and onto cell i
+    bound = reach + limit + before[-1] - len(route)
+    dist: dict[Pos, int] = {find: 0}
+    frontier = [(0, find)]
+    while frontier:
+        d, (x, y) = heapq.heappop(frontier)
+        if d > dist.get((x, y), d):
+            continue
+        for dx, dy in NEIGHBOURS:
+            p = (x + dx, y + dy)
+            c = cost(p)
+            if c is None or d + c > bound or d + c >= dist.get(p, bound + 1):
+                continue
+            dist[p] = d + c
+            heapq.heappush(frontier, (d + c, p))
     if here not in dist:
         return None  # not a short insert from here: priced again as the walk comes by
-    rejoin = [dist[p] - (i + 1) for i, p in enumerate(route) if p in dist]
+    rejoin = [dist[p] - before[i] for i, p in enumerate(route) if p in dist]
     if not rejoin:
         return None
-    extra = dist[here] + min(rejoin)
+    # Searched from the find, the walk out pays ``here``'s price, not the find's.
+    extra = dist[here] - (cost(here) or 1) + (cost(find) or 1) + min(rejoin)
     return extra if extra <= limit else None

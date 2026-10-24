@@ -250,6 +250,23 @@ class DetourOnEveryWalkTest(unittest.TestCase):
         # 6 steps added round the wall (0.6 gems) against a berry worth 0.7: counted twice, it was passed by.
         self.assertTrue(act.act({"op": "buy", "code": "raft"}, c).why.startswith("detour"))
 
+    def test_a_surcharge_the_route_pays_anyway_is_not_charged_to_the_detour(self):
+        k = knowledge()
+        k.world_code = WORLD
+        w = open_ground(world(health=6), 60, 30)
+        w.perception = 60
+        c = ctx(w, k)
+        op = {"op": "travel", "to": "point", "x": 55, "y": 10}
+        act.act(op, c)
+        x, y = w.pos = _end_of_queue(w, c)
+        for fx in range(x + 2, x + 10):
+            for fy in range(30):
+                w.view.tiles.pop((fx, fy), None)  # unseen ground the walk ahead crosses anyway, at fog's surcharge
+        berry(w, at=(x + 12, y + 1))  # beside the route past it
+        w.entities.append(Entity("supply", 77, (1, 1), "small_potion", gem_price=7))  # a health point at 0.7 gems
+        # Charged the fog it crosses anyway (8 steps, 0.8 gems), the berry was passed by.
+        self.assertTrue(act.act(op, c).why.startswith("detour"))
+
     def test_at_full_health_the_walk_passes_the_berries(self):
         k = knowledge(sells={"raft": 30})
         k.world_code = WORLD

@@ -282,7 +282,7 @@ def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
     walks = OWNER_WALKS.get(owner, ())
     for rec in m.nav_stuck.given_up.values():
         mine = (rec.map_id, rec.target) == (w.map_id, at) and rec.goal.startswith(walks)
-        if mine and w.tick < rec.until and rec.reasons:
+        if mine and rec.holds(w.tick) and rec.reasons:
             return f"the walk, given up ({', '.join(rec.reasons)})"
     return None
 
@@ -290,9 +290,10 @@ def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
 def _shut_key(w: WorldModel, ctx: PlayContext, state: str, op: GoalOp | None, at: Pos | None) -> tuple:
     """What a shut way was found under: the executor, its op, the map, the
     cell, the target, the map's tiles (``Tiles.revision``), what is held, and
-    what lapses by time alone: the walks given up and still backed off (A90:
-    a block, the op's own walk, any other) and the cells the route learnings
-    keep out or price (``plan_sets``). A give-up that lapses with the op on
+    what lapses: the walks given up and still holding (A90: a block, the
+    op's own walk, any other; each lifts once its backoff ends and its
+    ground changes, A171) and the cells the route learnings keep out or
+    price (``plan_sets``), by time. A give-up that lapses with the op on
     top has the way searched again (A129)."""
     m = ctx.memory
     held = tuple(sorted((s.code or "") for s in w.held_supplies)) + (w.armed_code or "",)

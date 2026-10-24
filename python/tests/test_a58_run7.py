@@ -25,6 +25,7 @@ from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
 from agentrealm_agent.states.base import PlayContext
 from agentrealm_adk.world import Entity, WorldModel
+from tests.test_give_ups import see_new_ground
 
 SMALL_BUDGET = 30
 
@@ -245,6 +246,8 @@ class HealWalkBoundedTest(unittest.TestCase):
         self.assertIsNone(bounded_step(m, w, "loot", FOOD, set(), lambda: planned.append(1) or [(403, 606)]))
         self.assertEqual(planned, [], "backed off: not planned again")
         w.tick += nav_stuck.BACKOFF_BASE_TICKS
+        self.assertIsNone(bounded_step(m, w, "loot", FOOD, set(), lambda: [(403, 606)]), "ground unchanged (A171)")
+        see_new_ground(w, m.nav_stuck.given_up[nav_stuck.goal_key("loot", w.map_id, FOOD)], m)
         self.assertEqual(bounded_step(m, w, "loot", FOOD, set(), lambda: [(403, 606)]), (403, 606))
 
     def test_a_taken_first_step_waits_out_its_window(self):

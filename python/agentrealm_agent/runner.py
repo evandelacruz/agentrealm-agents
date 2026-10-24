@@ -1173,7 +1173,7 @@ class Runner:
             return False
         if intent and intent.get("verb") == "Step" and w.pos is not None:
             rej = result.get("rejection") or {}
-            nav_on_rejection(m)  # before the rejection drops the goal (A15)
+            nav_on_rejection(m, rej.get("code"))  # before the rejection drops the goal (A15)
             learn_step_rejection(
                 m,
                 w,

@@ -11,6 +11,7 @@ from agentrealm_agent.plan import PLAN_STALL_SECONDS
 from unittest import mock
 
 from agentrealm_agent.brain import Memory, decide
+from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
@@ -175,7 +176,8 @@ class RevealTest(unittest.TestCase):
         )
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
 
-    def test_occupied_first_step_waits_out_the_window(self):
+    def test_an_occupied_first_step_waits_and_never_fails_the_window(self):
+        """Occupants move (A169): waiting on one is no failed level, however long."""
         w = grid(["#####", "....."], at=(0, 1))
         w.entities = [Entity("character", 5, (1, 1))]
         m = Memory()
@@ -183,9 +185,79 @@ class RevealTest(unittest.TestCase):
         self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
         att = nav_stuck.active(m, w)
         self.assertEqual(att.level, nav_stuck.WALK, "a taken cell is not a failed level")
-        w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+        w.tick += nav_stuck.OCCUPANT_WAIT_TICKS - 1  # past the time window, short of the wait's cap
+        self.assertGreater(nav_stuck.OCCUPANT_WAIT_TICKS, 0)
         self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
-        self.assertEqual((att.level, att.reasons), (nav_stuck.CAUTIOUS, ["time"]))
+        self.assertEqual((att.level, att.reasons), (nav_stuck.WALK, []))
+        self.assertEqual(nav_stuck.occupant_wait(m, w, "goto"), nav_stuck.OCCUPANT_WAIT_TICKS - 1)
+        self.assertNotIn(att.key, m.nav_stuck.given_up)
+        w.entities = []  # the occupant moved on: the walk goes, and the wait never counted
+        self.assertEqual(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path), (1, 1))
+        self.assertIsNone(nav_stuck.occupant_wait(m, w, "goto"))
+        self.assertIsNone(nav_stuck.stuck_reason(att, w.tick))
+
+    def test_the_wait_on_occupants_is_capped_for_every_walk_with_no_give_up(self):
+        """Past ``OCCUPANT_WAIT_TICKS`` the walk holds: no give-up, no backoff, its caller told (A169)."""
+        w = grid(["#####", "....."], at=(0, 1))
+        w.entities = [Entity("character", 5, (1, 1))]
+        m = Memory()
+        path = [(1, 1), (2, 1), (3, 1)]
+        guided_step(m, w, "goto", (3, 1), set(), lambda _a: path)
+        att = nav_stuck.active(m, w)
+        w.tick += nav_stuck.OCCUPANT_WAIT_TICKS
+        self.assertEqual(nav_stuck.stuck_reason(att, w.tick), nav_stuck.OCCUPIED)
+        self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
+        self.assertTrue(nav_stuck.occupants_held(m, w, "goto"))
+        self.assertFalse(nav_stuck.occupants_held(m, w, "goto", since=w.tick + 1))  # a later op's walk: not its hold
+        self.assertEqual(att.level, nav_stuck.WALK)
+        self.assertFalse(nav_stuck.backed_off(m, "goto", w.map_id, (3, 1), w.tick))
+        self.assertEqual(m.nav_stuck.stuck_signals, [])
+        w.tick += 1  # the next call plans afresh: the occupant still there, it waits again, never climbs
+        self.assertIsNone(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path))
+        self.assertEqual(nav_stuck.occupant_wait(m, w, "goto"), 0)
+        w.entities = []
+        self.assertEqual(guided_step(m, w, "goto", (3, 1), set(), lambda _a: path), (1, 1))
+        self.assertFalse(nav_stuck.occupants_held(m, w, "goto"))
+
+    def test_garys_travel_walk_holds_at_the_cap_and_never_gives_up_on_an_occupant(self):
+        """Gary's executors walk the same ladder (``travel.route_step``): the cap holds for him too."""
+        from agentrealm_agent.states.travel import route_step
+
+        w = grid(["#######", ".......", "#######"], at=(0, 1))
+        w.entities = [Entity("npc", 5, (1, 1), "villager")]  # a stationary NPC on a one-cell way
+        m = Memory()
+        steps = []
+        for _ in range(4 * nav_stuck.OCCUPANT_WAIT_TICKS // 10):
+            steps.append(route_step(w, m, Policy(), None, set(), set(), w.map_id, (6, 1), "travel:point", set()))
+            w.tick += 10
+        self.assertEqual(set(steps), {None})
+        self.assertFalse(nav_stuck.backed_off(m, "travel:point", w.map_id, (6, 1), w.tick))
+        self.assertEqual(m.nav_stuck.stuck_signals, [])
+        self.assertEqual(nav_stuck.active(m, w).level, nav_stuck.WALK)
+        self.assertTrue(nav_stuck.occupants_held(m, w, "travel:point"))
+        w.entities = []
+        self.assertEqual(route_step(w, m, Policy(), None, set(), set(), w.map_id, (6, 1), "travel:point", set()), (1, 1))
+
+    def test_a_way_round_an_occupant_near_as_short_is_walked(self):
+        w = grid([".....", ".....", "....."], at=(0, 1))
+        w.entities = [Entity("npc", 5, (1, 1))]
+        m = Memory()
+        path = [(1, 1), (2, 1), (3, 1)]
+        step = guided_step(m, w, "goto", (3, 1), set(), lambda _a: path)
+        self.assertIn(step, [(1, 0), (1, 2)])  # round the NPC, not a wait on it
+        self.assertIsNone(nav_stuck.occupant_wait(m, w, "goto"))
+
+    def test_a_way_shut_by_terrain_is_still_given_up(self):
+        """Only terrain makes a target unreachable (A169): with no route at all the ladder runs to its give-up."""
+        w = grid(["#####", "..#..", "#####"], at=(0, 1))
+        w.entities = [Entity("npc", 5, (1, 1))]  # an occupant beside the wall changes nothing
+        m = Memory()
+        for _ in range(12):
+            guided_step(m, w, "goto", (4, 1), set(), lambda _a: None)
+            w.tick += nav_stuck.PROGRESS_TICK_LIMIT
+            if nav_stuck.backed_off(m, "goto", w.map_id, (4, 1), w.tick):
+                break
+        self.assertTrue(nav_stuck.backed_off(m, "goto", w.map_id, (4, 1), w.tick))
 
 
 class BreakResetTest(unittest.TestCase):

@@ -23,11 +23,20 @@ owed, else a round trip (``POST tick``). Each round trip:
    is not run again for that goal, and the tree is asked afresh.
 5. **No silent hold** (A168): an op that sends nothing the same way two
    rounds in a row is over, but for a wait the clock clears (a weapon
-   cooldown, her place unread: ``Act.waits``), which is neither a repeat
-   nor a stall. Every round the op sends nothing and no reflex
+   cooldown, her place unread, occupants on the way: ``Act.waits``), which
+   is neither a repeat nor a stall. Every round the op sends nothing and no reflex
    holds is a stall, but for one with the question about the goal still
    out; ``STALL_ROUNDS`` of them in a row block the goal with why, and the
    next walk asks the planner once, saying so.
+6. **A blocked goal never idles her** (A169): the walk works the tree's
+   other nodes under it ("gather" always has an op), and the blocked goal
+   is retried once its blocker can have changed (``ask.lift_changed``: the
+   state the planner saw, a walk's backoff ended, its expiry). With no
+   goal at all and the world not beaten, she always asks the planner about
+   the blocked node, with why; exploring (``IDLE_OP``) only fills the wait
+   for the answer. An answer that walks back to a target given up and still
+   backed off is not run (``refused``). Each tick record names the goals
+   blocked and why (``round_record``), beside the goal worked.
 
 Every send, a reflex's or an op's, goes through the one water gate
 (``fording.ford_gate``, A133), as Gary's do.
@@ -62,20 +71,20 @@ from agentrealm_adk.knowledge_base.hostiles import load_hostiles, save_hostiles
 from agentrealm_adk.knowledge_maps import record_map_level, record_map_levels, record_warp, sync_tiles, sync_world_maps
 from agentrealm_adk.level_order import minimap_due, note_door_step, settle_entry
 from agentrealm_adk.memory import Memory
-from agentrealm_adk.navigation.rejection import learn_step_rejection
+from agentrealm_adk.navigation.rejection import end_decision, learn_step_rejection
 from agentrealm_adk.navigation.stuck import given_up_dests
 from agentrealm_adk.navigation.stuck import on_rejection as nav_on_rejection
 from agentrealm_adk.navigation.stuck import on_step as nav_on_step
 from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
 from agentrealm_adk.survival import recently_attacked
-from agentrealm_adk.targets import GoalOp
+from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
 from agentrealm_adk.trace import Trace, tick_detail
 from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
-from .act import FETCH_GOAL, Act, Ctx, Started, act
-from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, watch_lines
+from .act import FETCH_GOAL, Act, Ctx, Started, act, given_up_lines, given_up_target
+from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, seen, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 from .readiness import ORDINARY
 from .reflexes import ESCAPES, reflex, threats
@@ -86,6 +95,8 @@ SELF_REFRESH = 60
 QUEUE_RESULT_SLACK = 5
 # Round trips in a row the op may send nothing, no reflex holding, before its goal is blocked (A168).
 STALL_ROUNDS = 10
+# What she works with no goal while a block stands and the world is not beaten (A169).
+IDLE_OP: GoalOp = {"op": "explore_area", "radius": EXPLORE_ANYWHERE}
 
 
 def choose_call(w: WorldModel, m: Memory, policy: config.Policy) -> str:
@@ -148,6 +159,8 @@ class LadderRunner:
         self.note = ""  # said with the next ask: why the last goal was blocked
         self.asked_blocked: tuple[str, int] | None = None  # the blocked node last asked about, and its block's expiry
         self.own_blocks: set[str] = set()  # nodes the loop blocked itself (a stall, every op over), not a cannot
+        self.goal_since: tuple[str | None, int] = (None, 0)  # the turn's goal and the tick it became the goal
+        self.last_retry: int | None = None  # when the walk the goal's last op gave up on may be walked again
 
     def log(self, call: str, detail: str, record: dict | None = None) -> None:
         self.trace.log(self.world, call, detail, record or {})
@@ -280,6 +293,7 @@ class LadderRunner:
         goal (``stalled``). A round with the question about the turn's goal
         still out is not counted, so a slow reply is never thrown away."""
         d = self.choose()
+        end_decision(self.mem.nav, self.world.tick)  # a rejection's lessons last one decision (A14, A169)
         if not d.stalled:
             self.stalls = 0
             return d
@@ -327,9 +341,19 @@ class LadderRunner:
                     return Decision(None, why, op["op"], stalled=True)
                 a = Act(None, f"{why}, again", over=True)
             self.log("op", f"{op['op']} over: {a.why}")
+            if a.retry_at is not None:
+                self.last_retry = a.retry_at
             self.end_op(a.why)
             op = self.goal_op()
-        return Decision(None, "no op to work", "tree", stalled=self.turn is not None and self.turn.goal is not None)
+        return Decision(None, self.nothing_to_work(), "tree", stalled=self.turn is not None and self.turn.goal is not None)
+
+    def nothing_to_work(self) -> str:
+        """Why no op works this round: the blocks that stand, if any (A169)."""
+        skipped = self.turn.skipped if self.turn is not None else []
+        if not skipped:
+            return "no op to work"
+        node, block = skipped[0]
+        return f"no op to work: {node.title} blocked, {block.reason}"
 
     def asking_about_goal(self) -> bool:
         """The question about the turn's goal is out and not yet taken up."""
@@ -338,11 +362,14 @@ class LadderRunner:
 
     def round_record(self, d: Decision) -> dict:
         """What a tick record names besides its intents (A168): the tree's
-        goal node, the op, the act's result (why, whether anything went out,
-        a stall) and the reflex that held the round, if one did."""
+        goal node, the goals blocked and why (A169: the goal worked is the
+        one worked instead), the op, the act's result (why, whether
+        anything went out, a stall) and the reflex that held the round, if one did."""
         goal = self.turn.goal if self.turn is not None else None
+        skipped = self.turn.skipped if self.turn is not None else []
         return {
             "goal": goal.key if goal is not None else None,
+            "blocked": [{"goal": n.key, "why": b.reason} for n, b in skipped],
             "op": self.op,
             "act": {"why": d.why, "sent": bool(d.intents), "stalled": d.stalled, "stalls": self.stalls},
             "reflex": d.reflex,
@@ -392,14 +419,18 @@ class LadderRunner:
         no answer; the reply is taken up once it is back."""
         w = self.world
         for key in lift_changed(self.blocks, w, self.knowledge):
-            self.log("planner", f"{key}: block lifted, what it waited on came")
+            self.log("planner", f"{key}: block lifted, what it waited on came or its blocker may have changed")
+            self.own_blocks.discard(key)
             self.asked_for = None  # the next walk asks afresh
         # A death chest her walk to gave up on is no source the tree picks (A167).
         unreachable = given_up_dests(self.mem.nav_stuck, w.tick, FETCH_GOAL)
         self.turn = turn = walk(w, self.knowledge, self.blocks, self.root, unreachable)
+        turn.reading.given_up = tuple(given_up_lines(self.mem, w.tick))  # told the planner (A169)
+        if self.goal_since[0] != (turn.goal.key if turn.goal is not None else None):
+            self.goal_since, self.last_retry = (turn.goal.key if turn.goal is not None else None, w.tick), None
         if turn.goal is None:
-            self.set_op(None)
             self.asked_for = None
+            self.set_op(self.idle_op(turn))  # fills the wait for the answer, never stands in for it
             self.ask_blocked(turn)
             if self.call is not None and self.call.back:
                 self.take_reply(turn)
@@ -419,6 +450,27 @@ class LadderRunner:
         op = turn.op()
         return None if op in self.done else op
 
+    def idle_op(self, turn: Turn) -> GoalOp | None:
+        """With no goal while a block stands (A169), she explores, until that is over too."""
+        return IDLE_OP if turn.skipped and IDLE_OP not in self.done else None
+
+    def retry_at(self) -> int | None:
+        """When a walk given up for the turn's goal may be walked again: the
+        soonest backoff end among the walk targets given up since it became
+        the goal, or the one its last op was over on (A90, A169), for its
+        block to retry then."""
+        tick, stuck = self.world.tick, self.mem.nav_stuck
+        ends = [g.until for g in stuck.given_up.values() if g.since >= self.goal_since[1] and tick < g.until]
+        if self.last_retry is not None and tick < self.last_retry:
+            ends.append(self.last_retry)
+        return min(ends) if ends else None
+
+    def block(self, key: str, reason: str) -> None:
+        """Block ``key`` for the loop's own reason (a stall, every op over),
+        retried as a ``cannot`` is (A169)."""
+        self.blocks.mark(key, reason, self.world.tick, seen=seen(self.world, self.knowledge), retry_at=self.retry_at())
+        self.own_blocks.add(key)
+
     def ask(self, turn: Turn, note: str = "") -> None:
         """Send the question about the turn's goal, unless one is out already,
         with why the last goal was blocked when a stall blocked it (A168)."""
@@ -428,16 +480,17 @@ class LadderRunner:
                 self.note = ""
 
     def blocked_node(self, turn: Turn) -> Node | None:
-        """The deepest node the walk skipped for a block the loop set itself
-        (``own_blocks``) and still in force; a planner's ``cannot`` is its answer already."""
-        return next(
-            (n for n, _ in turn.skipped if n.key in self.own_blocks and self.blocks.active(n.key, self.world.tick)), None
-        )
+        """The node to ask about when every way down is blocked: the deepest
+        the loop blocked itself (``own_blocks``), else the first a planner's
+        ``cannot`` blocked (A169), still in force."""
+        active = [n for n, _ in turn.skipped if self.blocks.active(n.key, self.world.tick)]
+        return next((n for n in active if n.key in self.own_blocks), active[0] if active else None)
 
     def ask_blocked(self, turn: Turn) -> None:
-        """Every way down is blocked and the world is not beaten (A168): the
-        planner is asked once about the deepest node blocked, with why, so
-        the walk never stands with no goal and no question out."""
+        """Every way down is blocked and the world is not beaten (A168, A169):
+        the planner is always asked, once per block, about the node
+        ``blocked_node`` names, with why, so "no op to work" is never a silent
+        hold; exploring only fills the wait for its answer."""
         node = self.blocked_node(turn)
         if node is None or self.call is not None:
             return
@@ -458,11 +511,15 @@ class LadderRunner:
             return
         self.own_blocks.discard(node.key)
         if reply.op is None:
-            answer(node, reply, self.blocks, self.turn.reading)
+            answer(node, reply, self.blocks, self.turn.reading, self.retry_at())
+            self.asked_blocked = (node.key, self.blocks[node.key].until)  # its answer: not asked again for this block
             self.log("planner", f"{node.title}: cannot: {reply.cannot}")
+            return
+        if self.refused(node, reply.op):
             return
         self.blocks.lift(node.key)
         self.turn = turn = walk(self.world, self.knowledge, self.blocks, self.root)
+        turn.reading.given_up = tuple(given_up_lines(self.mem, self.world.tick))
         if turn.goal is None or turn.goal.key != node.key:
             return
         self.asked_for, self.done, self.answered = (node.key, tuple(watch_lines(self.world, self.knowledge).values())), [], True
@@ -476,7 +533,7 @@ class LadderRunner:
         assert call is not None
         reply = self.planner.finish(call)
         goal = turn.goal
-        if goal is None and self.blocked_node(turn) is call.node:
+        if goal is None and self.asked_blocked is not None and call.node.key == self.asked_blocked[0]:
             self.take_blocked_reply(call, reply)
             return
         if goal is None or call.node.key != goal.key:
@@ -490,7 +547,7 @@ class LadderRunner:
         if first is not None and (reply is None or already_met(reply, turn.reading.world)):
             # Asked once more and no better answer: the first one's plain block, to its expiry.
             self.own_blocks.discard(goal.key)
-            answer(goal, first, self.blocks, turn.reading)
+            answer(goal, first, self.blocks, turn.reading, self.retry_at())
             self.set_op(None)
             return
         if reply is None:
@@ -502,14 +559,27 @@ class LadderRunner:
             self.ask(turn, ALREADY_MET.format(until=reply.until))
             return
         self.own_blocks.discard(goal.key)
-        op = answer(goal, reply, self.blocks, turn.reading)
+        op = answer(goal, reply, self.blocks, turn.reading, self.retry_at())
         if op is None:
             b = self.blocks[goal.key]
             self.log("planner", f"{goal.title}: cannot: {reply.cannot} (until {b.named or 'tick'} {b.was or b.until})")
             self.set_op(None)  # the next walk descends past the blocked node
             return
+        if self.refused(goal, op):
+            return
         self.log("planner", f"{goal.title}: {op}")
         self.set_op(None if op in self.done else op)
+
+    def refused(self, node: Node, op: GoalOp) -> bool:
+        """An answer that walks back to a target her walk gave up and is still
+        backed off from is not run (A169, ``act.given_up_target``): the
+        tree's op stands, and the next ask says why."""
+        why = given_up_target(op, self.ctx())
+        if not why:
+            return False
+        self.log("planner", f"{node.title}: {op} refused: {why}")
+        self.note = f"your answer {json.dumps(op, sort_keys=True)} was not run: {why}"
+        return True
 
     def set_op(self, op: GoalOp | None) -> None:
         if op != self.op:
@@ -528,8 +598,7 @@ class LadderRunner:
             return
         self.set_op(self.own_op(self.turn))
         if self.op is None:
-            self.blocks.mark(goal.key, f"every op for it is over: {why}", self.world.tick)
-            self.own_blocks.add(goal.key)
+            self.block(goal.key, f"every op for it is over: {why}")
             self.log("planner", f"{goal.title}: blocked, every op for it is over ({why})")
 
     def stalled(self, why: str) -> None:
@@ -541,8 +610,7 @@ class LadderRunner:
         if goal is None:
             return
         reason = f"stalled: {STALL_ROUNDS} rounds with nothing sent ({why})"
-        self.blocks.mark(goal.key, reason, self.world.tick)
-        self.own_blocks.add(goal.key)
+        self.block(goal.key, reason)
         self.log("planner", f"{goal.title}: blocked, {reason}")
         self.note = f"{goal.title} was blocked, {reason}"
         self.asked_for = None
@@ -589,8 +657,8 @@ class LadderRunner:
             intent, tick = m.pending_intents[idx], int(res.get("tick", w.tick))
             if res.get("outcome") == "rejected":
                 if intent.get("verb") == "Step" and w.pos is not None:
-                    nav_on_rejection(m)
                     code = (res.get("rejection") or {}).get("code")
+                    nav_on_rejection(m, code)
                     learn_step_rejection(m, w, self.knowledge, step_landing(w.pos, intent["direction"]), code, tick)
                 self.drop_queue()
                 m.need_position, m.path = True, []

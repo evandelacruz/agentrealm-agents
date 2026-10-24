@@ -238,6 +238,19 @@ class LoopTest(unittest.TestCase):
                 Decision([{"verb": "Step", "direction": "W"}], "flee", "flee"))
         self.assertEqual(r.mem.break_pending, (MAP, ROCK, "cut"))
 
+    def test_a_queue_that_sends_the_break_again_keeps_it_though_the_old_one_was_refused(self):
+        r, w = self.r, self.w
+        self.sent([use_on(ROCK)])
+        refused = [{"queue_id": 7, "index": 0, "outcome": "rejected", "tick": w.tick, "rejection": {"code": "attack_cooldown"}}]
+        r.apply({"tick": w.tick, "queue_id": 8, "intent_results": refused},
+                Decision([{"verb": "Wait", "ticks": 1}, use_on(ROCK)], "break", "gather_gems"))
+        self.assertEqual(r.mem.break_pending, (MAP, ROCK, "cut"))
+        w.tick += 2
+        r.apply({"tick": w.tick, "events_by_tick": [{"tick": w.tick, "events": [
+            {"kind": "BlockChanged", "map_id": MAP, "x": ROCK[0], "y": ROCK[1], "block_type": "grass"}]}]},
+            Decision(None, "poll", "gather_gems"))
+        self.assertEqual(r.knowledge.breaks[f"{MAP},7,5,cut"]["result"], "opened")
+
     def test_a_queue_replaced_before_the_break_ran_drops_it(self):
         r, w = self.r, self.w
         self.sent([{"verb": "Wait", "ticks": 2}, use_on(ROCK)])

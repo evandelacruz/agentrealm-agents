@@ -66,7 +66,7 @@ from agentrealm_adk.executor import (
     queue_horizon_intents,
     step_landing,
 )
-from agentrealm_adk.break_results import note_break_use, resolve_pending_break
+from agentrealm_adk.break_results import note_break_use, resolve_pending_break, settle_replaced_break
 from agentrealm_adk.fording import ford_gate, loadout_memory
 from agentrealm_adk.gem_caches import note_caches
 from agentrealm_adk.item_table import use_target_block
@@ -654,7 +654,7 @@ class LadderRunner:
             m.pending_next_index, m.queue_sent_tick = 0, w.tick
         self.apply_results(r.get("intent_results") or [])
         if d.intents is not None:
-            settle_replaced_break(self.knowledge, m, w, replaced, r.get("intent_results") or [], d.intents)
+            settle_replaced_break(self.knowledge, m, w, *replaced, r.get("intent_results") or [], d.intents)
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
@@ -738,39 +738,6 @@ class LadderRunner:
         for e in w.entities:
             if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0 and not w.is_our_drop(e.id):
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
-
-
-def settle_replaced_break(
-    kb: KnowledgeBase | None, m: Memory, w: WorldModel, replaced: tuple, results: list[dict], sent: list[dict],
-) -> None:
-    """Settle a break in flight on a queue just replaced (A172): its own
-    results in this response first (``note_break_use``), as for any queue;
-    then, if its break ``Use`` never ran and the new queue does not send it
-    again, the break is no longer in flight, so a later change there is not
-    ours. One that ran stays pending: its ``BlockChanged`` may come with this
-    response (``resolve_pending_break``) or a later one."""
-    intents, queue, start = replaced
-    if m.break_pending is None or not intents:
-        return
-    pos = m.break_pending[1]
-
-    def is_break(i: dict | None) -> bool:
-        return i is not None and i.get("verb") == "Use" and use_target_block(i, w.entities) == pos
-
-    at = next((n for n in range(start, len(intents)) if is_break(intents[n])), None)
-    if at is None:
-        return
-    ran = False
-    for res in sorted((x for x in results if x.get("queue_id") == queue), key=lambda x: (x.get("tick", 0), x.get("index", 0))):
-        n = int(res.get("index", 0))
-        if n < start or n >= len(intents) or m.break_pending is None:
-            continue
-        intent = intents[n]
-        block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
-        note_break_use(kb, m, w, intent, res, block, list(intents[n:]))
-        ran |= n == at and res.get("outcome") != "rejected"
-    if m.break_pending is not None and not ran and not any(is_break(i) for i in sent):
-        m.break_pending = None
 
 
 def op_key(op: GoalOp | None) -> str | None:

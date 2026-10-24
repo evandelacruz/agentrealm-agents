@@ -397,6 +397,39 @@ def is_backed_off(stuck: NavStuckMemory, key: str, tick: int) -> bool:
     return rec is not None and rec.holds(tick)
 
 
+# Each reason a walk is given up for, in game terms, for the planner (A171).
+GIVE_UP_WORDS = {
+    "no_path": "no path over known ground",
+    "no_step": "no open step toward it",
+    "time": "got no nearer for 30 s",
+    "moves": "got no nearer in 20 moves",
+    "rejections": "its steps were refused",
+    "oscillation": "paced between two cells",
+    "pacing": "paced between two cells",
+    "reveal_spent": "walking along the obstacle found no way",
+    "no_frontier": "no unseen ground left near it to look at",
+    "no_break": "no block on the way that a held item opens",
+    "arm_only": "arming a tool led to no break",
+}
+
+
+def why_given_up(rec: GiveUp) -> str:
+    """Why ``rec`` was given up, in game terms: each failed level's reason once, in order."""
+    words = [GIVE_UP_WORDS.get(r, r.replace("_", " ")) for r in rec.reasons] or ["stuck"]
+    return ", ".join(dict.fromkeys(words))
+
+
+def what_lifts(rec: GiveUp, tick: int) -> str:
+    """When ``rec`` is walked again (A171): after its backoff while that is
+    ahead, and once the ground round it changes, never on time alone."""
+    ground = "once new ground is seen near it, a block there opens, an occupant leaves or a capability is gained"
+    if rec.ground is None:
+        return f"retried after tick {rec.until}"
+    if tick < rec.until:
+        return f"retried after tick {rec.until}, {ground}"
+    return f"retried {ground}"
+
+
 def key_of(rec: GiveUp) -> str:
     """The :func:`goal_key` ``rec`` is filed under."""
     return goal_key(rec.goal, rec.map_id, rec.target)

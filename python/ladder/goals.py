@@ -139,6 +139,9 @@ class Block:
     # The walks given up for it (``stuck.goal_key``): while each still holds,
     # nothing round it changed and it stays blocked; one lifting retries it (A171).
     given_up: tuple[str, ...] = ()
+    # The give-ups the planner was shown when it answered ``cannot`` (State
+    # ``given_up``): a ``cannot`` resting on one lapses when it lifts (A171).
+    shown: tuple[str, ...] = ()
 
 
 class Blocks(dict[str, Block]):
@@ -146,9 +149,9 @@ class Blocks(dict[str, Block]):
 
     def mark(
         self, key: str, reason: str, now: int, ticks: int = BLOCK_TICKS, named: str = "", was: str = "",
-        seen: tuple = (), given_up: tuple[str, ...] = (),
+        seen: tuple = (), given_up: tuple[str, ...] = (), shown: tuple[str, ...] = (),
     ) -> None:
-        self[key] = Block(reason, now + ticks, named, was, seen, given_up)
+        self[key] = Block(reason, now + ticks, named, was, seen, given_up, shown)
 
     def active(self, key: str, now: int) -> Block | None:
         """The block on ``key`` still in force at ``now``; a lapsed one is forgotten."""

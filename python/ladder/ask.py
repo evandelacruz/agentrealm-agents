@@ -89,7 +89,7 @@ You answer one question about one goal of an Agent Realm character: how to work 
 You are shown the goal, the state its readiness reads, the ops that can work it, and the op the goal tree would run, as an example of an op's shape. Answer with one JSON object and nothing else:
 
 - {"op": {"op": "<one of the ops>", ...its fields}, "why": "<one line>"} to run that op now. Name a cell only by an x and y the state gives.
-- given_up lists the targets a walk gave up on, with why and what lifts each: a tick, and the ground round it changing (cells seen there that were not, a block opened or broken, an occupant gone, a capability gained). Never answer with an op that walks to one of them (its cell, or a buy whose every seller is one) while it is listed: nothing has changed there. Answer with another way instead: explore toward it so the ground round it is seen, another target (another entrance, another seller), or getting what opens the way.
+- given_up lists the targets a walk gave up on, with why and what lifts each: a tick, and the ground round it changing (cells seen there that were not, a block opened or broken, an occupant gone, a capability gained). A give-up is not "unreachable": it holds only until what lifts it comes, so a cannot that rests on one lapses with it. Never answer with an op that walks to one of them (its cell, or a buy whose every seller is one) while it is listed: nothing has changed there. Answer with another way instead: explore toward it so the ground round it is seen, another target (another entrance, another seller), or getting what opens the way.
 - {"cannot": "<why no op can work it now, in game terms>", "until": "<what would let it be worked>"} when none can. The goal is then set aside, and the character works on what is under it, until then. until is one of: "held" (what is carried changes), "levels_cleared", "sellers" (a seller becomes known for another item), "entrance_needs" (the next level's entrance needs something else), "gems N" (N gems are held), or "ticks N" (N ticks pass, at most 3000). Anything else, or none, sets the goal aside for 3000 ticks."""
 
 
@@ -212,13 +212,15 @@ def already_met(reply: Reply, w: WorldModel) -> bool:
 ALREADY_MET = "your last answer was cannot until {until}, which is already true; answer again"
 
 
-def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, given_up: tuple[str, ...] = ()) -> GoalOp | None:
+def answer(
+    node: Node, reply: Reply, blocks: Blocks, rd: Reading, given_up: tuple[str, ...] = (), shown: tuple[str, ...] = ()
+) -> GoalOp | None:
     """Carry a reply out on the tree: an op is returned to run; a ``cannot``
     blocks the node with its reason and what it waits on (``UNTIL_LINES``,
     ``gems N``, ``ticks N``); anything else it names is dropped. The block
     is retried as every block is (``lift_changed``): on the state the
     planner saw (``seen``), and once one of the walks ``given_up`` for the
-    node may be walked again (A171)."""
+    node, or one of the give-ups it was ``shown``, may be walked again (A171)."""
     if reply.op is not None:
         return reply.op
     name, _, arg = reply.until.partition(" ")
@@ -229,7 +231,7 @@ def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, given_up: tupl
         named, was = GEMS, arg
     elif name == TICKS and _count(arg) is not None:
         ticks = min(BLOCK_TICKS, _count(arg))
-    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world, rd.kb), given_up=given_up)
+    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world, rd.kb), given_up=given_up, shown=shown)
     return None
 
 
@@ -245,7 +247,10 @@ def may_have_changed(block: Block, w: WorldModel, now: tuple, stuck: NavStuckMem
     it may be walked again (A171: its ground changed), or the state the
     planner saw is not ``now`` (``seen``). While every walk given up for it
     still holds, the region she stands in is no change: only what she
-    carries or what her health covers is."""
+    carries or what her health covers is. A ``cannot`` lapses too once a
+    give-up the planner was shown lifts: it may have rested on it."""
+    if block.shown and (stuck is None or not all(is_backed_off(stuck, k, w.tick) for k in block.shown)):
+        return True
     if not block.given_up:
         return bool(block.seen) and block.seen != now
     if stuck is None or not all(is_backed_off(stuck, k, w.tick) for k in block.given_up):

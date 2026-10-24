@@ -86,7 +86,7 @@ from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, sa
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
-from .act import FETCH_GOAL, Act, Ctx, Started, act, given_up_lines, given_up_target
+from .act import FETCH_GOAL, OWN_WALKS, Act, Ctx, Started, act, given_up_lines, given_up_target
 from .ask import ALREADY_MET, Call, Planner, Reply, already_met, answer, lift_changed, seen, watch_lines
 from .goals import Blocks, Node, Turn, tree, walk
 from .readiness import ORDINARY
@@ -476,6 +476,13 @@ class LadderRunner:
         keys |= {k for k in self.last_given_up if is_backed_off(stuck, k, tick)}
         return tuple(sorted(keys))
 
+    def shown(self) -> tuple[str, ...]:
+        """The give-ups the planner is shown (State ``given_up``,
+        ``act.given_up_lines``), still holding: a ``cannot`` it answers may
+        rest on one, so the block lapses once one lifts (A171)."""
+        stuck, tick = self.mem.nav_stuck, self.world.tick
+        return tuple(sorted(k for k, g in stuck.given_up.items() if g.goal.startswith(OWN_WALKS) and g.holds(tick)))
+
     def block(self, key: str, reason: str) -> None:
         """Block ``key`` for the loop's own reason (a stall, every op over),
         retried as a ``cannot`` is (A169)."""
@@ -526,7 +533,7 @@ class LadderRunner:
             return
         self.own_blocks.discard(node.key)
         if reply.op is None:
-            answer(node, reply, self.blocks, self.turn.reading, self.given_up())
+            answer(node, reply, self.blocks, self.turn.reading, self.given_up(), self.shown())
             self.asked_blocked = (node.key, self.blocks[node.key].until)  # its answer: not asked again for this block
             self.log("planner", f"{node.title}: cannot: {reply.cannot}")
             return
@@ -562,7 +569,7 @@ class LadderRunner:
         if first is not None and (reply is None or already_met(reply, turn.reading.world)):
             # Asked once more and no better answer: the first one's plain block, to its expiry.
             self.own_blocks.discard(goal.key)
-            answer(goal, first, self.blocks, turn.reading, self.given_up())
+            answer(goal, first, self.blocks, turn.reading, self.given_up(), self.shown())
             self.set_op(None)
             return
         if reply is None:
@@ -574,7 +581,7 @@ class LadderRunner:
             self.ask(turn, ALREADY_MET.format(until=reply.until))
             return
         self.own_blocks.discard(goal.key)
-        op = answer(goal, reply, self.blocks, turn.reading, self.given_up())
+        op = answer(goal, reply, self.blocks, turn.reading, self.given_up(), self.shown())
         if op is None:
             b = self.blocks[goal.key]
             self.log("planner", f"{goal.title}: cannot: {reply.cannot} (until {b.named or 'tick'} {b.was or b.until})")

@@ -279,17 +279,14 @@ def given_up_act(ctx: Ctx, goal: str, dest: Pos, key: str) -> Act:
     """A walk to a target given up and still held: over, with the give-up
     that must lift first (A171: its ground must change)."""
     rec = ctx.mem.nav_stuck.given_up[key]
-    return Act(None, f"{goal}: the walk to {dest} is given up ({held_until(rec, ctx.world.tick)})", over=True,
-               given_up=(key,))
+    return Act(None, f"{goal}: the walk to {dest} is {given_up_why(rec, ctx.world.tick)}", over=True, given_up=(key,))
 
 
-def held_until(rec: nav_stuck.GiveUp, tick: int) -> str:
-    """What lifts a give-up still held (A171): its backoff's end while it is
-    ahead, and the ground round it changing."""
-    parts = [f"tick {rec.until}"] if tick < rec.until else []
-    if rec.ground is not None:
-        parts.append("the ground round it changes")
-    return "until " + " and ".join(parts or [f"tick {rec.until}"])
+def given_up_why(rec: nav_stuck.GiveUp, tick: int) -> str:
+    """A give-up as the planner is told it (A171): why the walk was given up
+    and what lifts it, never a bare "unreachable", so a ``cannot`` it draws
+    names a reason that lapses with it."""
+    return f"given up ({nav_stuck.why_given_up(rec)}); {nav_stuck.what_lifts(rec, tick)}"
 
 
 # Her walks' goals: what she gave up on, which the tree and the planner never point back at (A169).
@@ -310,14 +307,13 @@ def given_up_near(ctx: Ctx, map_id: int | None, p: Pos, reach: int = 0) -> nav_s
 
 def given_up_lines(m: Memory, tick: int) -> list[str]:
     """Each walk target of hers given up and still held, for the planner
-    (A169): where, why each level of the walk failed, and what lifts it (A171)."""
+    (A169): where, why the walk was given up, and what lifts it (A171)."""
     recs = sorted(
         (g for g in m.nav_stuck.given_up.values() if g.goal.startswith(OWN_WALKS) and g.holds(tick)),
         key=lambda g: (g.until, g.map_id, g.target),
     )
     return [
-        f"{g.goal.removeprefix(OWN_WALKS)} to map {g.map_id} at {g.target[0]},{g.target[1]} {held_until(g, tick)}"
-        + (f" ({', '.join(g.reasons)})" if g.reasons else "")
+        f"{g.goal.removeprefix(OWN_WALKS)} to map {g.map_id} at {g.target[0]},{g.target[1]}: walk {given_up_why(g, tick)}"
         for g in recs
     ]
 
@@ -330,13 +326,13 @@ def given_up_target(op: GoalOp, ctx: Ctx) -> str:
         sellers = [s for s in sellers_of(op.get("code", ""), w, ctx.kb, op) if s.in_stock]
         ups = [given_up_near(ctx, s.map_id, s.pos, NEAR) for s in sellers]
         if sellers and all(ups):
-            return f"every seller of {op.get('code')} is given up ({held_until(min(ups, key=lambda g: g.until), w.tick)})"
+            return f"every seller of {op.get('code')} is {given_up_why(min(ups, key=lambda g: g.until), w.tick)}"
         return ""
     if _int(op.get("x")) and _int(op.get("y")):
         map_id = op["map_id"] if _int(op.get("map_id")) else w.map_id
         g = given_up_near(ctx, map_id, (op["x"], op["y"]), NEAR)
         if g is not None:
-            return f"the walk to {op['x']},{op['y']} is given up ({held_until(g, w.tick)})"
+            return f"the walk to {op['x']},{op['y']} is {given_up_why(g, w.tick)}"
     return ""
 
 
@@ -355,7 +351,7 @@ def give_up_walk(ctx: Ctx, goal: str, key: str) -> None:
     else:
         map_id, target = nav_stuck.key_dest(key)
         ground = nav_stuck.ground_seen(w, target) if map_id == w.map_id else None
-        nav_stuck.remember_give_up(stuck, key, goal, w.tick, ground)
+        nav_stuck.remember_give_up(stuck, key, goal, w.tick, ground).reasons = ("no_step",)
 
 
 def walk_queue(ctx: Ctx, step: Pos) -> list[dict]:
@@ -521,7 +517,7 @@ def buy(op: GoalOp, ctx: Ctx) -> Act:
     walkable = [s for s in left if given_up_near(ctx, s.map_id, s.pos, NEAR) is None]
     if not walkable and ups:
         first = min(ups, key=lambda g: g.until)
-        return Act(None, f"every seller of {code} left is given up ({held_until(first, w.tick)})", over=True,
+        return Act(None, f"every seller of {code} left is {given_up_why(first, w.tick)}", over=True,
                    given_up=tuple(sorted({nav_stuck.key_of(g) for g in ups})))
     left = walkable
     if not left:

@@ -332,7 +332,7 @@ class GivenUpTest(Base):
         r, c = self.given_up_seller()
         a = act.act({"op": "buy", "code": "large_potion"}, c)
         self.assertTrue(a.over)
-        self.assertIn("given up (until tick", a.why)
+        self.assertIn("given up (no open step toward it); retried after tick", a.why)
         self.assertEqual(a.given_up, (stuck.goal_key("lorraine:buy", MAP, SELLER),))
 
     def test_the_planner_is_told_the_targets_given_up_and_an_answer_back_to_one_is_not_run(self):
@@ -342,12 +342,50 @@ class GivenUpTest(Base):
         settle(r)
         sent = fake.messages[0][1]["content"]
         self.assertIn("goal: ready for its risk", sent)
-        self.assertIn(f"- given_up: buy to map {MAP} at {SELLER[0]},{SELLER[1]} until tick", sent)
+        self.assertIn(f"- given_up: buy to map {MAP} at {SELLER[0]},{SELLER[1]}: walk given up (no open step toward it); "
+                      "retried after tick", sent)
+        self.assertNotIn("unreachable", sent)
         self.assertNotEqual(r.op, {"op": "buy", "code": "large_potion"})  # the planner's buy was not run
         said = r.note + "".join(m[1]["content"] for m in fake.messages[1:])
         self.assertIn("was not run: every seller of large_potion is given up", said)  # the next ask says why
         self.assertIn("risk", r.blocks)  # the tree's own buy is over at once too: the goal blocked till the backoff ends
         self.assertEqual(r.blocks["risk"].given_up, (stuck.goal_key("lorraine:buy", MAP, SELLER),))
+
+
+    def test_the_planner_is_told_why_a_target_is_given_up_and_what_lifts_it(self):
+        """A171: a give-up is shown with its reason in game terms and what
+        lifts it, never as a bare "unreachable"; past its backoff, only the ground."""
+        r, _ = self.given_up_seller()
+        rec = r.mem.nav_stuck.given_up[stuck.goal_key("lorraine:buy", MAP, SELLER)]
+        rec.reasons = ("no_path",)
+        r.world.tick = rec.until
+        line = act.given_up_lines(r.mem, r.world.tick)[0]
+        self.assertEqual(line, f"buy to map {MAP} at {SELLER[0]},{SELLER[1]}: walk given up (no path over known ground); "
+                               "retried once new ground is seen near it, a block there opens, an occupant leaves "
+                               "or a capability is gained")
+
+    def test_a_cannot_resting_on_a_given_up_target_lapses_when_the_give_up_lifts(self):
+        """A171: the planner answered cannot on a give-up it was shown; once
+        new ground is seen near it the give-up lifts, so the cannot does too."""
+        fake = FakeLLM('{"cannot": "the seller is given up"}')
+        r, _ = self.given_up_seller()
+        r.goal_since = (None, r.world.tick + 1)  # given up before the goal came: only shown to the planner
+        r.planner = Planner(client=fake, clock=Clock(), tokens_per_min=10**9)
+        settle(r)
+        block = r.blocks["risk"]
+        key = stuck.goal_key("lorraine:buy", MAP, SELLER)
+        self.assertIn(key, block.shown)
+        rec = r.mem.nav_stuck.given_up[key]
+        r.world.tick = rec.until
+        r.mem.pending_intents, r.queue_of = None, None
+        settle(r)
+        self.assertIs(r.blocks.get("risk"), block, "the give-up still holds: so does the cannot")
+        see_new_ground(r.world, rec)
+        r.mem.pending_intents, r.queue_of = None, None
+        with mock.patch.object(r, "log", wraps=r.log) as log:
+            r.decide()
+        self.assertIn(mock.call("planner", "risk: block lifted, what it waited on came or its blocker may "
+                                           "have changed"), log.call_args_list)
 
 
 class RejectionTest(Base):

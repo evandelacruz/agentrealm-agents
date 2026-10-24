@@ -240,7 +240,7 @@ Reply with one JSON object only, no markdown, with these keys:
 Each goal is an object with "op" and that op's fields; every op may also carry "why". These are the only ops (anything else is dropped):
 {_op_table()}
 
-State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it. Each give-up lapses at its retry_at_tick, when the cell leaves the list; whether to travel there again is then your call, and a give-up there again backs off twice as long. A stuck trigger says which walk was given up and its retry_at_tick: drop or replace the goal behind it if it keeps getting stuck.
+State lists the current stack, each op marked "pinned" or "planner". Pinned ops come from the directives file (the user's manual steering, or the run's own target). You cannot remove, reorder or replace them: whatever you send, they stay on top, until they are done or stuck detection gives up on their target. Plan around them. Your "goals" are only your own part of the stack, the ops below the pinned ones; leave pinned ops out of it. Never send a travel, of any kind, whose destination is a cell listed under given_up_travel: stuck detection gave up on it. Each give-up lapses at its retry_at_tick at the soonest, and only once the ground round it has changed (cells seen there, a block opened or broken, a capability gained), when the cell leaves the list; while it is listed, find another way (explore toward it, another destination, or what opens the way); whether to travel there again is then your call, and a give-up there again backs off twice as long. A stuck trigger says which walk was given up and its retry_at_tick: drop or replace the goal behind it if it keeps getting stuck.
 
 The survival params ("params" under State, set by "params" or a set_param op). Survival params may only tighten past params_floor; a change that loosens one is ignored:
 {_param_table()}
@@ -451,7 +451,7 @@ def build_prompt(
     state_lines.append("stack (top first):" + "".join(f"\n  {line}" for line in lines) if lines else "stack: (empty)")
     if given_up_travel:
         rows = [{"cell": f"{mid}:{x},{y}", "retry_at_tick": until} for (mid, (x, y)), until in sorted(given_up_travel.items(), key=str)]
-        state_lines.append(f"given_up_travel={json.dumps(rows, sort_keys=True)} (cells stuck detection gave up on: never travel to them before retry_at_tick)")
+        state_lines.append(f"given_up_travel={json.dumps(rows, sort_keys=True)} (cells stuck detection gave up on: never travel to them while listed)")
     stalled = stalled_lines(stalled_ops)
     if stalled:
         state_lines.append(stalled)

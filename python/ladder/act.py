@@ -759,8 +759,6 @@ def cut(ctx: Ctx, cell: Pos) -> list[dict]:
     """A ``Use`` on ``cell`` with the cutter in hand, armed first when it is
     not, behind the cooldown its swing still owes (A153)."""
     w, m = ctx.world, ctx.mem
-    if ctx.drops is not None and w.view.tiles.get(cell) in BLOCK_FOOD:
-        ctx.drops.note_cut(w, cell)  # judged for its berry (A170)
     cutter = weapon_to_arm(w, ctx.kb, CUT, hunting_ceiling(w, ctx.kb))
     use = use_block(cell)
     since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None

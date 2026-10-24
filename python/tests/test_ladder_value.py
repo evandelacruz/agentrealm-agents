@@ -1,6 +1,7 @@
 """One value for every target (A170): food, chests and gems priced alike, on every walk."""
 
 import unittest
+from unittest import mock
 
 from agentrealm_adk import value
 from agentrealm_adk.item_table import InventorySupply
@@ -8,6 +9,8 @@ from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.world import DeathChest, Entity
 from ladder import act, goals
 from ladder.act import Ctx
+from agentrealm_adk.travel.knowledge import record_shop_cell
+from tests import test_ladder_act
 from tests.test_ladder_act import ctx, nearer, open_ground
 from tests.test_ladder_goals import MAP, hostile, knowledge, world
 
@@ -80,7 +83,7 @@ class ValueTest(unittest.TestCase):
         for i, berry_dropped in enumerate([True] * 10):
             cell = (20 + i, 5)
             w.view.tiles[cell] = "bush"
-            watch.note_cut(w, cell)
+            watch.note_cut(w, cell, w.tick)
             w.view.tiles[cell] = "dirt"
             if berry_dropped:
                 w.entities = [Entity("supply", 100 + i, cell, "berry")]
@@ -93,7 +96,7 @@ class ValueTest(unittest.TestCase):
         w, k = world(), kb()
         w.view.tiles[(6, 5)] = "bush"
         watch = value.DropWatch()
-        watch.note_cut(w, (6, 5))
+        watch.note_cut(w, (6, 5), w.tick)
         w.tick += 10
         watch.update(w, k)
         self.assertTrue(watch.unbroken(w, (6, 5)))
@@ -102,6 +105,34 @@ class ValueTest(unittest.TestCase):
 
 def gather(w, k=None):
     return act.gather_targets(ctx(w, k or kb()))
+
+
+class CutLandsTest(unittest.TestCase):
+    """A bush cut is judged from the tick its ``Use`` landed (``LadderRunner.apply_results``)."""
+
+    setUp = test_ladder_act.LoopTest.setUp
+    runner = test_ladder_act.LoopTest.runner
+
+    def test_a_cut_behind_a_cooldown_is_judged_from_when_it_landed(self):
+        w = open_ground(world(health=6, armed_code="pocket_knife", armed_id=2))
+        w.view.tiles[(6, 5)] = "bush"
+        r = self.runner(w)
+        queue = [{"verb": "Wait", "ticks": 8}, {"verb": "Use", "target": {"kind": "block", "x": 6, "y": 5}}]
+        r.apply({"tick": 3, "queue_id": "q1"}, mock.Mock(intents=queue))
+        w.tick = 10
+        r.drops.update(w, r.knowledge)  # past the window from the send, the cut not yet landed
+        self.assertFalse(r.drops.unbroken(w, (6, 5)))
+        self.assertEqual(r.drops.pending, [])
+        results = [{"queue_id": "q1", "index": i, "outcome": "applied", "tick": 11} for i in (0, 1)]
+        r.apply({"tick": 11, "intent_results": results}, mock.Mock(intents=None))
+        self.assertEqual([p for _, p, _ in r.drops.pending], [(6, 5)])
+        w.view.tiles[(6, 5)] = "dirt"
+        w.entities = [Entity("supply", 9, (6, 5), "berry")]
+        w.tick = 12
+        r.drops.update(w, r.knowledge)
+        w.tick = 20
+        r.drops.update(w, r.knowledge)
+        self.assertEqual(r.knowledge.extra[value.BUSH_KEY], {"cuts": 1, "berries": 1})
 
 
 class GatherByValueTest(unittest.TestCase):
@@ -142,7 +173,6 @@ class GatherByValueTest(unittest.TestCase):
         w.pos = (6, 5)
         a = act.act({"op": "gather_gems", "count": 5}, c)
         self.assertEqual(a.intents[-1], {"verb": "Use", "target": {"kind": "block", "x": 7, "y": 5}})
-        self.assertEqual([p for _, p, _ in c.drops.pending], [(7, 5)], "judged for its berry")
 
     def test_at_full_health_a_bush_is_not_cut(self):
         w = open_ground(world(armed_code="pocket_knife", armed_id=2))
@@ -253,6 +283,21 @@ class HealCheapestTest(unittest.TestCase):
         w = world(health=4, gems=40)
         berry(w, at=(7, 5))
         self.assertEqual(self.op(w, knowledge(sells={"small_potion": 10}))["op"], "fetch_item")
+
+    def test_a_potion_sold_only_off_this_map_never_beats_food_by_a_free_walk(self):
+        w = world(health=4, gems=40)
+        berry(w, at=(205, 5))
+        k = knowledge()
+        record_shop_cell(k, MAP + 1, (20, 20), "small_potion", 10)  # its walk cannot be priced from here
+        self.assertEqual(self.op(w, k)["op"], "fetch_item")
+        w.entities = []
+        self.assertEqual(self.op(w, k), {"op": "buy", "code": "small_potion"}, "with nothing priced, still bought")
+
+    def test_a_potion_sold_out_everywhere_is_no_option(self):
+        w = world(health=4, gems=40)
+        k = knowledge(sells={"small_potion": 10})
+        with mock.patch("ladder.goals.sellers_of", return_value=[]):
+            self.assertEqual(self.op(w, k), {"op": "travel", "to": "town"})
 
     def test_a_potion_wins_when_the_food_is_far(self):
         w = world(health=4, gems=40)

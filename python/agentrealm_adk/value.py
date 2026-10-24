@@ -35,8 +35,9 @@ hazard or costly cell, a block to break, fog), converted at that same rate
 any walk is taken when its value beats the steps it adds (``extra_steps``)
 at that rate (``detour_gain``). Urgency the cost grid does not see (an
 attack under way, a boss clock running, hostiles the margin cannot pay for)
-is the caller's, and ``URGENT`` declines every find. Gary's Detour and
-Lorraine's walks both read this.
+is the caller's, and ``URGENT`` declines every find. Lorraine's gather and
+walks read all of this; Gary's Detour reads only ``extra_steps`` so far (A170
+is partial: his allowance, Pickup and Gather do not read the value yet).
 """
 
 from __future__ import annotations
@@ -177,7 +178,8 @@ def expected_chest_gems(w: WorldModel, kb: KnowledgeBase | None) -> float:
 
 def learn_opened_chests(w: WorldModel, kb: KnowledgeBase | None) -> None:
     """Count each chest seen in reach holding something, once, toward
-    ``expected_chest_gems``: its contents at their prices, fit or not. Our
+    ``expected_chest_gems``: its contents each by ``supply_value``, fit or
+    not (gems by their count, food by the health it gives back now). Our
     own death chests are known, not expected, and an empty one is a storage
     chest (a dropped chest is never empty), so neither counts."""
     if kb is None:
@@ -192,7 +194,7 @@ def learn_opened_chests(w: WorldModel, kb: KnowledgeBase | None) -> None:
         for chest_id, contents in opened.items():
             if chest_id in ids:
                 continue
-            worth = sum(float(seen.get(s.code, 0)) for s in contents if not eaten_on_pickup(s.code))
+            worth = sum(supply_value(s.code, w, kb, seen) for s in contents)
             row["count"], row["gems"] = int(row.get("count", 0)) + 1, float(row.get("gems", 0.0)) + worth
             ids.append(chest_id)
         row["ids"] = ids[-CHEST_IDS_KEPT:]
@@ -220,18 +222,20 @@ def bush_value(block: str | None, w: WorldModel, kb: KnowledgeBase | None, seen:
 
 @dataclass
 class DropWatch:
-    """The bush cuts sent and not yet judged (A170): each is filed a cut,
-    with a berry when one lies on its cell within ``GEM_WINDOW_TICKS`` (a
-    break drops at most one supply, on that block), and a cell the cut left
-    standing is passed over for ``REGROW_TICKS`` (``unbroken``)."""
+    """The bush cuts that landed and are not yet judged (A170): each is
+    noted at the tick its ``Use`` result came back (``note_cut``), filed a
+    cut, with a berry when one lies on its cell within ``GEM_WINDOW_TICKS``
+    of it (a break drops at most one supply, on that block), and a cell the
+    cut left standing is passed over for ``REGROW_TICKS`` (``unbroken``)."""
 
     pending: list[tuple[int | None, Pos, int]] = field(default_factory=list)
     berry: set[tuple[int | None, Pos]] = field(default_factory=set)
     standing: dict[tuple[int | None, Pos], int] = field(default_factory=dict)
 
-    def note_cut(self, w: WorldModel, cell: Pos) -> None:
+    def note_cut(self, w: WorldModel, cell: Pos, tick: int) -> None:
+        """A ``Use`` on the bush at ``cell`` landed at ``tick``."""
         if not any(m == w.map_id and p == cell for m, p, _ in self.pending):
-            self.pending.append((w.map_id, cell, w.tick))
+            self.pending.append((w.map_id, cell, tick))
 
     def unbroken(self, w: WorldModel, cell: Pos) -> bool:
         return w.tick < self.standing.get((w.map_id, cell), -1)

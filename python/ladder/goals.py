@@ -312,7 +312,10 @@ def restore_margin(node: Node, rd: Reading) -> GoalOp:
     price and the steps to its seller, each step at the step price
     (``value.step_gems``; ``URGENT`` under a threat her margin cannot pay
     for, ``readiness.step_urgent``), so
-    food near beats a potion and a potion wins once food is far; else retreat
+    food near beats a potion and a potion wins once food is far. A potion
+    whose sellers in stock are all off this map has no walk to price: it is
+    bought only when nothing priced makes the margin fit; one sold out
+    everywhere is no option. Else retreat
     to town, out of the hostiles' reach. A carried heal is never drunk for
     it: it counted already, so a drink leaves the margin as it was."""
     w, goal = rd.world, node.serves
@@ -322,11 +325,20 @@ def restore_margin(node: Node, rd: Reading) -> GoalOp:
     if food is not None and r.margin_after(goal, w, rd.kb, eat=heal_of(food.code)).ok:
         steps = chebyshev(w.pos, food.pos) if w.pos is not None else 0
         options.append((walk_gems(steps, step), 0, {"op": "fetch_item", "code": food.code, "x": food.pos[0], "y": food.pos[1]}))
+    unpriced: list[tuple[int, str]] = []
     for code, price in r.for_sale(w, rd.kb).items():
         if is_potion(code) and price <= (w.gems or 0) and r.margin_after(goal, w, rd.kb, carry=heal_of(code)).ok:
-            walks = [n for s in sellers_of(code, w, rd.kb) if s.in_stock and (n := walk_estimate(s, w)) is not None]
-            options.append((price + walk_gems(min(walks, default=0), step), 1, {"op": "buy", "code": code}))
-    return min(options, key=lambda o: o[:2])[2] if options else {"op": "travel", "to": "town"}
+            sellers = [s for s in sellers_of(code, w, rd.kb) if s.in_stock]
+            walks = [n for s in sellers if (n := walk_estimate(s, w)) is not None]
+            if walks:
+                options.append((price + walk_gems(min(walks), step), 1, {"op": "buy", "code": code}))
+            elif sellers:
+                unpriced.append((price, code))  # sold only off this map: its walk cannot be priced here
+    if options:
+        return min(options, key=lambda o: o[:2])[2]
+    if unpriced:
+        return {"op": "buy", "code": min(unpriced)[1]}
+    return {"op": "travel", "to": "town"}
 
 
 def tree() -> Node:

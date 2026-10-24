@@ -625,6 +625,7 @@ class LadderRunner:
         w, m = self.world, self.mem
         w.tick = int(r.get("tick", w.tick))
         if d.intents is not None:
+            drop_unsent_break(m, w, d.intents)
             # What was sent replaces the server's queue, even an empty one.
             m.pending_intents = d.intents or None
             m.pending_queue = r.get("queue_id") if d.intents else None
@@ -713,6 +714,21 @@ class LadderRunner:
         for e in w.entities:
             if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0 and not w.is_our_drop(e.id):
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
+
+
+def drop_unsent_break(m: Memory, w: WorldModel, sent: list[dict]) -> None:
+    """A queue replaced before its break ``Use`` ran, by one that does not
+    send it again, never breaks the block: the break is no longer in flight
+    (A172), so a later change there is not ours."""
+    if m.break_pending is None:
+        return
+    pos = m.break_pending[1]
+
+    def breaks(intents: list[dict]) -> bool:
+        return any(i.get("verb") == "Use" and use_target_block(i, w.entities) == pos for i in intents)
+
+    if breaks((m.pending_intents or [])[m.pending_next_index:]) and not breaks(sent):
+        m.break_pending = None
 
 
 def op_key(op: GoalOp | None) -> str | None:

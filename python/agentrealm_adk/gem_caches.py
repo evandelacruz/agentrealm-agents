@@ -17,9 +17,10 @@ in sight, and no cache lies on it. One no held capability may break is no
 target; the planner is told what it needs (``needs_lines``).
 
 What a break dropped is filed by cell in the knowledge base
-(``note_caches``)::
+(``note_caches``), a break of ours that dropped nothing as a 0, so a lone
+block that is only odd is soon priced near nothing::
 
-    "gem_caches": {"<map_id>,<x>,<y>": {"drops": [7, 7], "last_id": <supply id>}}
+    "gem_caches": {"<map_id>,<x>,<y>": {"drops": [7, 0], "last_id": <supply id>, "settled": <tick>}}
 """
 
 from __future__ import annotations
@@ -31,13 +32,14 @@ from .break_memory import FAILED_RESULTS, break_key, held_capabilities, pick_sup
 from .gem_yield import GEM_CACHE_PREFIX
 from .item_table import InventorySupply
 from .knowledge_base import KnowledgeBase
-from .oddities import back_at_tick, find, remember, remembered
+from .oddities import ODDITIES_SHOWN, back_at_tick, find, remember, remembered
 from .supplies import CAPABILITIES
 from .world import Entity, Pos, WorldModel, chebyshev
 
 CACHES_KEY = "gem_caches"
 PRIOR_CACHES = (5, 7, 10)  # what a region's cache may be worth, by ring (Manual Gem caches)
 DROPS_KEPT = 10  # drops remembered per oddity, the latest kept
+CACHE_SEEN_TICKS = 20  # a break's cell this long in sight with no cache on it: it dropped none
 
 
 @dataclass(frozen=True)
@@ -73,30 +75,44 @@ def oddities_here(w: WorldModel, kb: KnowledgeBase | None) -> dict[Pos, str]:
 
 
 def note_caches(w: WorldModel, kb: KnowledgeBase | None) -> None:
-    """File each gem cache in sight lying on a remembered oddity as that
-    oddity's drop, once per cache (its supply id)."""
+    """File what each break of a remembered oddity dropped (A172): a gem
+    cache in sight lying on it, once per cache (its supply id); and, for a
+    break of ours that opened it (break memory's ``opened``), a zero once its
+    cell has been in sight for ``CACHE_SEEN_TICKS`` after the break with no
+    cache on it, so a lone block that is only odd stops being priced at the
+    prior. Each opening is settled once (``settled``, its tick)."""
     if kb is None or w.map_id is None:
         return
-    odd = remembered(w, kb)
-    for e in w.entities:
-        if e.kind != "supply" or e.pos not in odd or not cache_gems(e.code):
-            continue
+    for pos in remembered(w, kb):
+        opened = latest_opening(kb, w.map_id, pos)
+        cache = next(iter(caches_on(w, pos)), None)
+        in_sight = w.pos is not None and chebyshev(w.pos, pos) <= w.perception
         with kb.lock:
-            row = kb.extra.setdefault(CACHES_KEY, {}).setdefault(f"{w.map_id},{e.pos[0]},{e.pos[1]}", {})
-            if row.get("last_id") == e.id:
+            rows = kb.extra.setdefault(CACHES_KEY, {})
+            key = f"{w.map_id},{pos[0]},{pos[1]}"
+            row = rows.get(key) or {}
+            unsettled = opened is not None and row.get("settled") != opened
+            if cache is not None and row.get("last_id") != cache.id:
+                drop = cache_gems(cache.code)
+                row["last_id"] = cache.id
+            elif cache is None and unsettled and in_sight and w.tick >= opened + CACHE_SEEN_TICKS:
+                drop = 0
+            else:
                 continue
-            row["drops"] = (list(row.get("drops") or []) + [cache_gems(e.code)])[-DROPS_KEPT:]
-            row["last_id"] = e.id
+            row["drops"] = (list(row.get("drops") or []) + [drop])[-DROPS_KEPT:]
+            if opened is not None:
+                row["settled"] = opened
+            rows[key] = row
 
 
 def drops(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> list[int]:
-    """What breaks of the oddity at ``pos`` have dropped, oldest first."""
+    """What breaks of the oddity at ``pos`` have dropped, oldest first; a break that dropped nothing is a 0."""
     if kb is None or map_id is None:
         return []
     with kb.lock:
         row = (kb.extra.get(CACHES_KEY) or {}).get(f"{map_id},{pos[0]},{pos[1]}")
         seen = list(row.get("drops") or []) if isinstance(row, dict) else []
-    return [int(n) for n in seen if isinstance(n, int) and not isinstance(n, bool) and n > 0]
+    return [int(n) for n in seen if isinstance(n, int) and not isinstance(n, bool) and n >= 0]
 
 
 def expected_cache(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> float:
@@ -113,6 +129,12 @@ def _tries(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> dict[str, 
     with kb.lock:
         rows = {c: kb.breaks.get(break_key(map_id, pos, c)) for c in sorted(CAPABILITIES)}
     return {c: row for c, row in rows.items() if isinstance(row, dict)}
+
+
+def latest_opening(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> int | None:
+    """The tick of the latest break that opened ``pos``; None when none has."""
+    ticks = [int(row.get("tick") or 0) for row in _tries(kb, map_id, pos).values() if row.get("result") == "opened"]
+    return max(ticks) if ticks else None
 
 
 def opener(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> str | None:
@@ -162,13 +184,17 @@ def cache_targets(w: WorldModel, kb: KnowledgeBase | None, tick_hz: int) -> list
 def needs_lines(w: WorldModel, kb: KnowledgeBase | None) -> list[str]:
     """Each oddity remembered on this map that no held capability may break,
     with what it needs: the capability that opened it, else those not yet
-    failed there. Never walked to; the planner is told (A172)."""
+    failed there; the ``ODDITIES_SHOWN`` nearest, as Gary's State shows
+    oddities. Never walked to; the planner is told (A172)."""
     held = held_capabilities(w, kb)
+    here = w.pos or (0, 0)
     out = []
-    for pos, block in sorted(remembered(w, kb).items()):
+    for pos, block in sorted(remembered(w, kb).items(), key=lambda pb: (chebyshev(here, pb[0]), pb[0])):
         caps = capabilities_for(w, kb, pos)
         if any(c in held for c in caps):
             continue
+        if len(out) == ODDITIES_SHOWN:
+            break
         need = caps[0] if len(caps) == 1 else f"one of {', '.join(caps)}" if caps else "a capability none has opened it with"
         out.append(f"{block} at {pos[0]},{pos[1]} worth about {expected_cache(kb, w.map_id, pos):.0f} gems needs {need}")
     return out

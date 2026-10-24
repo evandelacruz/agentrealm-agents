@@ -13,7 +13,7 @@ from agentrealm_adk.break_memory import record_attempt
 from agentrealm_adk.break_results import note_break_use, resolve_pending_break
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.memory import Memory
-from agentrealm_adk.oddities import RETURN_SECONDS
+from agentrealm_adk.oddities import ODDITIES_SHOWN, RETURN_SECONDS
 from agentrealm_adk.world import Entity
 from ladder import act
 from ladder.ask import Planner, node_state
@@ -76,6 +76,39 @@ class CacheTargetTest(unittest.TestCase):
         self.assertEqual(gem_caches.drops(k, MAP, ROCK), [10])
         self.assertAlmostEqual(gem_caches.expected_cache(k, MAP, ROCK), (10 + 22 / 3) / 2)
 
+    def test_a_break_that_dropped_nothing_counts_as_a_zero(self):
+        w, k = field_with_a_rock(pos=(6, 5)), kb()
+        gem_caches.oddities_here(w, k)
+        w.tick = 100
+        record_attempt(k, map_id=MAP, pos=ROCK, capability="cut", result="opened", tick=100)
+        gem_caches.note_caches(w, k)
+        self.assertEqual(gem_caches.drops(k, MAP, ROCK), [])  # the cache may still come
+        w.tick = 100 + gem_caches.CACHE_SEEN_TICKS
+        gem_caches.note_caches(w, k)
+        gem_caches.note_caches(w, k)  # settled once
+        self.assertEqual(gem_caches.drops(k, MAP, ROCK), [0])
+        self.assertAlmostEqual(gem_caches.expected_cache(k, MAP, ROCK), 22 / 6)
+
+    def test_a_cache_seen_after_a_break_settles_it_with_no_zero(self):
+        w, k = field_with_a_rock(pos=(6, 5)), kb()
+        gem_caches.oddities_here(w, k)
+        record_attempt(k, map_id=MAP, pos=ROCK, capability="cut", result="opened", tick=100)
+        w.tick = 101
+        w.entities = [Entity("supply", 70, ROCK, "gem_cache_5")]
+        gem_caches.note_caches(w, k)
+        w.entities, w.tick = [], 100 + gem_caches.CACHE_SEEN_TICKS  # taken
+        gem_caches.note_caches(w, k)
+        self.assertEqual(gem_caches.drops(k, MAP, ROCK), [5])
+
+    def test_a_tool_breaks_with_no_swing_cooldown(self):
+        w, k = field_with_a_rock(armed_code="matches", pos=(6, 5)), kb()
+        record_attempt(k, map_id=MAP, pos=ROCK, capability="cut", result="applied_no_effect", tick=1)
+        c = ctx(w, k)
+        c.mem.last_use_tick = w.tick - 1  # a swing just went out
+        a = act.act(OP, c)
+        self.assertEqual(a.intents, [use_on(ROCK)])
+        self.assertEqual(c.mem.break_pending, (MAP, ROCK, "burn"))
+
     def test_not_while_its_regrow_timer_runs(self):
         w, k = field_with_a_rock(), kb()
         gem_caches.oddities_here(w, k)  # seen and remembered
@@ -109,6 +142,15 @@ class CacheTargetTest(unittest.TestCase):
         line = node_state(GATHER, Reading(w, k))["gem_caches_out_of_reach"]
         self.assertIn("rock at 7,5", line)
         self.assertIn("one of blast, burn, chop, smash", line)
+
+    def test_the_planner_is_told_only_the_nearest_few(self):
+        w, k = field_with_a_rock(), kb()
+        k.extra["oddities"] = {f"{MAP},5,{y}": {"block": "rock", "seen": 0} for y in range(30, 10, -1)}
+        for y in range(11, 31):  # the knife failed on each
+            record_attempt(k, map_id=MAP, pos=(5, y), capability="cut", result="applied_no_effect", tick=1)
+        lines = gem_caches.needs_lines(w, k)
+        self.assertEqual(len(lines), ODDITIES_SHOWN)
+        self.assertIn("rock at 5,11", lines[0])
 
     def test_one_opened_before_needs_that_capability(self):
         w, k = field_with_a_rock(armed_code="mallet"), kb()
@@ -175,6 +217,13 @@ class LoopTest(unittest.TestCase):
                                              "rejection": {"code": "busy"}}]}, Decision(None, "poll", "gather_gems"))
         self.assertIsNone(r.mem.break_pending)  # a later change there is not hers
         self.assertNotIn(f"{MAP},7,5,cut", r.knowledge.breaks)
+
+
+    def test_a_queue_replaced_before_the_break_ran_drops_it(self):
+        r, w = self.r, self.w
+        self.sent([{"verb": "Wait", "ticks": 2}, use_on(ROCK)])
+        r.apply({"tick": w.tick, "queue_id": 8}, Decision([{"verb": "Step", "direction": "W"}], "flee", "flee"))
+        self.assertIsNone(r.mem.break_pending)
 
 
 if __name__ == "__main__":

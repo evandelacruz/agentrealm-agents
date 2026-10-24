@@ -646,9 +646,10 @@ def break_oddity(ctx: Ctx, c: CacheTarget) -> list[dict]:
     use = use_block(c.pos)
     since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
     if c.supply.id < 0 or c.supply.code == w.armed_code:
+        # A tool's Use (matches, a bomb) waits on no swing's cooldown (A153).
         intents = build_attack_queue(
             [use], poll_interval_ticks=ctx.horizon, horizon_ticks=ctx.horizon,
-            weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz), ticks_since_last_use=since,
+            weapon_cooldown_ticks=use_cooldown_ticks(use, w.armed_code, ctx.tick_hz), ticks_since_last_use=since,
         )
     else:
         intents = arm_then_use(

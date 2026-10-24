@@ -176,7 +176,8 @@ class GatherByValueTest(unittest.TestCase):
 
     def test_at_full_health_a_bush_is_not_cut(self):
         w = open_ground(world(armed_code="pocket_knife", armed_id=2))
-        w.view.tiles[(7, 5)] = "bush"
+        for y in range(3, 8):
+            w.view.tiles[(7, y)] = "bush"  # a hedge: no oddity (A134), only food
         self.assertEqual(gather(w), [])
 
     def test_a_surcharge_on_the_way_makes_a_near_gem_dearer_than_a_far_one(self):

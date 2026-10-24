@@ -66,7 +66,10 @@ from agentrealm_adk.executor import (
     queue_horizon_intents,
     step_landing,
 )
+from agentrealm_adk.break_results import note_break_use, resolve_pending_break, settle_replaced_break
 from agentrealm_adk.fording import ford_gate, loadout_memory
+from agentrealm_adk.gem_caches import note_caches
+from agentrealm_adk.item_table import use_target_block
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
@@ -646,15 +649,20 @@ class LadderRunner:
     def apply(self, r: dict, d: Decision) -> list[dict]:
         w, m = self.world, self.mem
         w.tick = int(r.get("tick", w.tick))
+        replaced = (m.pending_intents, m.pending_queue, m.pending_next_index)
         if d.intents is not None:
             # What was sent replaces the server's queue, even an empty one.
             m.pending_intents = d.intents or None
             m.pending_queue = r.get("queue_id") if d.intents else None
             m.pending_next_index, m.queue_sent_tick = 0, w.tick
         self.apply_results(r.get("intent_results") or [])
+        if d.intents is not None:
+            settle_replaced_break(self.knowledge, m, w, *replaced, r.get("intent_results") or [], d.intents)
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        resolve_pending_break(self.knowledge, m, w)  # a break that opened its block (A172)
+        note_caches(w, self.knowledge)
         w.note_level_clear(r.get("level_clear_ceremony"))
         w.learn_threat(events, earlier)
         self.drops.update(w, self.knowledge)  # what her bush cuts dropped (A170)
@@ -683,6 +691,9 @@ class LadderRunner:
             if idx < m.pending_next_index or idx >= len(m.pending_intents):
                 continue
             intent, tick = m.pending_intents[idx], int(res.get("tick", w.tick))
+            # A break in flight is settled on every result, as in every agent's loop (A172).
+            block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
+            note_break_use(self.knowledge, m, w, intent, res, block, list(m.pending_intents[idx:]))
             if res.get("outcome") == "rejected":
                 if intent.get("verb") == "Step" and w.pos is not None:
                     code = (res.get("rejection") or {}).get("code")

@@ -9,13 +9,12 @@ import time
 from dataclasses import dataclass
 from functools import partial
 
-from agentrealm_adk.break_memory import TRANSIENT_BREAK_REJECTIONS, cannot_cut, record_attempt
+from agentrealm_adk.break_memory import cannot_cut
+from agentrealm_adk.break_results import note_break_use, resolve_pending_break
 from agentrealm_adk.gem_yield import CUT_BLOCKS, FELL_BLOCKS, GemYieldTracker, take_raises_gems
 from agentrealm_adk.navigation.rejection import learn_step_rejection, on_block_changed
-from agentrealm_adk.navigation.stuck import active as nav_active
 from agentrealm_adk.navigation.stuck import lapsed as lapsed_give_ups
 from agentrealm_adk.stalled import lapse as lapse_stalled, retry_basis
-from agentrealm_adk.navigation.stuck import on_break_opened, on_break_tried
 from agentrealm_adk.navigation.stuck import on_rejection as nav_on_rejection
 from agentrealm_adk.navigation.stuck import on_step as nav_on_step
 from agentrealm_adk.client import ApiError, Client
@@ -1462,74 +1461,13 @@ class Runner:
         log_supply_codes_seen(self.knowledge, seen_codes)
 
     def _note_break_use(self, intent: dict | None, result: dict, block, index: int) -> None:
-        """Settle the Break ``Use`` in flight (A28).
-
-        ``applied_no_effect`` marks the pair failed. A rejection at or before
-        the pending ``Use`` in its queue drops it: a refused ``Arm`` or ``Use``
-        for it marks the pair failed too, unless the refusal was a cooldown,
-        and pending is cleared either way so Break picks again.
-        """
-        m, w = self.mem, self.world
-        pending = m.break_pending
-        if pending is None:
-            return
-        map_id, pos, cap = pending
-        tick = int(result.get("tick", w.tick))
-        outcome = result.get("outcome")
-        if outcome == "rejected":
-            ahead = [self._intent_at(i) for i in range(index, max(index + 1, len(m.pending_intents or [])))]
-            if not any(
-                i is not None and i.get("verb") == "Use" and use_target_block(i, w.entities) == pos for i in ahead
-            ):
-                return  # the break Use already ran: its BlockChanged may still come
-            m.break_pending = None
-            code = (result.get("rejection") or {}).get("code")
-            verb = (intent or {}).get("verb")
-            ours = verb == "Arm" or (verb == "Use" and block == pos)
-            if ours and code not in TRANSIENT_BREAK_REJECTIONS:
-                record_attempt(self.knowledge, map_id=map_id, pos=pos, capability=cap, result="failed", tick=tick)
-                on_break_tried(m, w)
-            return
-        if intent is None or intent.get("verb") != "Use" or block != pos:
-            return
-        if outcome == "applied_no_effect":
-            record_attempt(
-                self.knowledge,
-                map_id=map_id,
-                pos=pos,
-                capability=cap,
-                result="applied_no_effect",
-                tick=tick,
-            )
-            m.break_pending = None
-            on_break_tried(m, w)
+        """Settle the Break ``Use`` in flight (A28, ``break_results.note_break_use``)."""
+        m = self.mem
+        ahead = [self._intent_at(i) for i in range(index, max(index + 1, len(m.pending_intents or [])))]
+        note_break_use(self.knowledge, m, self.world, intent, result, block, ahead)
 
     def _resolve_pending_break(self) -> None:
-        m, w = self.mem, self.world
-        pending = m.break_pending
-        if pending is None:
-            return
-        map_id, pos, cap = pending
-        if not w.alive or w.map_id != map_id:
-            # Died or left the map: a later change at that cell is not our break.
-            m.break_pending = None
-            return
-        for changed_map, p in w.changed_blocks:
-            if changed_map == map_id and p == pos:
-                block_after = w.view.tiles.get(pos, "")
-                record_attempt(
-                    self.knowledge,
-                    map_id=map_id,
-                    pos=pos,
-                    capability=cap,
-                    result="opened",
-                    block_after=block_after,
-                    tick=w.tick,
-                    code=w.armed_code,
-                )
-                m.break_pending = None
-                on_break_opened(m, w, nav_active(m, w))
-                return
+        resolve_pending_break(self.knowledge, self.mem, self.world)
 
     def on_events(self, events: list[dict]) -> None:
         w, m = self.world, self.mem

@@ -7,7 +7,7 @@ from agentrealm_adk import value
 from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.world import DeathChest, Entity
-from ladder import act, goals
+from ladder import act, goals, readiness
 from ladder.act import Ctx
 from agentrealm_adk.travel.knowledge import record_shop_cell
 from tests import test_ladder_act
@@ -298,6 +298,14 @@ class HealCheapestTest(unittest.TestCase):
         k = knowledge(sells={"small_potion": 10})
         with mock.patch("ladder.goals.sellers_of", return_value=[]):
             self.assertEqual(self.op(w, k), {"op": "travel", "to": "town"})
+
+    def test_under_a_threat_her_margin_cannot_pay_for_the_walks_are_still_priced(self):
+        w = world(health=3, gems=40, armed_code="bronze_sword")  # a potion covers the rat, her health alone does not
+        berry(w, at=(205, 5))
+        hostile(w, 50, (8, 5))
+        k = knowledge(sells={"small_potion": 10, "large_potion": 40})
+        self.assertTrue(readiness.step_urgent(w, k))
+        self.assertEqual(self.op(w, k), {"op": "buy", "code": "small_potion"}, "the cheapest potion, not far food")
 
     def test_a_potion_wins_when_the_food_is_far(self):
         w = world(health=4, gems=40)

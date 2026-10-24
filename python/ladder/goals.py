@@ -309,9 +309,8 @@ def alive_margin(node: Node, rd: Reading) -> Check:
 def restore_margin(node: Node, rd: Reading) -> GoalOp:
     """Restore the margin with the cheapest move that makes it fit, its walk
     counted (A170): eat food in sight, at its steps, or buy a potion, at its
-    price and the steps to its seller, each step at the step price
-    (``value.step_gems``; ``URGENT`` under a threat her margin cannot pay
-    for, ``readiness.step_urgent``), so
+    price and the steps to its seller, each step at ``value.STEP_GEMS``
+    (``URGENT`` declines optional finds, never prices a needed heal), so
     food near beats a potion and a potion wins once food is far. A potion
     whose sellers in stock are all off this map has no walk to price: it is
     bought only when nothing priced makes the margin fit; one sold out
@@ -319,7 +318,7 @@ def restore_margin(node: Node, rd: Reading) -> GoalOp:
     to town, out of the hostiles' reach. A carried heal is never drunk for
     it: it counted already, so a drink leaves the margin as it was."""
     w, goal = rd.world, node.serves
-    step = step_gems(r.step_urgent(w, rd.kb, goal.value))
+    step = step_gems()  # a needed heal: danger declines finds, never prices this walk (A170)
     options: list[tuple[float, int, GoalOp]] = []
     food = r.food_in_sight(w)
     if food is not None and r.margin_after(goal, w, rd.kb, eat=heal_of(food.code)).ok:

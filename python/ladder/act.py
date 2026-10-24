@@ -319,16 +319,25 @@ def urgent(ctx: Ctx) -> bool:
     return under_attack(w, ctx.policy) or boss_clock.running(ctx.mem, w) or step_urgent(w, ctx.kb, ctx.value)
 
 
-def walk_costs(ctx: Ctx, cells: set[Pos]) -> dict[Pos, int]:
-    """The cost grid's price of the walk from her to each of ``cells`` she
-    can reach, in steps: one a clear step, plus every surcharge her walk
-    keeps (a hostile's ground, a hazard, a break, fog; ``navigation.planner``)."""
+def walk_costs(ctx: Ctx, cells: set[Pos]) -> dict[Pos, tuple[int, int]]:
+    """The cost grid's price of the cheapest walk from her to each of
+    ``cells`` she can reach, in steps, and how many steps that walk takes:
+    the price is one a clear step plus every surcharge her walk keeps (a
+    hostile's ground, a hazard, a break, fog; ``navigation.planner``), so
+    price less steps is the surcharges alone (``surcharges``)."""
     w = ctx.world
     if w.pos is None or not cells:
         return {}
     avoid, costly, _ = walk_sets(ctx)
     params = grid_params(ctx.policy, avoid, costly, allow_goal_door=True, m=ctx.mem, w=w, knowledge=ctx.kb)
-    return {p: c for p, (_, c) in cost_flood(w, cells, params).items()}
+    return {p: (c, len(path)) for p, (path, c) in cost_flood(w, cells, params).items()}
+
+
+def surcharges(cost: tuple[int, int]) -> int:
+    """The surcharges in a walk's price (``walk_costs``): its price less its
+    steps, never the steps round a wall, which the steps already count."""
+    price, steps = cost
+    return max(0, price - steps)
 
 
 def take_find(ctx: Ctx, f: Find) -> list[dict]:
@@ -398,8 +407,8 @@ def best_detour(ctx: Ctx, goal: str, dest: Pos | None, step: float, candidates: 
         cost = costs.get(stand_by(w, f.pos, NEAR))
         if extra is None or cost is None:
             continue
-        surcharge = max(0, cost - chebyshev(here, stand_by(w, f.pos, NEAR)))
-        gain = detour_gain(f.gems, extra + surcharge, step)
+        # ``extra_steps`` counts the steps, walls and all; the walk adds only its surcharges.
+        gain = detour_gain(f.gems, extra + surcharges(cost), step)
         if gain > 0 and (best is None or (gain, -f.id) > best[:2]):
             best = (gain, -f.id, f)
     return best[2] if best is not None else None
@@ -736,7 +745,7 @@ def gather_targets(ctx: Ctx) -> list[Target]:
             continue
         if foes:
             t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes)
-        cost = costs.get(stand, chebyshev(here, stand))
+        cost = costs[stand][0] if stand in costs else chebyshev(here, stand)
         out.append(((bool(foes), -net(gems, cost), chebyshev(here, t.cell), t.cell), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
 

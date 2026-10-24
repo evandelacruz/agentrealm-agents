@@ -234,6 +234,21 @@ class DetourOnEveryWalkTest(unittest.TestCase):
         self.assertTrue(a.why.startswith("detour"), a.why)
         self.assertIn("chest", a.why)
 
+    def test_a_find_behind_a_wall_pays_its_steps_round_it_once(self):
+        k = knowledge(sells={"raft": 30})
+        k.world_code = WORLD
+
+        def behind_a_wall(w):
+            x, y = w.pos
+            for dx in range(-3, 4):
+                w.view.tiles[(x + dx, y + 3)] = "wall"
+            berry(w, at=(x + 1, y + 5))
+            w.entities.append(Entity("supply", 77, (1, 1), "small_potion", gem_price=7))  # a health point at 0.7 gems
+
+        w, c = self.walk({"op": "buy", "code": "raft"}, k, find=behind_a_wall)
+        # 6 steps added round the wall (0.6 gems) against a berry worth 0.7: counted twice, it was passed by.
+        self.assertTrue(act.act({"op": "buy", "code": "raft"}, c).why.startswith("detour"))
+
     def test_at_full_health_the_walk_passes_the_berries(self):
         k = knowledge(sells={"raft": 30})
         k.world_code = WORLD

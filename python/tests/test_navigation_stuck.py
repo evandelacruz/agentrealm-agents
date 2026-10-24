@@ -22,7 +22,7 @@ from agentrealm_adk.navigation.planner import FOG
 from agentrealm_adk.pathing import escalation_step, guided_step, path_for_plan_op, replan
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, Sighting, WorldModel
 from tests.fixtures.navigation import grids, sim
 from tests.test_cost_grid import grid
 from tests.test_recover import apply_zone, ctx, died_at, world
@@ -374,15 +374,51 @@ class GroundChangedTest(unittest.TestCase):
         self.assertEqual(rec.lifted, "capabilities changed")
         self.assertFalse(nav_stuck.backed_off(m, "goto", 1, (9, 1), w.tick))
 
-    def test_an_occupant_gone_lifts_it(self):
+    def test_an_occupant_moved_out_of_the_box_lifts_it(self):
         w = open_world()
         w.entities = [Entity("npc", 5, (8, 1), "villager")]
         m, rec = self.given_up(w)
-        w.entities = []  # out of sight: not known to be gone
-        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [])
         w.entities = [Entity("npc", 5, (8, 1 + 2 * nav_stuck.GROUND_PAD_CELLS), "villager")]
         self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
         self.assertEqual(rec.lifted, "an occupant left")
+
+    def test_a_hostile_killed_in_the_box_lifts_it(self):
+        w = open_world()
+        w.entities = [Entity("npc", 5, (8, 1), "wolf")]
+        w.sightings[("npc", 5)] = Sighting(w.entities[0], 1, w.tick)
+        m, rec = self.given_up(w)
+        w.entities = []  # out of view, still remembered there: it may still bar the way
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [])
+        del w.sightings[("npc", 5)]  # killed (``NPCDied``), or its sighting lapsed
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "an occupant left")
+
+    def test_health_risen_lifts_it(self):
+        # A pass through hostile ground is priced by her health (``covers_pass``).
+        w = open_world()
+        w.health, w.max_health = 4, 10
+        m, rec = self.given_up(w)
+        w.health = 3
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [], "a hit opens nothing")
+        w.health = 7
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "health rose")
+
+    def test_held_give_ups_stay_bounded(self):
+        w, m = open_world(), Memory()
+        for x in range(nav_stuck.GIVE_UPS_HELD_KEPT + 5):
+            w.tick += 1
+            nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (x, 1)), "no_path")
+        given_up = m.nav_stuck.given_up
+        self.assertEqual(len(given_up), nav_stuck.GIVE_UPS_HELD_KEPT)
+        self.assertNotIn(nav_stuck.goal_key("goto", 1, (0, 1)), given_up, "the oldest goes first")
+
+    def test_the_reasons_are_told_from_the_ladders_own_limits(self):
+        rec = nav_stuck.GiveUp("goto", 1, (9, 1), 0, 300, 1, reasons=("time", "moves", "time"))
+        self.assertEqual(
+            nav_stuck.why_given_up(rec),
+            f"got no nearer in {nav_stuck.PROGRESS_TICK_LIMIT} ticks, got no nearer in {nav_stuck.PROGRESS_MOVE_LIMIT} moves",
+        )
 
     def test_still_inside_its_backoff_a_changed_ground_waits_for_the_backoff(self):
         w = open_world()

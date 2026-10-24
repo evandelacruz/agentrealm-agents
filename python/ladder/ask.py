@@ -47,7 +47,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 from agentrealm_adk.llm import (
     DEFAULT_CALLS_PER_MIN,
@@ -121,7 +121,18 @@ def watch_lines(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, str]:
     }
 
 
-def seen(w: WorldModel, kb: KnowledgeBase | None) -> tuple:
+class Seen(NamedTuple):
+    """The state the planner saw (``seen``): where she stands, by region,
+    what she carries, and whether her health covers the next level and the
+    hostiles that can reach her now."""
+
+    where: tuple | None
+    carried: tuple[str, ...]
+    level_ok: bool
+    here_ok: bool
+
+
+def seen(w: WorldModel, kb: KnowledgeBase | None) -> Seen:
     """The state the planner saw, as a block retries on it (A169): the
     region she stands in, what she carries, and whether her health covers
     what is ahead, on her one risk function (``readiness.risk_budget``: the
@@ -131,7 +142,7 @@ def seen(w: WorldModel, kb: KnowledgeBase | None) -> tuple:
     carried = tuple(sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values()))
     level = r.Foes(tuple(r.level_foes(w, kb)), r.VALUABLE)
     here = r.Foes(tuple(r.foes_here(w, kb)), r.ORDINARY)
-    return (where, carried, r.risk_budget(level, w, kb).ok, r.risk_budget(here, w, kb, now=True).ok)
+    return Seen(where, carried, r.risk_budget(level, w, kb).ok, r.risk_budget(here, w, kb, now=True).ok)
 
 
 def question_prefix(reference_sections: str = "") -> str:
@@ -255,7 +266,7 @@ def may_have_changed(block: Block, w: WorldModel, now: tuple, stuck: NavStuckMem
         return bool(block.seen) and block.seen != now
     if stuck is None or not all(is_backed_off(stuck, k, w.tick) for k in block.given_up):
         return True
-    return bool(block.seen) and block.seen[1:] != now[1:]
+    return bool(block.seen) and block.seen._replace(where=None) != now._replace(where=None)
 
 
 def lift_changed(

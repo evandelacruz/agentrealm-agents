@@ -361,8 +361,8 @@ class GivenUpTest(Base):
         r.world.tick = rec.until
         line = act.given_up_lines(r.mem, r.world.tick)[0]
         self.assertEqual(line, f"buy to map {MAP} at {SELLER[0]},{SELLER[1]}: walk given up (no path over known ground); "
-                               "retried once new ground is seen near it, a block there opens, an occupant leaves "
-                               "or a capability is gained")
+                               "retried once new ground is seen near it, a block there opens, an occupant or hostile "
+                               "there is gone, a capability is gained or her health rises")
 
     def test_a_cannot_resting_on_a_given_up_target_lapses_when_the_give_up_lifts(self):
         """A171: the planner answered cannot on a give-up it was shown; once

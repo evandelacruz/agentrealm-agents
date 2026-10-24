@@ -68,6 +68,10 @@ PRIOR_GEMS_PER_HEALTH = 1.0
 # grid prices (a hostile's ground, a hazard, a break, fog) is in steps and
 # converted at this rate (``walk_gems``).
 STEP_GEMS = 0.1
+# The most steps a detour adds (``extra_steps``): a short insert. A find
+# worth a longer walk is a target of its own (gather, the planner), priced
+# again as the walk comes by it; it also bounds every detour search.
+INSERT_STEPS = 24
 # The step price under urgency that declines every find.
 URGENT = math.inf
 # What a chest whose contents were never seen is worth until opened chests
@@ -344,8 +348,9 @@ def extra_steps(
     price: Callable[[Pos], int | None] | None = None,
 ) -> int | None:
     """Steps going by ``find`` now adds to walking ``route`` from ``here``,
-    rejoining it at its best cell; None when that is more than ``limit``, or
-    when the walk to ``find`` is longer than the straight line plus ``limit``.
+    rejoining it at its best cell; None when that is more than ``limit``
+    (never above ``INSERT_STEPS``: a detour is a short insert), or when the
+    walk to ``find`` is longer than the straight line plus ``limit``.
 
     ``route`` must start at the step after ``here`` (``pathing.route_ahead``):
     cell i is i + 1 steps away. Distances are walks over known ground
@@ -363,13 +368,19 @@ def extra_steps(
     it every open cell is one step."""
     if not route:
         return None
+    limit = min(limit, INSERT_STEPS)
     # Straight lines never overestimate a walk: past the limit on them, no search.
     reach = chebyshev(here, find)
     if reach + min(chebyshev(find, p) - (i + 1) for i, p in enumerate(route)) > limit:
         return None
     on_route = set(route) | {here}
+    # The search keeps within the straight line to ``here`` plus ``limit`` of the
+    # find, as a plain one does; a surcharge, however large, never widens it.
+    span = reach + limit
 
     def cost(p: Pos) -> int | None:
+        if chebyshev(find, p) > span:
+            return None
         if price is not None:
             c = price(p)
             return c if c is not None else (1 if p in on_route else None)
@@ -378,7 +389,9 @@ def extra_steps(
 
     walked = [cost(p) or 1 for p in route]
     before = list(itertools.accumulate(walked))  # what the route costs up to and onto cell i
-    bound = reach + limit + before[-1] - len(route)
+    inside = [i for i, p in enumerate(route) if chebyshev(find, p) <= span]
+    last = inside[-1] if inside else 0
+    bound = span + before[last] - (last + 1)  # the surcharges the route pays within the search
     dist: dict[Pos, int] = {find: 0}
     frontier = [(0, find)]
     while frontier:

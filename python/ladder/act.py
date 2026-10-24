@@ -712,8 +712,9 @@ def gather_targets(ctx: Ctx) -> list[Target]:
     (worth the gems a cut drops there, ``gem_yield.region_yields``) and
     bushes a held item cuts (``value.bush_value``, none left standing by a
     cut), each by its net (``value.net``: its value less the gems of the walk
-    to it, surcharges and all, ``walk_costs``), distance breaking ties, none
-    given up and still backed off. A target with known hostiles beside it
+    to it, surcharges and all, ``walk_costs``; one the grid does not reach
+    after every one it does), distance breaking ties, none given up and
+    still backed off. A target with known hostiles beside it
     (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes after
     every other, and only when her margin now covers them all
     (``readiness.margin_now``, A139); its walk then passes their ground."""
@@ -746,8 +747,10 @@ def gather_targets(ctx: Ctx) -> list[Target]:
             continue
         if foes:
             t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems)
-        cost = costs.get(stand, chebyshev(here, stand))
-        out.append(((bool(foes), -net(t.gems, cost), chebyshev(here, t.cell), t.cell), t))
+        # One walk model: a target her walk's grid does not reach goes after every one it does.
+        cost = costs.get(stand)
+        priced = -net(t.gems, cost) if cost is not None else 0.0
+        out.append(((bool(foes), cost is None, priced, chebyshev(here, t.cell), t.cell), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
 
 

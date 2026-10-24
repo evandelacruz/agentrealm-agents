@@ -64,6 +64,23 @@ class ValueTest(unittest.TestCase):
         self.assertEqual(value.step_gems(urgent=True), value.URGENT)
         self.assertEqual(value.allowance(1.0, value.URGENT), -1)
 
+    def test_a_detour_search_stays_short_whatever_the_route_pays(self):
+        """A route over costly cells, with unbounded fog round it, never widens the search (A170)."""
+        w = open_ground(world())
+        route = [(x, 5) for x in range(6, 40)]
+        calls = []
+
+        def price(p):
+            calls.append(p)
+            if p in ((9, 5), (10, 5), (11, 5)):
+                return 101  # a hazard the route crosses anyway
+            return 1 if p in w.view.tiles else 2  # fog, out to infinity
+
+        self.assertLessEqual(value.extra_steps(w, (5, 5), (7, 6), route, 8, price=price), 2)
+        span = 2 + 8
+        self.assertLessEqual(len(set(calls)), (2 * span + 1) ** 2, "kept within the straight line plus the limit")
+        self.assertIsNone(value.extra_steps(w, (5, 5), (7, 40), route, 100, price=price), "never past a short insert")
+
     def test_a_chest_never_opened_is_worth_what_opened_chests_held(self):
         w, k = world(), kb()
         self.assertEqual(value.expected_chest_gems(w, k), value.CHEST_PRIOR_GEMS)
@@ -186,6 +203,16 @@ class GatherByValueTest(unittest.TestCase):
             w.view.tiles[(7, y)] = "lava"  # a hazard between her and the near gem
         w.entities = [Entity("supply", 1, (8, 5), "gem"), Entity("supply", 2, (5, 1), "gem")]
         self.assertEqual(gather(w)[0].cell, (5, 1))
+
+    def test_a_target_her_walk_cannot_reach_goes_after_every_one_it_can(self):
+        w = open_ground(world())
+        for dx in range(-1, 2):
+            for dy in range(-1, 2):
+                if dx or dy:
+                    w.view.tiles[(8 + dx, 5 + dy)] = "wall"  # a gem walled in, three steps off
+        w.entities = [Entity("supply", 1, (8, 5), "gem")]
+        w.view.tiles[(1, 1)] = "grass"
+        self.assertEqual([t.cell for t in gather(w)], [(1, 1), (8, 5)])
 
     def test_a_chest_with_nothing_that_fits_is_worth_nothing(self):
         w = open_ground(world(carry_capacity=1))  # the sword armed fills it

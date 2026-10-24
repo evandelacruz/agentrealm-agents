@@ -49,6 +49,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
+from agentrealm_adk.gem_caches import needs_lines
 from agentrealm_adk.llm import (
     DEFAULT_CALLS_PER_MIN,
     Backoff,
@@ -89,14 +90,17 @@ You answer one question about one goal of an Agent Realm character: how to work 
 You are shown the goal, the state its readiness reads, the ops that can work it, and the op the goal tree would run, as an example of an op's shape. Answer with one JSON object and nothing else:
 
 - {"op": {"op": "<one of the ops>", ...its fields}, "why": "<one line>"} to run that op now. Name a cell only by an x and y the state gives.
+- gem_caches_out_of_reach lists the oddities known to drop a gem cache that nothing carried can break, with what each needs. Gathering never walks to one; buying what breaks it is one way to more gems.
 - given_up lists the targets a walk gave up on, with why and what lifts each: a tick, and the ground round it changing (cells seen there that were not, a block opened or broken, an occupant gone, a capability gained). A give-up is not "unreachable": it holds only until what lifts it comes, so a cannot that rests on one lapses with it. Never answer with an op that walks to one of them (its cell, or a buy whose every seller is one) while it is listed: nothing has changed there. Answer with another way instead: explore toward it so the ground round it is seen, another target (another entrance, another seller), or getting what opens the way.
 - {"cannot": "<why no op can work it now, in game terms>", "until": "<what would let it be worked>"} when none can. The goal is then set aside, and the character works on what is under it, until then. until is one of: "held" (what is carried changes), "levels_cleared", "sellers" (a seller becomes known for another item), "entrance_needs" (the next level's entrance needs something else), "gems N" (N gems are held), or "ticks N" (N ticks pass, at most 3000). Anything else, or none, sets the goal aside for 3000 ticks."""
 
 
 def node_state(node: Node, rd: Reading) -> dict[str, str]:
     """What the node's readiness reads, by name: its check, and the character's
-    place, health, gems and what is carried; and the walk targets given up
-    and still backed off, with why and until when (A169). Nothing of any other node."""
+    place, health, gems and what is carried; the walk targets given up
+    and still backed off, with why and until when (A169); and the oddities
+    that would drop a gem cache but need a capability she lacks, with what
+    each needs (A172). Nothing of any other node."""
     w = rd.world
     where = f"map {w.map_id} at {w.pos[0]},{w.pos[1]}" if w.pos is not None else "unplaced"
     carried = sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values())
@@ -107,6 +111,7 @@ def node_state(node: Node, rd: Reading) -> dict[str, str]:
         "gems": str(w.gems or 0),
         "held": ", ".join(carried) or "nothing",
         "given_up": "; ".join(rd.given_up) or "none",
+        "gem_caches_out_of_reach": "; ".join(needs_lines(w, rd.kb)) or "none",
     }
 
 

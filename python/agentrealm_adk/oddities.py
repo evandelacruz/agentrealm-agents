@@ -161,6 +161,13 @@ def oddity_row(w: WorldModel, kb: KnowledgeBase | None, pos: Pos, block: str, ti
     return row
 
 
+def back_at_tick(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, tick_hz: int) -> int | None:
+    """When the oddity at ``pos`` grows back: ``RETURN_SECONDS`` after the
+    latest break that opened it; None when none has."""
+    opened = [tick for _, result, tick in _tries(kb, map_id, pos) if result == "opened"]
+    return max(opened) + RETURN_SECONDS * tick_hz if opened else None
+
+
 def _tries(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> list[tuple[str, str, int]]:
     """Each capability break memory recorded at ``pos``, with its result and tick."""
     if kb is None or map_id is None:

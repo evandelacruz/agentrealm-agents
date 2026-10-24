@@ -61,10 +61,12 @@ class CacheTargetTest(unittest.TestCase):
         self.assertEqual(a.intents[-1], use_on(ROCK))
         self.assertEqual(c.mem.break_pending, (MAP, ROCK, "cut"))
 
-    def test_a_gem_in_sight_still_comes_before_grass_and_the_oddity(self):
+    def test_every_target_is_ranked_by_its_net(self):
+        """A170: the oddity's expected cache beats a gem five steps off, which beats the grass."""
         w, k = field_with_a_rock(), kb()
         w.entities = [Entity("supply", 9, (5, 10), "gem")]  # five steps off, grass and the rock nearer
-        self.assertTrue(nearer(w, act.act(OP, ctx(w, k)), (5, 10)))
+        cells = [t.cell for t in act.gather_targets(ctx(w, k))]
+        self.assertEqual(cells[:2], [ROCK, (5, 10)])
 
     def test_its_value_is_learned_from_breaks_with_the_reference_as_prior(self):
         w, k = field_with_a_rock(), kb()

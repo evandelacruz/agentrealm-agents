@@ -86,6 +86,8 @@ from agentrealm_adk.survival import recently_attacked
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
 from agentrealm_adk.trace import Trace, tick_detail
 from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
+from agentrealm_adk.supplies import BLOCK_FOOD
+from agentrealm_adk.value import DropWatch, learn_opened_chests
 from agentrealm_adk.world import DOORS, Passage, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
@@ -151,6 +153,7 @@ class LadderRunner:
         self.failed = False  # set when it stopped on an error, not on Ctrl-C
         self.world = WorldModel(cid)
         self.mem = Memory()
+        self.drops = DropWatch()  # her bush cuts, judged for berries (A170)
         self.pacer = pacer_of(client, cid)
         self.tick_hz, self.horizon = DEFAULT_TICK_RATE_HZ, QUEUE_HORIZON_INTENTS
         self.trace = Trace(cfg.trace_path(cid), cfg.profile, out)
@@ -298,7 +301,7 @@ class LadderRunner:
         if self.started is None:
             self.started = Started.now(self.world)
         return Ctx(self.world, self.mem, self.knowledge, self.cfg.policy, self.started, self.tick_hz, self.horizon,
-                   goal.value if goal is not None else ORDINARY)
+                   goal.value if goal is not None else ORDINARY, self.drops)
 
     def decide(self) -> Decision:
         """The round's decision (``choose``), watched for stalls (A168): a
@@ -662,6 +665,8 @@ class LadderRunner:
         note_caches(w, self.knowledge)
         w.note_level_clear(r.get("level_clear_ceremony"))
         w.learn_threat(events, earlier)
+        self.drops.update(w, self.knowledge)  # what her bush cuts dropped (A170)
+        learn_opened_chests(w, self.knowledge)  # what chests she opened held
         if any(ev.get("kind") in ("Died", "Respawned") for ev in events):
             self.resync()
         finished = r.get("finished_queue")
@@ -676,7 +681,8 @@ class LadderRunner:
 
     def apply_results(self, results: list[dict]) -> None:
         """A ``Step`` applied moves her (a door sends her to read position);
-        a swing applied starts the weapon's cooldown; a rejection ends the queue."""
+        a swing applied starts the weapon's cooldown; a cut that landed on a
+        bush is watched for its berry; a rejection ends the queue."""
         w, m = self.world, self.mem
         for res in sorted(results, key=lambda x: (x.get("tick", 0), x.get("index", 0))):
             if m.pending_intents is None or res.get("queue_id") != m.pending_queue:
@@ -709,6 +715,11 @@ class LadderRunner:
                     return
             elif is_weapon_swing(intent, w.armed_code) and res.get("outcome") == "applied":
                 m.last_use_tick = tick
+            if intent.get("verb") == "Use" and res.get("outcome") in ("applied", "applied_no_effect"):
+                target = intent.get("target") or {}
+                cell = (target.get("x"), target.get("y"))
+                if target.get("kind") == "block" and w.view.tiles.get(cell) in BLOCK_FOOD:
+                    self.drops.note_cut(w, cell, tick)  # judged for its berry from when it landed (A170)
 
     def drop_queue(self) -> None:
         m = self.mem

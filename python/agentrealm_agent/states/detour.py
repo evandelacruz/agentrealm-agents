@@ -10,8 +10,9 @@ food the character is hurt by at least the heal of (A155). Every one in view is 
 to the walk: the walking distance from where the character stands to the
 find, then on to the best cell of the route still ahead (the queued steps,
 then the path), less the steps the walk takes to that cell anyway
-(``extra_steps``, a search over known ground, so a wall between the route
-and the find counts). There is no fixed reach: each kind has its own
+(``value.extra_steps``, the ADK's, which Lorraine's walks price by too,
+A170: a search over known ground, so a wall between the route and the
+find counts). There is no fixed reach: each kind has its own
 allowance (``allowance``). A gem pile is worth ``GEM_PILE_STEPS``, and each
 gem pile next to it adds ``GEM_CLUSTER_STEPS`` (one stop takes them all);
 a life is worth ``LIFE_STEPS``; such food ``FOOD_STEPS``. Hostile
@@ -44,7 +45,6 @@ same target.
 
 from __future__ import annotations
 
-from collections.abc import Collection
 from dataclasses import dataclass
 
 from agentrealm_adk.healing import worth_eating
@@ -59,7 +59,8 @@ from agentrealm_adk.pathing import bounded_step, grid_params, nav_search, route_
 from agentrealm_adk.supplies import is_food
 from agentrealm_adk.survival import health_floor, hit_damage, under_attack, worn_defense
 from agentrealm_adk.threat import type_key_for_entity
-from agentrealm_adk.world import DOORS, NEIGHBOURS, Entity, Pos, WorldModel, chebyshev
+from agentrealm_adk.value import extra_steps
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 from .base import PlayContext, State, StateOutcome, top_op
 from .gather_safe import gather_ground, route_clear
@@ -153,52 +154,6 @@ def allowance(w: WorldModel, e: Entity, finds: list[Entity]) -> int:
     if worth_eating(w, e.code):
         steps = max(steps, FOOD_STEPS)
     return steps
-
-
-def extra_steps(w: WorldModel, here: Pos, find: Pos, route: list[Pos], limit: int, avoid: Collection[str] = ()) -> int | None:
-    """Steps going by ``find`` now adds to walking ``route`` from ``here``,
-    rejoining it at its best cell; None when that is more than ``limit``, or
-    when the walk to ``find`` is longer than the straight line plus ``limit``.
-
-    ``route`` must start at the step after ``here`` (``route_ahead``): cell i
-    is i + 1 steps away. Distances are walks over known ground (walkable or a
-    door, never a tile in ``avoid``; the route's own cells count as open),
-    searched from ``find`` no further than the straight line to ``here``
-    plus ``limit``. A find near in a straight line but far on foot (beside a
-    later stretch of a route that winds round a wall) is no short insert from
-    here: it is priced again as the walk comes by it. A find beside the route
-    within that search costs at most 2."""
-    if not route:
-        return None
-    # Straight lines never overestimate a walk: past the limit on them, no search.
-    reach = chebyshev(here, find)
-    if reach + min(chebyshev(find, p) - (i + 1) for i, p in enumerate(route)) > limit:
-        return None
-    on_route = set(route) | {here}
-
-    def open_(p: Pos) -> bool:
-        tile = w.view.tiles.get(p)
-        return p in on_route or (tile not in avoid and (w.walkable(p) or tile in DOORS))
-
-    dist, frontier = {find: 0}, [find]
-    for steps in range(1, reach + limit + 1):
-        nxt = []
-        for x, y in frontier:
-            for dx, dy in NEIGHBOURS:
-                p = (x + dx, y + dy)
-                if p not in dist and open_(p):
-                    dist[p] = steps
-                    nxt.append(p)
-        frontier = nxt
-        if not frontier:
-            break
-    if here not in dist:
-        return None  # not a short insert from here: priced again as the walk comes by
-    rejoin = [dist[p] - (i + 1) for i, p in enumerate(route) if p in dist]
-    if not rejoin:
-        return None
-    extra = dist[here] + min(rejoin)
-    return extra if extra <= limit else None
 
 
 def detour_find(w: WorldModel, ctx: PlayContext, known: Danger | None = None) -> Entity | None:

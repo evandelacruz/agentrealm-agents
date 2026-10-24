@@ -196,6 +196,14 @@ def margin_now(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None) -> 
     return risk_budget(goal, world, kb, now=True)
 
 
+def step_urgent(world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> bool:
+    """A step is too dear for any find (``value.URGENT``, A170): hostiles can
+    reach her and her margin now does not cover them (``margin_now`` on
+    ``Here``), her one risk function. Their ground nearer a find is priced
+    by the cost grid, not here."""
+    return bool(foes_here(world, kb)) and not margin_now(Here(value), world, kb).ok
+
+
 @dataclass(frozen=True)
 class Here:
     """What a reflex prices: the hostiles that can reach her where she stands

@@ -120,6 +120,7 @@ class Supply:
     eaten_on_pickup: bool = False
     fords: bool = False  # water is walkable while it is armed or worn (``fords``, A133)
     sold: bool = False  # a shop sells it in some world: ``gem_prices`` names one
+    gem_prices: tuple[tuple[str, int], ...] = ()  # (world code, price) as ``gem_prices`` gives them (A170)
 
 
 def parse(raw: Any) -> dict[str, Supply]:
@@ -146,6 +147,7 @@ def parse(raw: Any) -> dict[str, Supply]:
             used_up_on_break=used_up if isinstance(used_up, bool) else None,
             eaten_on_pickup=row.get("eaten_on_pickup") is True,
             sold=_sold(row.get("gem_prices")),
+            gem_prices=_gem_prices(row.get("gem_prices")),
             **stats,
         )
     return out
@@ -195,6 +197,13 @@ def _stat_fields(row: dict[str, Any]) -> dict[str, Any]:
 def _sold(prices: Any) -> bool:
     """Whether ``gem_prices`` gives a price in at least one world."""
     return isinstance(prices, dict) and any(_positive_int(v) is not None for v in prices.values())
+
+
+def _gem_prices(prices: Any) -> tuple[tuple[str, int], ...]:
+    """Each world's price ``gem_prices`` gives, as (world code, price), by world."""
+    if not isinstance(prices, dict):
+        return ()
+    return tuple(sorted((str(k), p) for k, v in prices.items() if (p := _positive_int(v)) is not None))
 
 
 def _non_negative_int(v: Any) -> int | None:
@@ -331,6 +340,17 @@ def is_life(code: str | None) -> bool:
 
 def heals(code: str | None) -> bool:
     return is_food(code) or is_potion(code)
+
+
+def list_price(code: str | None, world: str | None = None) -> int | None:
+    """The reference's price for ``code`` in ``world`` (A170), or with no
+    world named the cheapest in any: what an item is worth in gems before a
+    seller of it is seen. None when it is not priced there."""
+    r = row(code)
+    prices = dict(r.gem_prices) if r is not None else {}
+    if world is not None:
+        return prices.get(world)
+    return min(prices.values()) if prices else None
 
 
 def heal_of(code: str | None) -> int:

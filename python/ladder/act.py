@@ -22,6 +22,16 @@ the ADK's backoff (``navigation.stuck``, A90) and is over, so the loop moves
 on; an op with more than one target (gather, explore) takes the next-best
 one that has a step first, and is over only once none has. Occupants on the
 way are no reason to give a walk up (A169): only terrain is.
+
+Every target has one value in gems, the ADK's (``agentrealm_adk.value``,
+A170): gems, food (the health it would give back, at a potion's gems per
+health), lives, and chests (what they hold that fits). Gather works the
+target worth most per step (``gather_targets``), and every walk, whatever op
+sent it, goes by a find on the way when its value beats the steps it adds
+at the step price (``detour``). A step on clear ground is nearly free
+(``value.STEP_GEMS``); hostile ground and other obstacles add the cost
+grid's surcharges, and an attack or a threat her margin cannot pay for
+(``urgent``) declines every detour.
 """
 
 from __future__ import annotations
@@ -29,6 +39,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from agentrealm_adk import boss_clock
 from agentrealm_adk.config import Policy
 from agentrealm_adk.equip import ARMED, CUT, FIGHT, best_equip_upgrade, hunting_ceiling, weapon_to_arm
 from agentrealm_adk.executor import (
@@ -41,24 +52,38 @@ from agentrealm_adk.executor import (
     trim_to_horizon,
     use_cooldown_ticks,
 )
-from agentrealm_adk.gem_caches import CacheTarget, cache_gems, cache_targets
-from agentrealm_adk.gem_yield import GATHER_BLOCKS, region_of, region_yields, take_raises_gems
+from agentrealm_adk.break_memory import choice_at
+from agentrealm_adk.gem_caches import CacheTarget, cache_targets
+from agentrealm_adk.gem_yield import GATHER_BLOCKS, region_of, region_yields
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, hostiles_within, off_safe, walk_reach
 from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
 from agentrealm_adk.memory import Memory
-from agentrealm_adk.navigation import walk_toward
+from agentrealm_adk.navigation import CostGridParams, cell_price, cost_flood, walk_toward
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.passage import went_through
-from agentrealm_adk.pathing import attempt_plan, grid_params, guided_step, plan_sets
+from agentrealm_adk.pathing import attempt_plan, grid_params, guided_step, plan_sets, route_ahead
 from agentrealm_adk.reach import NEAR, supply_reach, weapon_reach
 from agentrealm_adk.sellers import sellers_of, walk_order
-from agentrealm_adk.survival import is_hostile
+from agentrealm_adk.survival import is_hostile, under_attack
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
 from agentrealm_adk.travel.ops import travel_op_from_plan_goal
 from agentrealm_adk.travel.resolve import resolve_travel
+from agentrealm_adk.supplies import BLOCK_FOOD, kept_on_break
+from agentrealm_adk.value import (
+    URGENT,
+    DropWatch,
+    Find,
+    allowance,
+    bush_value,
+    detour_gain,
+    extra_steps,
+    finds,
+    net,
+    step_gems,
+)
 from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 
-from .readiness import ORDINARY, Foes, fits_now, margin_now, owned
+from .readiness import ORDINARY, Foes, fits_now, margin_now, owned, step_urgent
 
 # Most cells one walk queue carries; the walk is re-planned once they have run.
 WALK_CELLS = 8
@@ -69,7 +94,7 @@ FETCH_GOAL = "lorraine:fetch_item"
 # yields the round; the ones with no step are given up, so the next round
 # tries the next ones.
 TARGETS_TRIED = 6
-GATHER, EXPLORE = "lorraine:gather", "lorraine:explore"
+GATHER, EXPLORE, DETOUR = "lorraine:gather", "lorraine:explore", "lorraine:detour"
 
 
 @dataclass
@@ -82,6 +107,8 @@ class Started:
     target: Pos | int | None = None  # what the op committed to: a frontier cell, an NPC id
     searched: set[tuple[int, Pos]] = field(default_factory=set)  # sellers reached without the item (buy)
     stood: set[Pos] = field(default_factory=set)  # frontier cells stood on (explore_area): seen from as near as can be
+    detour: tuple[str, int] | None = None  # the find a detour walks to (A170): (kind, id)
+    taken: set[tuple[str, int]] = field(default_factory=set)  # finds a take was sent for: never chosen again
 
     @classmethod
     def now(cls, w: WorldModel) -> Started:
@@ -105,6 +132,7 @@ class Ctx:
     tick_hz: int = DEFAULT_TICK_RATE_HZ
     horizon: int = QUEUE_HORIZON_INTENTS
     value: str = ORDINARY
+    drops: DropWatch | None = None  # her bush cuts, judged for berries (A170)
 
 
 @dataclass(frozen=True)
@@ -238,11 +266,15 @@ def walk(
     open yet; else the target is given up for the ADK's backoff
     (``give_up_walk``) and the walk is over, so no op holds on it (A168).
     ``toward`` is the hostile a fight walks to and ``passing`` the hostiles
-    a pass is covered for (``walk_sets``), whose ground it does not keep off."""
+    a pass is covered for (``walk_sets``), whose ground it does not keep off.
+    On the way, a find worth the steps it adds is taken first (``detour``)."""
     w, m = ctx.world, ctx.mem
     if w.pos is None or w.map_id is None:
         return Act(None, f"{goal}: unplaced", waits=True)
     dest_map = w.map_id if dest_map is None else dest_map
+    side = detour(ctx, goal, dest if dest_map == w.map_id else None) if goal != DETOUR else None
+    if side is not None:
+        return side
     key = nav_stuck.goal_key(goal, dest_map, dest)
     if nav_stuck.is_backed_off(m.nav_stuck, key, w.tick):
         return given_up_act(ctx, goal, dest, key)
@@ -274,6 +306,110 @@ def walk(
         give_up_walk(ctx, goal, key)
         return Act(None, f"{goal}: no step toward {dest}, given up", over=True, given_up=(key,))
     return Act(walk_queue(ctx, step), f"{goal} → {dest}")
+
+
+# Value on the way (A170): one value for every target, one price for a step.
+
+
+def urgent(ctx: Ctx) -> bool:
+    """A step costs more than any find (``value.URGENT``): under attack,
+    with a boss clock running, or with hostiles that can reach her that her
+    margin does not cover (``readiness.step_urgent``). Hostile ground short
+    of that is priced cell by cell by the cost grid (``walk_costs``)."""
+    w = ctx.world
+    return under_attack(w, ctx.policy) or boss_clock.running(ctx.mem, w) or step_urgent(w, ctx.kb, ctx.value)
+
+
+def walk_grid(ctx: Ctx) -> CostGridParams:
+    """The cost grid her walks plan on: one a clear step plus every
+    surcharge her walk keeps (a hostile's ground, a hazard, a break, fog;
+    ``navigation.planner``). Gather's prices (``walk_costs``) and a detour's
+    (``navigation.cell_price`` in ``value.extra_steps``) read the same one."""
+    avoid, costly, _ = walk_sets(ctx)
+    return grid_params(ctx.policy, avoid, costly, allow_goal_door=True, m=ctx.mem, w=ctx.world, knowledge=ctx.kb)
+
+
+def walk_costs(ctx: Ctx, cells: set[Pos]) -> dict[Pos, int]:
+    """The price of the cheapest walk from her to each of ``cells`` she can
+    reach, on her walk's cost grid (``walk_grid``), in steps."""
+    w = ctx.world
+    if w.pos is None or not cells:
+        return {}
+    return {p: c for p, (_, c) in cost_flood(w, cells, walk_grid(ctx)).items()}
+
+
+def take_find(ctx: Ctx, f: Find) -> list[dict]:
+    """What takes a find: a ``Take`` of a supply, everything that fits out
+    of a chest. Sent once an op: a find still there after it is not chosen
+    again (``Started.taken``), so a take that came to nothing never loops."""
+    ctx.started.taken.add((f.kind, f.id))
+    return [take(f.id)] if f.kind == "supply" else [withdraw(f.id)]
+
+
+def detour(ctx: Ctx, goal: str, dest: Pos | None) -> Act | None:
+    """A side find on the walk ``goal`` is under way on (A170), any op's:
+    the find whose value (``value.finds``) less the steps going by it adds
+    (``value.extra_steps`` over the route ahead, on her walk's cost grid,
+    ``best_detour``) at the step price (``value.step_gems``)
+    gains most, when it gains at all; none while ``urgent``.
+    Once taken up it is kept until it is taken or gone, the step price makes
+    it a loss, or its walk ends; a take sent for it is never sent again.
+    None: no detour, the walk goes on."""
+    w, st = ctx.world, ctx.started
+    if w.pos is None:
+        return None
+    step = step_gems(urgent(ctx))
+    if step == URGENT:
+        st.detour = None
+        return None
+    here = w.pos
+    by_key = {(f.kind, f.id): f for f in finds(w, ctx.kb) if (f.kind, f.id) not in st.taken}
+    f = by_key.get(st.detour) if st.detour else None
+    if f is None:
+        st.detour = None
+        f = best_detour(ctx, goal, dest, step, list(by_key.values()))
+        if f is None:
+            return None
+        st.detour = (f.kind, f.id)
+    if chebyshev(here, f.pos) <= NEAR:
+        st.detour = None
+        return Act(take_find(ctx, f), f"detour: take {f.code} worth {f.gems:.1f} gems")
+    a = walk(ctx, DETOUR, stand_by(w, f.pos, NEAR))
+    if a.over:
+        st.detour = None
+        return None
+    return Act(a.intents, f"detour → {f.code} worth {f.gems:.1f} gems at {f.pos}", waits=a.waits)
+
+
+def best_detour(ctx: Ctx, goal: str, dest: Pos | None, step: float, candidates: list[Find]) -> Find | None:
+    """The find on this map worth the most over what going by it adds to the
+    route ahead of the walk ``goal``, priced on her walk's cost grid (steps
+    and surcharges, ``value.extra_steps`` with ``navigation.cell_price``),
+    when its value beats it; never the walk's own target, nor one on the ground of
+    a hostile the walk keeps off or a walk to it given up."""
+    w, m = ctx.world, ctx.mem
+    here = w.pos
+    route = route_ahead(w, m) if m.goal == goal else []
+    if here is None or not route:
+        return None
+    _, _, reach = walk_sets(ctx)
+    near = [
+        f for f in candidates
+        if f.map_id == w.map_id and f.pos not in reach
+        and (dest is None or chebyshev(f.pos, dest) > NEAR)  # not the walk's own target
+        and not nav_stuck.backed_off(m, DETOUR, w.map_id, stand_by(w, f.pos, NEAR), w.tick)
+    ]
+    price = cell_price(w, walk_grid(ctx)) if near else None
+    best: tuple[float, int, Find] | None = None
+    for f in near:
+        # On her walk's own grid: the steps round a wall, and a surcharge the route pays anyway, count once.
+        extra = extra_steps(w, here, f.pos, route, allowance(f.gems, step), ctx.policy.avoid_blocks, price)
+        if extra is None:
+            continue
+        gain = detour_gain(f.gems, extra, step)
+        if gain > 0 and (best is None or (gain, -f.id) > best[:2]):
+            best = (gain, -f.id, f)
+    return best[2] if best is not None else None
 
 
 def given_up_act(ctx: Ctx, goal: str, dest: Pos, key: str) -> Act:
@@ -550,8 +686,7 @@ class Target:
     then: Callable[[], list[dict]]
     why: str
     foes: tuple[Entity, ...] = ()
-    gems: float = 0.0  # what working it is worth, in gems: priced per step (``per_step``)
-    lying: bool = False  # a gem in sight: taken before any work (A168)
+    gems: float = 0.0  # what working it is worth, in gems (``value``, A170): ranked by its net
 
 
 def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
@@ -570,50 +705,64 @@ def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
 
 
 def gather_targets(ctx: Ctx) -> list[Target]:
-    """Where a gather may work, best first (A168, A172): a gem in sight
-    before anything else, nearest first; then grass to cut (with the cutter
-    ``equip.weapon_to_arm`` picks, worth the gems a cut drops there,
-    ``gem_yield.region_yields``) and an oddity a held capability may break
-    (``gem_caches.cache_targets``, worth its expected cache), each by its
-    value per step (``per_step``); none given up and still backed off. A target with known hostiles beside it
-    (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes
-    after every other, and only when her margin now covers them all
+    """Where a gather may work, best first (A168, A170, A172): every find in
+    sight or remembered on this map (``value.finds``: gems, food while it
+    would heal, lives, chests), an oddity a held capability may break
+    (``gem_caches.cache_targets``, worth its expected cache), grass to cut
+    (worth the gems a cut drops there, ``gem_yield.region_yields``) and
+    bushes a held item cuts (``value.bush_value``, none left standing by a
+    cut), each by its net (``value.net``: its value less the gems of the walk
+    to it, surcharges and all, ``walk_costs``; one the grid does not reach
+    after every one it does), distance breaking ties, none given up and
+    still backed off. A target with known hostiles beside it
+    (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes after
+    every other, and only when her margin now covers them all
     (``readiness.margin_now``, A139); its walk then passes their ground."""
-    w, m = ctx.world, ctx.mem
+    w, m, kb = ctx.world, ctx.mem, ctx.kb
     if w.pos is None:
         return []
     here = w.pos
     found: list[Target] = []
-    for e in w.entities:
-        if e.kind == "supply" and e.gem_price is None and take_raises_gems(e.code):
-            found.append(Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem", gems=cache_gems(e.code) or 1, lying=True))
-    for c in cache_targets(w, ctx.kb, ctx.tick_hz):
-        found.append(Target(c.pos, supply_reach(ctx.kb, c.supply.code), lambda c=c: break_oddity(ctx, c),
+    for f in finds(w, kb):
+        if (f.kind, f.id) not in ctx.started.taken:
+            found.append(Target(f.pos, NEAR, lambda f=f: take_find(ctx, f), f"take {f.code} worth {f.gems:.1f} gems",
+                                gems=f.gems))
+    for c in cache_targets(w, kb, ctx.tick_hz):
+        found.append(Target(c.pos, supply_reach(kb, c.supply.code), lambda c=c: break_oddity(ctx, c),
                             f"break the {c.block} at {c.pos} for its cache, about {c.gems:.1f} gems", gems=c.gems))
-    reach = weapon_reach(w, ctx.kb)
-    rate, by_region = region_yields(ctx.kb, w.map_id)
+    reach = weapon_reach(w, kb)
+    rate, by_region = region_yields(kb, w.map_id)
     for p, b in w.view.tiles.items():
         if b in GATHER_BLOCKS:
             found.append(Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}", gems=by_region.get(region_of(p), rate)))
+        elif b in BLOCK_FOOD and (gems := bush_value(b, w, kb)) > 0 and cuts_bush(ctx, p):
+            found.append(Target(p, NEAR, lambda p=p: cut(ctx, p), f"cut the bush at {p} for food worth {gems:.1f} gems",
+                                gems=gems))
+    kept = [(t, stand) for t in found if not nav_stuck.backed_off(m, GATHER, w.map_id, stand := stand_by(w, t.cell, t.reach), w.tick)]
+    costs = walk_costs(ctx, {stand for _, stand in kept})
     out: list[tuple[tuple, Target]] = []
-    for t in found:
-        p = t.cell
-        if nav_stuck.backed_off(m, GATHER, w.map_id, stand_by(w, p, t.reach), w.tick):
-            continue
-        foes = tuple(hostiles_within(w, ctx.policy, p, GATHER_HOSTILE_RADIUS))
-        if foes and not margin_now(Foes(foes, ctx.value), w, ctx.kb).ok:
+    for t, stand in kept:
+        foes = tuple(hostiles_within(w, ctx.policy, t.cell, GATHER_HOSTILE_RADIUS))
+        if foes and not margin_now(Foes(foes, ctx.value), w, kb).ok:
             continue
         if foes:
-            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems, t.lying)
-        steps = max(0, chebyshev(here, p) - t.reach)
-        priced = 0.0 if t.lying else -per_step(t.gems, steps)  # a gem in sight first, nearest first (A168)
-        out.append(((bool(foes), not t.lying, priced, chebyshev(here, p), p), t))
+            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems)
+        # One walk model: a target her walk's grid does not reach goes after every one it does.
+        cost = costs.get(stand)
+        priced = -net(t.gems, cost) if cost is not None else 0.0
+        out.append(((bool(foes), cost is None, priced, chebyshev(here, t.cell), t.cell), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
 
 
-def per_step(gems: float, steps: int) -> float:
-    """A target's value per step: over the steps to it and the action that takes it."""
-    return gems / (steps + 1)
+def cuts_bush(ctx: Ctx, p: Pos) -> bool:
+    """A held item opens the bush at ``p`` without being used up
+    (``break_memory.choice_at``, ``supplies.kept_on_break``: a knife or a
+    sword, never a match), and no cut of hers left it standing lately."""
+    w = ctx.world
+    if ctx.drops is not None and ctx.drops.unbroken(w, p):
+        return False
+    choice = choice_at(w, ctx.kb, p)
+    return choice is not None and kept_on_break(choice.supply.code)
 
 
 def first_with_a_step(ctx: Ctx, goal: str, targets: list[Target]) -> Act | None:

@@ -760,6 +760,14 @@ def entrance_routes(w: WorldModel, goals: Iterable[Pos], budget: int = FINE_NODE
     return out
 
 
+def cell_price(w: WorldModel, params: CostGridParams | None = None) -> Callable[[Pos], int | None]:
+    """The cost grid's price of stepping onto each cell (one a clear step, plus
+    the surcharges ``params`` keep: a hostile's ground, a hazard, a break,
+    fog), None where no walk goes: for a search of one's own over the same
+    grid (``value.extra_steps``, A170)."""
+    return _Grid(w, set(), params or CostGridParams()).cost
+
+
 def path_cost(w: WorldModel, path: list[Pos], goal: Pos, params: CostGridParams | None = None) -> int | None:
     """What walking ``path`` costs on today's cost grid, plus the straight-line
     rest from its end to ``goal``; None when a cell on it is impassable now.

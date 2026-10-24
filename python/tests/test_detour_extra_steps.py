@@ -13,7 +13,9 @@ from agentrealm_adk.directives import PARAM_DEFAULTS
 from agentrealm_adk.memory import Memory
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import dispatch
-from agentrealm_agent.states.detour import GEM_PILE_STEPS, detour_find, extra_steps
+from agentrealm_adk.loot import GEM_PILE_STEPS
+from agentrealm_adk.value import extra_steps
+from agentrealm_agent.states.detour import detour_find
 from agentrealm_adk.world import Entity, WorldModel
 
 from tests.test_freeplay_run4 import ctx, open_field

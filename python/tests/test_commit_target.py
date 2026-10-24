@@ -22,7 +22,8 @@ from agentrealm_adk.memory import Memory
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch, gather_outcome
-from agentrealm_agent.states.detour import GEM_PILE_STEPS, extra_steps
+from agentrealm_adk.loot import GEM_PILE_STEPS
+from agentrealm_adk.value import extra_steps
 from agentrealm_agent.states.explore import explore_outcome
 from agentrealm_agent.states.level import ENTRANCE_GOAL
 from agentrealm_agent.states.travel import TRAVEL_TARGET, resolve_destination

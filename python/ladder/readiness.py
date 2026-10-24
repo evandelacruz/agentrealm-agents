@@ -55,6 +55,7 @@ from agentrealm_adk.survival import (
     worn_defense,
 )
 from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_sales
+from agentrealm_adk.value import URGENT
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -194,6 +195,18 @@ def margin_after(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None, *
 def margin_now(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None) -> Budget:
     """What the reflexes read (A141): the goal being worked, priced now."""
     return risk_budget(goal, world, kb, now=True)
+
+
+def step_urgency(world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> float:
+    """How much dearer a step is than at ease (``value.step_gems``, A170),
+    by her one risk function: 1 with no hostile that can reach her; else her
+    margin now (``margin_now`` on ``Here``) raises it by the share of it
+    those hostiles spend, and makes it ``value.URGENT`` once they spend all
+    of it."""
+    if not foes_here(world, kb):
+        return 1.0
+    b = margin_now(Here(value), world, kb)
+    return URGENT if not b.ok or b.slack <= 0 else b.allowed / b.slack
 
 
 @dataclass(frozen=True)

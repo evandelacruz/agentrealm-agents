@@ -53,9 +53,11 @@ from typing import TYPE_CHECKING
 
 from agentrealm_adk.entrance_needs import lying_in_sight, meets
 from agentrealm_adk.level_order import target_level
+from agentrealm_adk.sellers import sellers_of, walk_estimate
 from agentrealm_adk.supplies import heal_of, is_potion
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp
-from agentrealm_adk.world import Entity, Pos, WorldModel
+from agentrealm_adk.value import step_gems
+from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 from . import readiness as r
 
@@ -305,18 +307,30 @@ def alive_margin(node: Node, rd: Reading) -> Check:
 
 
 def restore_margin(node: Node, rd: Reading) -> GoalOp:
-    """Restore the margin with the first move that makes it fit: eat food in
-    sight, buy a potion; else retreat to town, out of the hostiles' reach.
-    A carried heal is never drunk for it: it counted already, so a drink
-    leaves the margin as it was."""
+    """Restore the margin with the cheapest move that makes it fit, its walk
+    counted (A170): eat food in sight, at its steps, or buy a potion, at its
+    price and the steps to its seller, each step at the step price
+    (``value.step_gems``, raised by danger, ``readiness.step_urgency``), so
+    food near beats a potion and a potion wins once food is far; else retreat
+    to town, out of the hostiles' reach. A carried heal is never drunk for
+    it: it counted already, so a drink leaves the margin as it was."""
     w, goal = rd.world, node.serves
+    step = step_gems(w, rd.kb, r.step_urgency(w, rd.kb, goal.value))
+    options: list[tuple[float, int, GoalOp]] = []
     food = r.food_in_sight(w)
     if food is not None and r.margin_after(goal, w, rd.kb, eat=heal_of(food.code)).ok:
-        return {"op": "fetch_item", "code": food.code, "x": food.pos[0], "y": food.pos[1]}
-    for price, code in sorted((p, c) for c, p in r.for_sale(w, rd.kb).items() if is_potion(c)):
-        if price <= (w.gems or 0) and r.margin_after(goal, w, rd.kb, carry=heal_of(code)).ok:
-            return {"op": "buy", "code": code}
-    return {"op": "travel", "to": "town"}
+        steps = chebyshev(w.pos, food.pos) if w.pos is not None else 0
+        options.append((_walk_gems(steps, step), 0, {"op": "fetch_item", "code": food.code, "x": food.pos[0], "y": food.pos[1]}))
+    for code, price in r.for_sale(w, rd.kb).items():
+        if is_potion(code) and price <= (w.gems or 0) and r.margin_after(goal, w, rd.kb, carry=heal_of(code)).ok:
+            walks = [n for s in sellers_of(code, w, rd.kb) if s.in_stock and (n := walk_estimate(s, w)) is not None]
+            options.append((price + _walk_gems(min(walks, default=0), step), 1, {"op": "buy", "code": code}))
+    return min(options, key=lambda o: o[:2])[2] if options else {"op": "travel", "to": "town"}
+
+
+def _walk_gems(steps: int, step: float) -> float:
+    """``steps`` at ``step`` gems a step; none costs nothing, whatever the price."""
+    return steps * step if steps else 0.0
 
 
 def tree() -> Node:

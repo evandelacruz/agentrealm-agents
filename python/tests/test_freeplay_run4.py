@@ -31,7 +31,8 @@ from agentrealm_adk.navigation.planner import CostGridParams, NavSearchState, _t
 from agentrealm_agent.plan import Plan, parse_directives_goals
 from agentrealm_agent.states import PlayContext, dispatch
 from agentrealm_adk.pathing import route_ahead
-from agentrealm_agent.states.detour import detour_find, extra_steps
+from agentrealm_adk.value import extra_steps
+from agentrealm_agent.states.detour import detour_find
 from agentrealm_agent.states.retreat import no_progress
 from agentrealm_adk.travel import sync_town
 from agentrealm_adk.world import Entity, WorldModel

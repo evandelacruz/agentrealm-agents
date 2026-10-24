@@ -219,6 +219,25 @@ class LoopTest(unittest.TestCase):
         self.assertNotIn(f"{MAP},7,5,cut", r.knowledge.breaks)
 
 
+    def test_a_queue_replaced_as_its_break_opens_still_files_it(self):
+        r, w = self.r, self.w
+        self.sent([{"verb": "Wait", "ticks": 2}, use_on(ROCK)])
+        results = [{"queue_id": 7, "index": i, "outcome": "applied", "tick": w.tick} for i in (0, 1)]
+        changed = [{"tick": w.tick, "events": [
+            {"kind": "BlockChanged", "map_id": MAP, "x": ROCK[0], "y": ROCK[1], "block_type": "grass"}]}]
+        r.apply({"tick": w.tick, "queue_id": 8, "intent_results": results, "events_by_tick": changed},
+                Decision([{"verb": "Step", "direction": "W"}], "flee", "flee"))
+        self.assertIsNone(r.mem.break_pending)
+        self.assertEqual(r.knowledge.breaks[f"{MAP},7,5,cut"]["result"], "opened")
+
+    def test_a_queue_replaced_after_its_break_ran_keeps_it_for_the_change_to_come(self):
+        r, w = self.r, self.w
+        self.sent([use_on(ROCK)])
+        r.apply({"tick": w.tick, "queue_id": 8,
+                 "intent_results": [{"queue_id": 7, "index": 0, "outcome": "applied", "tick": w.tick}]},
+                Decision([{"verb": "Step", "direction": "W"}], "flee", "flee"))
+        self.assertEqual(r.mem.break_pending, (MAP, ROCK, "cut"))
+
     def test_a_queue_replaced_before_the_break_ran_drops_it(self):
         r, w = self.r, self.w
         self.sent([{"verb": "Wait", "ticks": 2}, use_on(ROCK)])

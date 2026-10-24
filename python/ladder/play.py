@@ -624,13 +624,15 @@ class LadderRunner:
     def apply(self, r: dict, d: Decision) -> list[dict]:
         w, m = self.world, self.mem
         w.tick = int(r.get("tick", w.tick))
+        replaced = (m.pending_intents, m.pending_queue, m.pending_next_index)
         if d.intents is not None:
-            drop_unsent_break(m, w, d.intents)
             # What was sent replaces the server's queue, even an empty one.
             m.pending_intents = d.intents or None
             m.pending_queue = r.get("queue_id") if d.intents else None
             m.pending_next_index, m.queue_sent_tick = 0, w.tick
         self.apply_results(r.get("intent_results") or [])
+        if d.intents is not None:
+            settle_replaced_break(self.knowledge, m, w, replaced, r.get("intent_results") or [], d.intents)
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
@@ -716,18 +718,36 @@ class LadderRunner:
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
 
 
-def drop_unsent_break(m: Memory, w: WorldModel, sent: list[dict]) -> None:
-    """A queue replaced before its break ``Use`` ran, by one that does not
-    send it again, never breaks the block: the break is no longer in flight
-    (A172), so a later change there is not ours."""
-    if m.break_pending is None:
+def settle_replaced_break(
+    kb: KnowledgeBase | None, m: Memory, w: WorldModel, replaced: tuple, results: list[dict], sent: list[dict],
+) -> None:
+    """Settle a break in flight on a queue just replaced (A172): its own
+    results in this response first (``note_break_use``), as for any queue;
+    then, if its break ``Use`` never ran and the new queue does not send it
+    again, the break is no longer in flight, so a later change there is not
+    ours. One that ran stays pending: its ``BlockChanged`` may come with this
+    response (``resolve_pending_break``) or a later one."""
+    intents, queue, start = replaced
+    if m.break_pending is None or not intents:
         return
     pos = m.break_pending[1]
 
-    def breaks(intents: list[dict]) -> bool:
-        return any(i.get("verb") == "Use" and use_target_block(i, w.entities) == pos for i in intents)
+    def is_break(i: dict | None) -> bool:
+        return i is not None and i.get("verb") == "Use" and use_target_block(i, w.entities) == pos
 
-    if breaks((m.pending_intents or [])[m.pending_next_index:]) and not breaks(sent):
+    at = next((n for n in range(start, len(intents)) if is_break(intents[n])), None)
+    if at is None:
+        return
+    ran = False
+    for res in sorted((x for x in results if x.get("queue_id") == queue), key=lambda x: (x.get("tick", 0), x.get("index", 0))):
+        n = int(res.get("index", 0))
+        if n < start or n >= len(intents) or m.break_pending is None:
+            continue
+        intent = intents[n]
+        block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
+        note_break_use(kb, m, w, intent, res, block, list(intents[n:]))
+        ran |= n == at and res.get("outcome") != "rejected"
+    if m.break_pending is not None and not ran and not any(is_break(i) for i in sent):
         m.break_pending = None
 
 

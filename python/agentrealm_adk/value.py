@@ -8,42 +8,48 @@ Every place a walk may go for something has one value, in gems:
   ``min(heal, max_health - health)``, at the gems a health point costs as a
   potion (``gems_per_health``). At full health it is worth nothing, so food
   is passed by then by its price, not by a test of its own;
+- a bush (``supplies.BLOCK_FOOD``): its berry's value times the chance a cut
+  drops one (``berry_chance``, learned from the character's own cuts like
+  ``gem_yield``, ``DropWatch``, with ``BUSH_PRIOR`` until then);
 - a life (``supplies.is_life``): ``LIFE_GEMS``;
 - any other supply, lying free or in a chest: its price (``prices``): as
   seen for sale in this world (``chest_sources.known_prices``), else the
   Supplies reference's for this world (``supplies.list_price``), and only
   what fits the pack;
 - a chest, in view or remembered (her own death chests, kept across runs,
-  A122): the sum of what it holds that fits the pack (``chest_value``), as
-  seen in reach (``WorldModel.chest_contents``) or expected from the death
-  (A167). A chest never seen in reach is no dropped chest of ours, and a
-  dropped chest is never empty (the game removes it once emptied), so it is
-  worth at least one item at the cheapest price known (``unseen_chest_gems``).
+  A122): what it holds that fits the pack (``chest_value``): her own death
+  chest by its contents known from the death (A167), any chest by what was
+  seen in it in reach (``WorldModel.chest_contents``; a storage chest seen
+  empty is worth nothing). A chest whose contents were never seen is a
+  dropped chest's expected worth (``expected_chest_gems``: the running
+  average of what the non-empty chests opened held, kept in the knowledge
+  base, ``learn_opened_chests``, from ``CHEST_PRIOR_GEMS``): a dropped chest
+  is never empty, since the game removes it once emptied.
 
-A step costs what the action could have earned instead: the gems a cut
-drops on this map (``gem_yield.expected_yield``), the price A105 gives every
-step Gather walks. Urgency (a boss clock running, hostiles that can reach the
-character with the margin short, an attack under way) raises it; the caller
-says how much (``step_gems``'s ``urgency``), so a walk under threat declines
-what it would otherwise take, with no test of its own.
-
-A target is chosen by its value per step (``per_step``): its value over the
-steps to it plus the one action that takes it. A side find on any walk is
-taken when its value beats the steps it adds (``extra_steps``) at the step
-price (``detour_gain``). Gary's Detour and Lorraine's walks both read this.
+A step on clear ground is nearly free: ``STEP_GEMS``. Only a monster or
+another obstacle makes one dearer, by the surcharges the cost grid already
+prices in step units (``navigation.planner``: a hostile's priced ground, a
+hazard or costly cell, a block to break, fog), converted at that same rate
+(``walk_gems``). A target's net is its value less the gems of its walk
+(``net``); the highest net is chosen, distance breaking ties. A side find on
+any walk is taken when its value beats the steps it adds (``extra_steps``)
+at that rate (``detour_gain``). Urgency the cost grid does not see (an
+attack under way, a boss clock running, hostiles the margin cannot pay for)
+is the caller's, and ``URGENT`` declines every find. Gary's Detour and
+Lorraine's walks both read this.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Collection, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from .chest_sources import known_prices
-from .gem_yield import GEM_CACHE_PREFIX, expected_yield, regions
+from .gem_yield import GEM_CACHE_PREFIX, GEM_WINDOW_TICKS, PRIOR_CUTS, REGROW_TICKS
 from .loot import GEM_SUPPLY_CODES
-from .supplies import eaten_on_pickup, heal_of, is_life, is_potion, list_price, sold_codes
+from .supplies import BLOCK_FOOD, eaten_on_pickup, heal_of, is_life, is_potion, list_price, sold_codes
 from .world import DOORS, NEIGHBOURS, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -55,8 +61,25 @@ LIFE_GEMS = 2.0
 # A health point in gems with no potion priced, seen or in the reference:
 # a small potion's 10 gems for 10 health.
 PRIOR_GEMS_PER_HEALTH = 1.0
+# A step on clear ground, in gems: nearly free. Every surcharge the cost
+# grid prices (a hostile's ground, a hazard, a break, fog) is in steps and
+# converted at this rate (``walk_gems``).
+STEP_GEMS = 0.1
 # The step price under urgency that declines every find.
 URGENT = math.inf
+# What a chest whose contents were never seen is worth until opened chests
+# measure it, weighted as this many chests: a dropped chest is never empty,
+# and a death drops what was carried, a few items.
+CHEST_PRIOR_GEMS = 5.0
+CHEST_PRIOR_WEIGHT = 3
+# The chance a bush's cut drops a berry until cuts measure it, weighted as
+# ``gem_yield.PRIOR_CUTS`` cuts. The reference gives no rate (Manual §16),
+# so it is grass's farther rate.
+BUSH_PRIOR = 0.25
+# Knowledge base keys (``kb.extra``): opened chests' worth and bush drops.
+CHESTS_KEY, BUSH_KEY = "opened_chests", "bush_drops"
+# The opened chest ids kept, so a chest is counted once.
+CHEST_IDS_KEPT = 500
 
 
 @dataclass(frozen=True)
@@ -141,12 +164,103 @@ def chest_value(codes: Iterable[str], w: WorldModel, kb: KnowledgeBase | None, s
     return eaten + sum(sorted(kept, reverse=True)[: room(w)])
 
 
-def unseen_chest_gems(w: WorldModel, seen: Mapping[str, int]) -> float:
-    """A chest never seen in reach: at least one supply, at the cheapest price known."""
+def expected_chest_gems(w: WorldModel, kb: KnowledgeBase | None) -> float:
+    """A chest whose contents were never seen: what the non-empty chests
+    opened held on average (``learn_opened_chests``), pulled toward
+    ``CHEST_PRIOR_GEMS``; nothing with no room in the pack."""
     if room(w) == 0:
         return 0.0
-    known = [p for p in seen.values() if p > 0]
-    return float(min(known)) if known else 1.0
+    row = _row(kb, CHESTS_KEY)
+    n, gems = int(row.get("count", 0)), float(row.get("gems", 0.0))
+    return (gems + CHEST_PRIOR_GEMS * CHEST_PRIOR_WEIGHT) / (n + CHEST_PRIOR_WEIGHT)
+
+
+def learn_opened_chests(w: WorldModel, kb: KnowledgeBase | None) -> None:
+    """Count each chest seen in reach holding something, once, toward
+    ``expected_chest_gems``: its contents at their prices, fit or not. Our
+    own death chests are known, not expected, and an empty one is a storage
+    chest (a dropped chest is never empty), so neither counts."""
+    if kb is None:
+        return
+    opened = {cid: c for cid, c in w.chest_contents.items() if c and cid not in w.death_chests}
+    if not opened or all(cid in _row(kb, CHESTS_KEY).get("ids", []) for cid in opened):
+        return
+    seen = prices(w, kb)  # outside the lock: it reads the knowledge base
+    with kb.lock:
+        row = dict(_row(kb, CHESTS_KEY))
+        ids = list(row.get("ids", []))
+        for chest_id, contents in opened.items():
+            if chest_id in ids:
+                continue
+            worth = sum(float(seen.get(s.code, 0)) for s in contents if not eaten_on_pickup(s.code))
+            row["count"], row["gems"] = int(row.get("count", 0)) + 1, float(row.get("gems", 0.0)) + worth
+            ids.append(chest_id)
+        row["ids"] = ids[-CHEST_IDS_KEPT:]
+        kb.extra[CHESTS_KEY] = row
+
+
+def _row(kb: KnowledgeBase | None, key: str) -> dict:
+    row = kb.extra.get(key) if kb is not None else None
+    return row if isinstance(row, dict) else {}
+
+
+def berry_chance(kb: KnowledgeBase | None) -> float:
+    """The chance a bush's cut drops its berry: the cuts measured
+    (``DropWatch``) pulled toward ``BUSH_PRIOR`` as ``PRIOR_CUTS`` cuts."""
+    row = _row(kb, BUSH_KEY)
+    return (int(row.get("berries", 0)) + BUSH_PRIOR * PRIOR_CUTS) / (int(row.get("cuts", 0)) + PRIOR_CUTS)
+
+
+def bush_value(block: str | None, w: WorldModel, kb: KnowledgeBase | None, seen: Mapping[str, int] | None = None) -> float:
+    """A block that drops food when cut (``supplies.BLOCK_FOOD``): its food's
+    value now times the chance a cut drops it; nothing for another block."""
+    food = BLOCK_FOOD.get(block or "")
+    return berry_chance(kb) * supply_value(food, w, kb, seen) if food else 0.0
+
+
+@dataclass
+class DropWatch:
+    """The bush cuts sent and not yet judged (A170): each is filed a cut,
+    with a berry when one lies on its cell within ``GEM_WINDOW_TICKS`` (a
+    break drops at most one supply, on that block), and a cell the cut left
+    standing is passed over for ``REGROW_TICKS`` (``unbroken``)."""
+
+    pending: list[tuple[int | None, Pos, int]] = field(default_factory=list)
+    berry: set[tuple[int | None, Pos]] = field(default_factory=set)
+    standing: dict[tuple[int | None, Pos], int] = field(default_factory=dict)
+
+    def note_cut(self, w: WorldModel, cell: Pos) -> None:
+        if not any(m == w.map_id and p == cell for m, p, _ in self.pending):
+            self.pending.append((w.map_id, cell, w.tick))
+
+    def unbroken(self, w: WorldModel, cell: Pos) -> bool:
+        return w.tick < self.standing.get((w.map_id, cell), -1)
+
+    def update(self, w: WorldModel, kb: KnowledgeBase | None) -> None:
+        keep = []
+        for map_id, cell, tick in self.pending:
+            here = map_id == w.map_id
+            if here and any(e.kind == "supply" and e.pos == cell and e.code in BLOCK_FOOD.values() for e in w.entities):
+                self.berry.add((map_id, cell))
+            if w.tick <= tick + GEM_WINDOW_TICKS:
+                keep.append((map_id, cell, tick))
+                continue
+            if here and w.view.tiles.get(cell) in BLOCK_FOOD:
+                self.standing[(map_id, cell)] = w.tick + REGROW_TICKS  # no break: nothing to file
+            elif here:
+                _file_bush_cut(kb, (map_id, cell) in self.berry)
+            self.berry.discard((map_id, cell))
+        self.pending = keep
+
+
+def _file_bush_cut(kb: KnowledgeBase | None, berry: bool) -> None:
+    if kb is None:
+        return
+    with kb.lock:
+        row = dict(_row(kb, BUSH_KEY))
+        row["cuts"] = int(row.get("cuts", 0)) + 1
+        row["berries"] = int(row.get("berries", 0)) + (1 if berry else 0)
+        kb.extra[BUSH_KEY] = row
 
 
 def finds(w: WorldModel, kb: KnowledgeBase | None) -> list[Find]:
@@ -183,28 +297,31 @@ def _chest_gems(chest_id: int, w: WorldModel, kb: KnowledgeBase | None, seen: Ma
     chest = w.death_chests.get(chest_id)
     if chest is not None and chest.contents is not None:
         return chest_value(chest.contents, w, kb, seen)
-    return unseen_chest_gems(w, seen)
+    return expected_chest_gems(w, kb)
 
 
-def step_gems(w: WorldModel, kb: KnowledgeBase | None, urgency: float = 1.0) -> float:
-    """What a step costs in gems: the gems a cut drops on this map (A105:
-    a step is an action like a cut), times ``urgency`` (1 at ease; more,
-    up to ``URGENT``, under threat)."""
-    base = expected_yield(regions(kb, w.map_id))
-    return URGENT if urgency == URGENT else base * urgency
+def step_gems(urgent: bool = False) -> float:
+    """What a step on clear ground costs in gems: ``STEP_GEMS``, or
+    ``URGENT`` when the caller's urgency declines every find."""
+    return URGENT if urgent else STEP_GEMS
 
 
-def per_step(gems: float, steps: int) -> float:
-    """A target's value per step: over the steps to it and the action that takes it."""
-    return gems / (steps + 1)
+def walk_gems(cost: float, step: float = STEP_GEMS) -> float:
+    """A walk's cost grid price (steps, surcharges in steps) in gems; none costs nothing."""
+    return cost * step if cost else 0.0
 
 
-def detour_gain(gems: float, extra: int, step: float) -> float:
+def net(gems: float, cost: float, step: float = STEP_GEMS) -> float:
+    """A target's net: its value less the gems of the walk to it."""
+    return gems - walk_gems(cost, step)
+
+
+def detour_gain(gems: float, extra: float, step: float = STEP_GEMS) -> float:
     """What going by a find gains: its value less the steps it adds at the step price."""
-    return gems - extra * step if extra else gems
+    return net(gems, extra, step)
 
 
-def allowance(gems: float, step: float) -> int:
+def allowance(gems: float, step: float = STEP_GEMS) -> int:
     """The most steps a find of ``gems`` is worth at ``step`` gems a step."""
     if step == URGENT:
         return -1

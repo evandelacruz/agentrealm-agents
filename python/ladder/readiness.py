@@ -55,7 +55,6 @@ from agentrealm_adk.survival import (
     worn_defense,
 )
 from agentrealm_adk.travel.knowledge import iter_entrances, iter_shop_sales
-from agentrealm_adk.value import URGENT
 from agentrealm_adk.world import Entity, Pos, WorldModel, chebyshev
 
 if TYPE_CHECKING:
@@ -197,16 +196,12 @@ def margin_now(goal: RiskyGoal, world: WorldModel, kb: KnowledgeBase | None) -> 
     return risk_budget(goal, world, kb, now=True)
 
 
-def step_urgency(world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> float:
-    """How much dearer a step is than at ease (``value.step_gems``, A170),
-    by her one risk function: 1 with no hostile that can reach her; else her
-    margin now (``margin_now`` on ``Here``) raises it by the share of it
-    those hostiles spend, and makes it ``value.URGENT`` once they spend all
-    of it."""
-    if not foes_here(world, kb):
-        return 1.0
-    b = margin_now(Here(value), world, kb)
-    return URGENT if not b.ok or b.slack <= 0 else b.allowed / b.slack
+def step_urgent(world: WorldModel, kb: KnowledgeBase | None, value: str = ORDINARY) -> bool:
+    """A step is too dear for any find (``value.URGENT``, A170): hostiles can
+    reach her and her margin now does not cover them (``margin_now`` on
+    ``Here``), her one risk function. Their ground nearer a find is priced
+    by the cost grid, not here."""
+    return bool(foes_here(world, kb)) and not margin_now(Here(value), world, kb).ok
 
 
 @dataclass(frozen=True)

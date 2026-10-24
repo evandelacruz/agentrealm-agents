@@ -55,11 +55,49 @@ class ValueTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(1, "rope")]  # with the sword armed, one slot left
         self.assertEqual(value.chest_value(["bronze_sword", "small_potion"], w, kb()), 15.0)
 
-    def test_a_step_costs_what_a_cut_drops_and_urgency_raises_it(self):
-        w = world()
-        self.assertAlmostEqual(value.step_gems(w, kb()), 0.2)
-        self.assertAlmostEqual(value.step_gems(w, kb(), 3.0), 0.6)
-        self.assertEqual(value.step_gems(w, kb(), value.URGENT), value.URGENT)
+    def test_a_clear_step_is_nearly_free_and_urgency_declines_every_find(self):
+        self.assertEqual(value.step_gems(), value.STEP_GEMS)
+        self.assertAlmostEqual(value.net(1.0, 4), 0.6)
+        self.assertEqual(value.step_gems(urgent=True), value.URGENT)
+        self.assertEqual(value.allowance(1.0, value.URGENT), -1)
+
+    def test_a_chest_never_opened_is_worth_what_opened_chests_held(self):
+        w, k = world(), kb()
+        self.assertEqual(value.expected_chest_gems(w, k), value.CHEST_PRIOR_GEMS)
+        w.chest_contents = {7: [InventorySupply(1, "bronze_sword")], 8: []}  # a storage chest seen empty counts nothing
+        value.learn_opened_chests(w, k)
+        value.learn_opened_chests(w, k)  # each chest once
+        expected = (15 + value.CHEST_PRIOR_GEMS * value.CHEST_PRIOR_WEIGHT) / (1 + value.CHEST_PRIOR_WEIGHT)
+        self.assertAlmostEqual(value.expected_chest_gems(w, k), expected)
+        w.entities = [Entity("chest", 8, (9, 5))]
+        self.assertEqual([f.id for f in value.finds(w, k)], [], "the empty one is worth nothing")
+
+    def test_a_bush_is_worth_its_berry_times_the_chance_learned_from_cuts(self):
+        w, k = world(health=6), kb()
+        self.assertAlmostEqual(value.bush_value("bush", w, k), value.BUSH_PRIOR * 1.0)
+        self.assertEqual(value.bush_value("bush", world(), k), 0, "no berry is worth anything at full health")
+        watch = value.DropWatch()
+        for i, berry_dropped in enumerate([True] * 10):
+            cell = (20 + i, 5)
+            w.view.tiles[cell] = "bush"
+            watch.note_cut(w, cell)
+            w.view.tiles[cell] = "dirt"
+            if berry_dropped:
+                w.entities = [Entity("supply", 100 + i, cell, "berry")]
+            watch.update(w, k)
+            w.tick += 10
+            watch.update(w, k)
+        self.assertGreater(value.berry_chance(k), value.BUSH_PRIOR)
+
+    def test_a_cut_that_left_the_bush_standing_passes_it_over(self):
+        w, k = world(), kb()
+        w.view.tiles[(6, 5)] = "bush"
+        watch = value.DropWatch()
+        watch.note_cut(w, (6, 5))
+        w.tick += 10
+        watch.update(w, k)
+        self.assertTrue(watch.unbroken(w, (6, 5)))
+        self.assertEqual(k.extra.get(value.BUSH_KEY), None, "no break: nothing filed")
 
 
 def gather(w, k=None):
@@ -94,6 +132,29 @@ class GatherByValueTest(unittest.TestCase):
         w.pos = (9, 5)
         a = act.act({"op": "gather_gems", "count": 5}, ctx(w, kb()))
         self.assertEqual(a.intents, [{"verb": "WithdrawFromChest", "chest_id": 30}])
+
+    def test_hurt_with_a_knife_she_cuts_a_bush_for_its_berry(self):
+        w = open_ground(world(health=6, armed_code="pocket_knife", armed_id=2))
+        w.view.tiles[(7, 5)], w.view.tiles[(3, 5)] = "bush", "grass"
+        c = ctx(w, kb())
+        c.drops = value.DropWatch()
+        self.assertEqual(act.gather_targets(c)[0].cell, (7, 5))
+        w.pos = (6, 5)
+        a = act.act({"op": "gather_gems", "count": 5}, c)
+        self.assertEqual(a.intents[-1], {"verb": "Use", "target": {"kind": "block", "x": 7, "y": 5}})
+        self.assertEqual([p for _, p, _ in c.drops.pending], [(7, 5)], "judged for its berry")
+
+    def test_at_full_health_a_bush_is_not_cut(self):
+        w = open_ground(world(armed_code="pocket_knife", armed_id=2))
+        w.view.tiles[(7, 5)] = "bush"
+        self.assertEqual(gather(w), [])
+
+    def test_a_surcharge_on_the_way_makes_a_near_gem_dearer_than_a_far_one(self):
+        w = open_ground(world())
+        for y in range(10):
+            w.view.tiles[(7, y)] = "lava"  # a hazard between her and the near gem
+        w.entities = [Entity("supply", 1, (8, 5), "gem"), Entity("supply", 2, (5, 1), "gem")]
+        self.assertEqual(gather(w)[0].cell, (5, 1))
 
     def test_a_chest_with_nothing_that_fits_is_worth_nothing(self):
         w = open_ground(world(carry_capacity=1))  # the sword armed fills it
@@ -154,7 +215,7 @@ class DetourOnEveryWalkTest(unittest.TestCase):
         k.world_code = WORLD
         w, c = self.walk({"op": "buy", "code": "raft"}, k, health=2)
         hostile(w, 50, (w.pos[0] - 4, w.pos[1] - 3))  # can reach her, and her margin cannot pay for it
-        self.assertEqual(act.urgency(c), value.URGENT)
+        self.assertTrue(act.urgent(c))
         self.assertFalse(act.act({"op": "buy", "code": "raft"}, c).why.startswith("detour"))
 
     def test_under_attack_no_detour(self):
@@ -195,7 +256,7 @@ class HealCheapestTest(unittest.TestCase):
 
     def test_a_potion_wins_when_the_food_is_far(self):
         w = world(health=4, gems=40)
-        berry(w, at=(95, 5))
+        berry(w, at=(205, 5))
         self.assertEqual(self.op(w, knowledge(sells={"small_potion": 10})), {"op": "buy", "code": "small_potion"})
 
 

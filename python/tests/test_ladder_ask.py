@@ -9,6 +9,7 @@ from unittest import mock
 from agentrealm_adk import config, llm
 from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk.item_table import InventorySupply
+from agentrealm_adk.navigation import stuck
 from agentrealm_adk.travel.knowledge import iter_shop_cells, record_shop_cell, save_our_drops
 from agentrealm_adk.world import Entity, WorldModel
 from agentrealm_agent.strategist import Strategist, StrategistConfig
@@ -17,6 +18,7 @@ from ladder import ask
 from ladder.ask import CONTRACT, Planner, Reply, answer, lift_changed, node_state, question, read_reply
 from ladder.goals import Blocks, find, walk
 from ladder.play import LadderRunner
+from tests.test_give_ups import see_new_ground
 from tests.test_ladder_goals import geared, hostile, knowledge, world
 from tests.test_starter_agent import FakeClient
 
@@ -200,14 +202,20 @@ class BlockTest(unittest.TestCase):
         self.assertIn("requires", blocks)
 
     def test_a_block_is_retried_once_the_walk_given_up_for_it_may_be_walked_again(self):
+        # A171: its backoff ending is not enough; the ground round it must change too.
         w, kb = short_of_a_raft()
+        nav = stuck.NavStuckMemory()
+        key = stuck.goal_key("lorraine:buy", w.map_id, (9, 5))
+        rec = stuck.remember_give_up(nav, key, "lorraine:buy", w.tick, stuck.ground_seen(w, (9, 5)))
         blocks = Blocks()
         turn = walk(w, kb, blocks)
-        answer(turn.goal, Reply(cannot="the walk to the shop was given up"), blocks, turn.reading, retry_at=w.tick + 300)
-        w.tick += 299
-        self.assertEqual(lift_changed(blocks, w, kb), [])
-        w.tick += 1
-        self.assertEqual(lift_changed(blocks, w, kb), ["requires"])
+        answer(turn.goal, Reply(cannot="the walk to the shop was given up"), blocks, turn.reading, given_up=(key,))
+        w.tick = rec.until + 1000
+        stuck.note_ground(nav, w)
+        self.assertEqual(lift_changed(blocks, w, kb, nav), [], "time alone lifts nothing")
+        see_new_ground(w, rec)
+        stuck.note_ground(nav, w)
+        self.assertEqual(lift_changed(blocks, w, kb, nav), ["requires"])
 
     def test_a_gems_wait_already_met_is_no_wait(self):
         w, kb, blocks = self.block("gems 40")  # 40 held already

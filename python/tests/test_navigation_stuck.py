@@ -13,6 +13,7 @@ from unittest import mock
 from agentrealm_agent.brain import Memory, decide
 from agentrealm_adk.config import Policy
 from agentrealm_adk.directives import PARAM_DEFAULTS
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_maps import record_warp, sync_map_from_view
 from agentrealm_adk.navigation import CostGridParams
@@ -21,10 +22,11 @@ from agentrealm_adk.navigation.planner import FOG
 from agentrealm_adk.pathing import escalation_step, guided_step, path_for_plan_op, replan
 from agentrealm_agent.plan import Plan
 from agentrealm_agent.states import PlayContext, dispatch
-from agentrealm_adk.world import Entity, WorldModel
+from agentrealm_adk.world import Entity, Sighting, WorldModel
 from tests.fixtures.navigation import grids, sim
 from tests.test_cost_grid import grid
 from tests.test_recover import apply_zone, ctx, died_at, world
+from tests.test_give_ups import see_new_ground
 
 
 # A policy ``goto`` is a plan ``travel`` point op, walked by Travel under this label.
@@ -303,19 +305,27 @@ class BreakResetTest(unittest.TestCase):
 
 
 class BackoffTest(unittest.TestCase):
-    def test_given_up_target_is_retried_after_a_doubling_backoff(self):
+    def test_an_enclosed_target_is_not_retried_while_its_ground_is_unchanged(self):
+        # A171: the backoff runs out many times over, but nothing round the
+        # enclosure changes, so the walk is never tried again.
         sc = grids.WATER_ENCLOSURE
         r = sim.run(sc, sim.scripted(goals=["goto"], goto=sc.goal), max_decisions=500, stop_on_signal=False)
         sigs = r.memory.nav_stuck.stuck_signals
-        self.assertGreaterEqual(len(sigs), 2, "the stuck trigger re-arms once the backoff runs out")
-        first, second = sigs[0]["tick"], sigs[1]["tick"]
-        self.assertGreaterEqual(second - first, nav_stuck.BACKOFF_BASE_TICKS)
-        key = nav_stuck.goal_key(WALK, 1, sc.goal)
-        n = len(sigs)
-        self.assertEqual(r.memory.nav_stuck.given_up[key].power, n)
-        self.assertEqual(
-            r.memory.nav_stuck.given_up[key].until - sigs[-1]["tick"], nav_stuck.BACKOFF_BASE_TICKS * 2 ** (n - 1)
-        )
+        self.assertEqual(len(sigs), 1, "given up once, never retried on time alone")
+        rec = r.memory.nav_stuck.given_up[nav_stuck.goal_key(WALK, 1, sc.goal)]
+        self.assertGreater(r.world.tick, rec.until, "its backoff ended long ago")
+        self.assertTrue(rec.holds(r.world.tick))
+
+    def test_a_given_up_target_is_retried_after_a_doubling_backoff_once_its_ground_changed(self):
+        w, m = open_world(), Memory()
+        for n in range(3):
+            nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (4, 2)), "no_path")
+            rec = m.nav_stuck.given_up[nav_stuck.goal_key("goto", 1, (4, 2))]
+            self.assertEqual((rec.power, rec.until - w.tick), (n + 1, nav_stuck.BACKOFF_BASE_TICKS * 2**n))
+            w.tick = rec.until
+            self.assertTrue(nav_stuck.backed_off(m, "goto", 1, (4, 2), w.tick), "ground unchanged")
+            see_new_ground(w, rec, m)
+            self.assertFalse(nav_stuck.backed_off(m, "goto", 1, (4, 2), w.tick))
 
     def test_signal_queue_is_bounded(self):
         w, m = open_world(), Memory()
@@ -323,6 +333,104 @@ class BackoffTest(unittest.TestCase):
             nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (x, 2)), "no_path")
         self.assertEqual(len(m.nav_stuck.stuck_signals), nav_stuck.SIGNALS_KEPT)
         self.assertEqual(m.nav_stuck.stuck_signals[-1]["target"], [nav_stuck.SIGNALS_KEPT + 3, 2])
+
+
+class GroundChangedTest(unittest.TestCase):
+    """A171: a give-up holds past its backoff until the ground its walk saw changes."""
+
+    def given_up(self, w: WorldModel) -> tuple[Memory, nav_stuck.GiveUp]:
+        m = Memory()
+        nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (9, 1)), "no_path")
+        rec = m.nav_stuck.given_up[nav_stuck.goal_key("goto", 1, (9, 1))]
+        w.tick = rec.until + 10 * nav_stuck.BACKOFF_BASE_TICKS
+        return m, rec
+
+    def test_the_same_ground_counted_again_still_holds(self):
+        w = open_world()
+        m, rec = self.given_up(w)
+        w.view.tiles[(3, 1)] = w.view.tiles[(3, 1)]  # the same block written again: counted, no change
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [])
+        self.assertTrue(nav_stuck.backed_off(m, "goto", 1, (9, 1), w.tick))
+
+    def test_new_cells_seen_near_it_lift_it(self):
+        w = open_world()
+        m, rec = self.given_up(w)
+        w.view.tiles[(9, 3)] = "grass"
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "new ground seen")
+        self.assertFalse(nav_stuck.backed_off(m, "goto", 1, (9, 1), w.tick))
+
+    def test_cells_seen_far_from_it_do_not(self):
+        w = open_world()
+        m, _ = self.given_up(w)
+        w.view.tiles[(9, 3 + nav_stuck.GROUND_PAD_CELLS)] = "grass"
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [])
+
+    def test_a_breaking_capability_gained_lifts_it(self):
+        w = open_world()
+        m, rec = self.given_up(w)
+        w.held_supplies = [InventorySupply(9, "bomb")]
+        nav_stuck.note_ground(m.nav_stuck, w)
+        self.assertEqual(rec.lifted, "capabilities changed")
+        self.assertFalse(nav_stuck.backed_off(m, "goto", 1, (9, 1), w.tick))
+
+    def test_an_occupant_moved_out_of_the_box_lifts_it(self):
+        w = open_world()
+        w.entities = [Entity("npc", 5, (8, 1), "villager")]
+        m, rec = self.given_up(w)
+        w.entities = [Entity("npc", 5, (8, 1 + 2 * nav_stuck.GROUND_PAD_CELLS), "villager")]
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "an occupant left")
+
+    def test_a_hostile_killed_in_the_box_lifts_it(self):
+        w = open_world()
+        w.entities = [Entity("npc", 5, (8, 1), "wolf")]
+        w.sightings[("npc", 5)] = Sighting(w.entities[0], 1, w.tick)
+        m, rec = self.given_up(w)
+        w.entities = []  # out of view, still remembered there: it may still bar the way
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [])
+        del w.sightings[("npc", 5)]  # killed (``NPCDied``), or its sighting lapsed
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "an occupant left")
+
+    def test_health_risen_lifts_it(self):
+        # A pass through hostile ground is priced by her health (``covers_pass``).
+        w = open_world()
+        w.health, w.max_health = 4, 10
+        m, rec = self.given_up(w)
+        w.health = 3
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [], "a hit opens nothing")
+        w.health = 7
+        self.assertEqual(nav_stuck.note_ground(m.nav_stuck, w), [rec])
+        self.assertEqual(rec.lifted, "health rose")
+
+    def test_held_give_ups_stay_bounded(self):
+        w, m = open_world(), Memory()
+        for x in range(nav_stuck.GIVE_UPS_HELD_KEPT + 5):
+            w.tick += 1
+            nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (x, 1)), "no_path")
+        given_up = m.nav_stuck.given_up
+        self.assertEqual(len(given_up), nav_stuck.GIVE_UPS_HELD_KEPT)
+        self.assertNotIn(nav_stuck.goal_key("goto", 1, (0, 1)), given_up, "the oldest goes first")
+
+    def test_the_reasons_are_told_from_the_ladders_own_limits(self):
+        rec = nav_stuck.GiveUp("goto", 1, (9, 1), 0, 300, 1, reasons=("time", "moves", "time"))
+        self.assertEqual(
+            nav_stuck.why_given_up(rec),
+            f"got no nearer in {nav_stuck.PROGRESS_TICK_LIMIT} ticks, got no nearer in {nav_stuck.PROGRESS_MOVE_LIMIT} moves",
+        )
+
+    def test_still_inside_its_backoff_a_changed_ground_waits_for_the_backoff(self):
+        w = open_world()
+        m = Memory()
+        nav_stuck.give_up(m, w, nav_stuck.track(m, w, "goto", (9, 1)), "no_path")
+        rec = m.nav_stuck.given_up[nav_stuck.goal_key("goto", 1, (9, 1))]
+        w.view.tiles[(9, 3)] = "grass"
+        nav_stuck.note_ground(m.nav_stuck, w)
+        self.assertTrue(nav_stuck.backed_off(m, "goto", 1, (9, 1), rec.until - 1))
+        w.tick = rec.until
+        nav_stuck.note_ground(m.nav_stuck, w)  # what changed meanwhile shows once the backoff ends
+        self.assertFalse(nav_stuck.backed_off(m, "goto", 1, (9, 1), rec.until))
 
 
 class FrontierDropTest(unittest.TestCase):
@@ -430,9 +538,13 @@ class TravelBackoffTest(unittest.TestCase):
         self.assertEqual((out.state, out.intents, out.wait), ("Travel", None, True), out.reason)
         self.assertIn("asked the planner", out.reason)
         self.assertEqual(len(m.nav_stuck.stuck_signals), 1)
-        w.tick = m.nav_stuck.given_up[nav_stuck.goal_key(WALK, 1, sc.goal)].until
+        rec = m.nav_stuck.given_up[nav_stuck.goal_key(WALK, 1, sc.goal)]
+        w.tick = rec.until
         dispatch(w, c)
-        self.assertEqual(len(m.nav_stuck.stuck_signals), 2, "retried after the backoff, and stuck again")
+        self.assertEqual(len(m.nav_stuck.stuck_signals), 1, "the backoff ended, but its ground is unchanged (A171)")
+        see_new_ground(w, rec)
+        dispatch(w, c)
+        self.assertEqual(len(m.nav_stuck.stuck_signals), 2, "retried once its ground changed, and stuck again")
 
 
 class RecoverStuckTest(unittest.TestCase):

@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import TypeVar
 
 from agentrealm_adk.navigation import oscillation
+from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.navigation.rejection import end_decision
 from agentrealm_adk.engagement import sync_engagement
 from agentrealm_adk.level_order import sync_leave
@@ -200,6 +201,7 @@ def dispatch(world: WorldModel, ctx: PlayContext) -> StateOutcome:
     """
     m = ctx.memory
     m.nav_stuck.decision += 1
+    nav_stuck.note_ground(m.nav_stuck, world)  # a give-up holds until its ground changes (A171)
     yielded: list[str] = []
     paced = oscillation.check(m, world)
     if paced is not None:

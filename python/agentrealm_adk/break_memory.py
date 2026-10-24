@@ -381,5 +381,5 @@ def given_up_blocks(stuck: NavStuckMemory, map_id: int | None, tick: int) -> fro
     if map_id is None:
         return frozenset()
     return frozenset(
-        r.target for r in stuck.given_up.values() if r.goal == BREAK_GOAL and r.map_id == map_id and tick < r.until
+        r.target for r in stuck.given_up.values() if r.goal == BREAK_GOAL and r.map_id == map_id and r.holds(tick)
     )

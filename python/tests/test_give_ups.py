@@ -1,9 +1,10 @@
 """What failed where: stuck detection's one memory of walk targets given up (A15, A16, A90).
 
 Every give-up is remembered by its walk's goal, map and cell, backed off for
-``BACKOFF_BASE_TICKS`` doubled on each give-up there, and aged by time alone:
-whatever the goal (a town, a shop, a point, a frontier, a block), it may be
-walked to again once its backoff ends, and whether to is the planner's call.
+``BACKOFF_BASE_TICKS`` doubled on each give-up there, and never lifted by
+time alone (A171): whatever the goal (a town, a shop, a point, a frontier, a
+block), it may be walked to again once its backoff ends and the ground it was
+given up on has changed, and whether to is the planner's call.
 """
 
 from __future__ import annotations
@@ -32,6 +33,22 @@ def give_up(m: Memory, w: WorldModel, goal: str, cell) -> nav_stuck.GiveUp:
     return m.nav_stuck.given_up[nav_stuck.goal_key(goal, w.map_id, cell)]
 
 
+def see_new_ground(w: WorldModel, rec: nav_stuck.GiveUp, m: Memory | None = None) -> None:
+    """The ground round ``rec``'s walk changes (A171): a cell not seen before
+    comes into sight, else a wall there opens, else one falls in the box's
+    corner. With ``m``, the decision's ground check runs too (dispatch runs it)."""
+    x0, y0, x1, y1 = rec.ground.box
+    tiles, box = w.view.tiles, [(x, y) for y in range(y0, y1 + 1) for x in range(x0, x1 + 1)]
+    unseen = next((p for p in box if p not in tiles), None)
+    wall = next((p for p in box if not w.walkable(p)), None) if unseen is None else None
+    if unseen is not None or wall is not None:
+        tiles[unseen or wall] = "grass"
+    else:
+        tiles[(x0, y0)] = "stone"
+    if m is not None:
+        nav_stuck.note_ground(m.nav_stuck, w)
+
+
 class GiveUpMemoryTest(unittest.TestCase):
     def setUp(self):
         self.w = WorldModel(character_id=1, map_id=MAP, pos=(0, 0), tick=100)
@@ -42,11 +59,18 @@ class GiveUpMemoryTest(unittest.TestCase):
             rec = give_up(self.m, self.w, goal, TOWN)
             self.assertEqual(rec.until, self.w.tick + nav_stuck.BACKOFF_BASE_TICKS, goal)
             self.assertTrue(nav_stuck.backed_off(self.m, goal, MAP, TOWN, rec.until - 1), goal)
+            self.assertTrue(nav_stuck.backed_off(self.m, goal, MAP, TOWN, rec.until), f"{goal}: ground unchanged (A171)")
+            self.w.tick = rec.until
+            see_new_ground(self.w, rec, self.m)
+            self.w.tick = rec.since
             self.assertFalse(nav_stuck.backed_off(self.m, goal, MAP, TOWN, rec.until), goal)
 
     def test_a_travel_give_up_is_listed_with_when_it_lapses(self):
         rec = give_up(self.m, self.w, "travel:point", TOWN)
         self.assertEqual(given_up_travel(self.m.nav_stuck, self.w.tick), {(MAP, TOWN): rec.until})
+        self.assertIn((MAP, TOWN), given_up_travel(self.m.nav_stuck, rec.until), "ground unchanged (A171)")
+        self.w.tick = rec.until
+        see_new_ground(self.w, rec, self.m)
         self.assertEqual(given_up_travel(self.m.nav_stuck, rec.until), {})
         self.assertEqual(self.m.nav_stuck.stuck_signals[-1]["retry_at_tick"], rec.until)
 
@@ -70,6 +94,9 @@ class GiveUpMemoryTest(unittest.TestCase):
     def test_a_lapse_is_reported_once(self):
         rec = give_up(self.m, self.w, "travel:town", TOWN)
         self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until - 1), [])
+        self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until), [], "ground unchanged (A171)")
+        self.w.tick = rec.until
+        see_new_ground(self.w, rec, self.m)
         self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until), [rec])
         self.assertEqual(nav_stuck.lapsed(self.m.nav_stuck, rec.until + 1), [])
 
@@ -82,10 +109,13 @@ class GiveUpMemoryTest(unittest.TestCase):
         self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT + 4, "all still backed off: none forgotten")
         self.assertIn((MAP, TOWN), given_up_travel(stuck, self.w.tick))
         self.w.tick = travel.until  # the travel lapses; the explores (one tick later) do not
+        see_new_ground(self.w, travel)
+        travel.ground = None  # only the travel's ground is checked here: it changed (A171)
         give_up(self.m, self.w, "explore", (99, 50))
         self.assertNotIn(nav_stuck.goal_key("travel:point", MAP, TOWN), stuck.given_up, "the lapsed one goes first")
         self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT + 4)
         self.w.tick += nav_stuck.BACKOFF_BASE_TICKS
+        nav_stuck.note_ground(stuck, self.w)  # the new cell is in every explore's ground: they lapse too
         give_up(self.m, self.w, "explore", (98, 50))
         self.assertEqual(len(stuck.given_up), nav_stuck.GIVE_UPS_KEPT, "back to the bound once they lapse")
 
@@ -96,6 +126,7 @@ class GiveUpMemoryTest(unittest.TestCase):
         rec = give_up(c.memory, w, "travel:town", (20, 10))
         self.assertTrue(nav_stuck.backed_off(c.memory, "travel:town", MAP, (20, 10), w.tick))
         w.tick = rec.until
+        see_new_ground(w, rec)  # dispatch sees it (A171)
         out = dispatch(w, c)
         self.assertEqual(out.state, "Travel")
         self.assertEqual(out.intents[0]["verb"], "SetPosition", out.reason)
@@ -123,6 +154,7 @@ class GiveUpMemoryTest(unittest.TestCase):
         round_trip(s, r)
         self.assertIsNone(r.plan.current(), "given up: the re-sent travel:town never reaches the stack")
         r.world.tick = rec.until
+        see_new_ground(r.world, rec, r.mem)
         Runner.note_lapsed_give_ups(r)
         r.log.assert_called()
         s.clock.now += 60

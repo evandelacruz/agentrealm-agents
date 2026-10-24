@@ -27,9 +27,12 @@ the block holds to its expiry.
 Whatever ``until`` says, a blocked goal is retried once its blocker can
 have changed (A169, ``lift_changed``): the state the planner saw changed
 (``seen``: the region she stands in, what she carries, whether her health
-covers what is ahead on her risk function), or the
-backoff of a walk given up for it ended (``Block.retry_at``); the next walk
-asks again.
+covers what is ahead on her risk function), or a walk given up for it may
+be walked again (``Block.given_up``); the next walk asks again. A walk
+given up holds until the ground round it changes, never on time alone
+(A171, ``navigation.stuck.note_ground``), so while every walk given up
+for a goal holds, her standing in another region is no change: the goal
+stays blocked, and the planner is asked once for another way.
 
 The call itself is the ADK's (``agentrealm_adk.llm``): the provider, the
 call budget and backoff Gary's planner has, and its reply parsing.
@@ -44,7 +47,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 from agentrealm_adk.llm import (
     DEFAULT_CALLS_PER_MIN,
@@ -59,6 +62,7 @@ from agentrealm_adk.llm import (
     parse_reply,
     planner_disabled_by_env,
 )
+from agentrealm_adk.navigation.stuck import NavStuckMemory, is_backed_off
 from agentrealm_adk.planner_reference import game_notes_text, reference_text
 from agentrealm_adk.sellers import codes_with_sellers
 from agentrealm_adk.supplies import sold_codes
@@ -85,7 +89,7 @@ You answer one question about one goal of an Agent Realm character: how to work 
 You are shown the goal, the state its readiness reads, the ops that can work it, and the op the goal tree would run, as an example of an op's shape. Answer with one JSON object and nothing else:
 
 - {"op": {"op": "<one of the ops>", ...its fields}, "why": "<one line>"} to run that op now. Name a cell only by an x and y the state gives.
-- given_up lists the targets a walk gave up on, with why and until which tick. Never answer with an op that walks to one of them (its cell, or a buy whose every seller is one) before that tick: nothing has changed there.
+- given_up lists the targets a walk gave up on, with why and what lifts each: a tick, and the ground round it changing (cells seen there that were not, a block opened or broken, an occupant gone, a capability gained). A give-up is not "unreachable": it holds only until what lifts it comes, so a cannot that rests on one lapses with it. Never answer with an op that walks to one of them (its cell, or a buy whose every seller is one) while it is listed: nothing has changed there. Answer with another way instead: explore toward it so the ground round it is seen, another target (another entrance, another seller), or getting what opens the way.
 - {"cannot": "<why no op can work it now, in game terms>", "until": "<what would let it be worked>"} when none can. The goal is then set aside, and the character works on what is under it, until then. until is one of: "held" (what is carried changes), "levels_cleared", "sellers" (a seller becomes known for another item), "entrance_needs" (the next level's entrance needs something else), "gems N" (N gems are held), or "ticks N" (N ticks pass, at most 3000). Anything else, or none, sets the goal aside for 3000 ticks."""
 
 
@@ -117,7 +121,18 @@ def watch_lines(w: WorldModel, kb: KnowledgeBase | None) -> dict[str, str]:
     }
 
 
-def seen(w: WorldModel, kb: KnowledgeBase | None) -> tuple:
+class Seen(NamedTuple):
+    """The state the planner saw (``seen``): where she stands, by region,
+    what she carries, and whether her health covers the next level and the
+    hostiles that can reach her now."""
+
+    where: tuple | None
+    carried: tuple[str, ...]
+    level_ok: bool
+    here_ok: bool
+
+
+def seen(w: WorldModel, kb: KnowledgeBase | None) -> Seen:
     """The state the planner saw, as a block retries on it (A169): the
     region she stands in, what she carries, and whether her health covers
     what is ahead, on her one risk function (``readiness.risk_budget``: the
@@ -127,7 +142,7 @@ def seen(w: WorldModel, kb: KnowledgeBase | None) -> tuple:
     carried = tuple(sorted(s.code for s in w.held_supplies) + sorted(w.worn_codes.values()))
     level = r.Foes(tuple(r.level_foes(w, kb)), r.VALUABLE)
     here = r.Foes(tuple(r.foes_here(w, kb)), r.ORDINARY)
-    return (where, carried, r.risk_budget(level, w, kb).ok, r.risk_budget(here, w, kb, now=True).ok)
+    return Seen(where, carried, r.risk_budget(level, w, kb).ok, r.risk_budget(here, w, kb, now=True).ok)
 
 
 def question_prefix(reference_sections: str = "") -> str:
@@ -208,13 +223,15 @@ def already_met(reply: Reply, w: WorldModel) -> bool:
 ALREADY_MET = "your last answer was cannot until {until}, which is already true; answer again"
 
 
-def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, retry_at: int | None = None) -> GoalOp | None:
+def answer(
+    node: Node, reply: Reply, blocks: Blocks, rd: Reading, given_up: tuple[str, ...] = (), shown: tuple[str, ...] = ()
+) -> GoalOp | None:
     """Carry a reply out on the tree: an op is returned to run; a ``cannot``
     blocks the node with its reason and what it waits on (``UNTIL_LINES``,
     ``gems N``, ``ticks N``); anything else it names is dropped. The block
     is retried as every block is (``lift_changed``): on the state the
-    planner saw (``seen``), and at ``retry_at``, when a walk given up for
-    the node may be walked again."""
+    planner saw (``seen``), and once one of the walks ``given_up`` for the
+    node, or one of the give-ups it was ``shown``, may be walked again (A171)."""
     if reply.op is not None:
         return reply.op
     name, _, arg = reply.until.partition(" ")
@@ -225,7 +242,7 @@ def answer(node: Node, reply: Reply, blocks: Blocks, rd: Reading, retry_at: int 
         named, was = GEMS, arg
     elif name == TICKS and _count(arg) is not None:
         ticks = min(BLOCK_TICKS, _count(arg))
-    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world, rd.kb), retry_at=retry_at)
+    blocks.mark(node.key, reply.cannot, now, ticks, named=named, was=was, seen=seen(rd.world, rd.kb), given_up=given_up, shown=shown)
     return None
 
 
@@ -236,23 +253,34 @@ def lifts(block: Block, w: WorldModel, lines: dict[str, str]) -> bool:
     return block.named in lines and lines[block.named] != block.was
 
 
-def may_have_changed(block: Block, w: WorldModel, now: tuple) -> bool:
+def may_have_changed(block: Block, w: WorldModel, now: tuple, stuck: NavStuckMemory | None = None) -> bool:
     """Whether what blocked it can have changed (A169): a walk given up for
-    it may be walked again, or the state the planner saw is not ``now`` (``seen``)."""
-    if block.retry_at is not None and w.tick >= block.retry_at:
+    it may be walked again (A171: its ground changed), or the state the
+    planner saw is not ``now`` (``seen``). While every walk given up for it
+    still holds, the region she stands in is no change: only what she
+    carries or what her health covers is. A ``cannot`` lapses too once a
+    give-up the planner was shown lifts: it may have rested on it."""
+    if block.shown and (stuck is None or not all(is_backed_off(stuck, k, w.tick) for k in block.shown)):
         return True
-    return bool(block.seen) and block.seen != now
+    if not block.given_up:
+        return bool(block.seen) and block.seen != now
+    if stuck is None or not all(is_backed_off(stuck, k, w.tick) for k in block.given_up):
+        return True
+    return bool(block.seen) and block.seen._replace(where=None) != now._replace(where=None)
 
 
-def lift_changed(blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None) -> list[str]:
+def lift_changed(
+    blocks: Blocks, world: WorldModel, kb: KnowledgeBase | None, stuck: NavStuckMemory | None = None
+) -> list[str]:
     """Lift every block whose awaited state has come, or whose blocker can
-    have changed (``may_have_changed``); the keys lifted."""
+    have changed (``may_have_changed``, with her walks' give-ups in
+    ``stuck``); the keys lifted."""
     lifted, lines = [], None
     now = seen(world, kb) if any(b.seen for b in blocks.values()) else ()
     for key, block in list(blocks.items()):
         if block.named:
             lines = lines if lines is not None else watch_lines(world, kb)
-        if (block.named and lifts(block, world, lines)) or may_have_changed(block, world, now):
+        if (block.named and lifts(block, world, lines)) or may_have_changed(block, world, now, stuck):
             blocks.lift(key)
             lifted.append(key)
     return lifted

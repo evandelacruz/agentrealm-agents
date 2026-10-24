@@ -49,11 +49,16 @@ The ladder is the same whichever state walks: nothing in it knows Gather,
 Travel, Explore or Break. What a give-up leaves behind is one memory,
 ``NavStuckMemory.given_up``: a ``GiveUp`` per walk target, keyed by goal, map
 and cell (``goal_key``), so a target is given up only on the map it is on.
-It is aged by time alone: it holds until its backoff ends, and its power is
-kept, so the next give-up there backs off twice as long. Every walk asks it
-(``is_backed_off``), a Travel destination included (``given_up_dests``).
-Whether to drop a goal that keeps getting stuck is the planner's call: each
-give-up raises a ``stuck`` trigger saying when the target may be walked again.
+Time alone never lifts it (A171): it holds until its backoff ends and the
+known ground that could open a way has changed since the walk gave up
+(``Ground``: new cells seen round the walk and its target, a block opened
+or broken, an occupant or remembered hostile there gone, a capability
+gained, her health risen), checked once a decision by ``note_ground``. A
+hold may last for ever, so past ``GIVE_UPS_HELD_KEPT`` the oldest goes. Its power is kept, so the next give-up there backs off
+twice as long. Every walk asks it (``is_backed_off``), a Travel destination
+included (``given_up_dests``). Whether to drop a goal that keeps getting
+stuck is the planner's call: each give-up raises a ``stuck`` trigger saying
+when the target may be walked again at the soonest.
 
 Progress is the remaining length of the planned path plus the rest to the
 target from its end, read when the state plans: the corridor search's
@@ -199,6 +204,172 @@ class GiveUp:
     power: int
     lapse_noted: bool = False  # ``lapsed`` has reported it
     reasons: tuple[str, ...] = ()  # why each level of the walk given up failed, in order
+    lifted: str = ""  # how its ground changed, once it did (``note_ground``)
+    # The known ground the failed walk saw (A171): it holds past ``until``
+    # until that ground changes (``note_ground`` sets it None). None for a
+    # give-up recorded with no world, which time alone lifts.
+    ground: Ground | None = None
+
+    def holds(self, tick: int) -> bool:
+        """Still given up at ``tick``: its backoff has not ended, or the
+        ground it was given up on has not changed since (A171)."""
+        return tick < self.until or self.ground is not None
+
+
+# How far round the walk and its target the ground a give-up saw reaches
+# (A171): cells seen there may open a way the failed search did not have.
+GROUND_PAD_CELLS = 8
+# Most cells ``note_ground`` recounts in one decision (at least one box).
+GROUND_CELLS_PER_DECISION = 4096
+# Most give-ups kept at all: past it the oldest is forgotten even while it
+# holds, so a long run's memory stays bounded (A90, A171).
+GIVE_UPS_HELD_KEPT = 2 * GIVE_UPS_KEPT
+
+Occupant = tuple[str, int]  # (kind, id), as ``WorldModel.sightings`` keys them
+
+
+@dataclass(frozen=True)
+class Ground:
+    """What a walk's search saw when it gave up (A171), cheap to compare.
+    In the box round where it stood and its target (``GROUND_PAD_CELLS``):
+    how many cells were known and how many walkable, and the characters and
+    NPCs there, in view or remembered (``WorldModel.sightings``), whose
+    ground a walk keeps off or waits on. Beside them, the capabilities
+    carried (``break_memory.held_capabilities``), whether water was ground,
+    and her health, which prices a pass through hostile ground. The way can
+    have opened only once one of these changed: a cell seen, a block opened
+    or broken, one of those occupants gone from the box (moved out, killed,
+    or forgotten once its sighting lapsed), a capability gained or lost, or
+    her health risen. Nothing else a walk plans with opens a way by itself:
+    the other cells it learns to keep off (``navigation_avoid_costly``) are
+    walls learned and locked doors, which stay, and occupants' marks."""
+
+    map_id: int
+    box: tuple[int, int, int, int]  # x0, y0, x1, y1, inclusive
+    known: int
+    walkable: int
+    occupants: frozenset[Occupant]
+    capabilities: frozenset[str]
+    fords: bool
+    health: int | None
+    revision: int  # the map's ``Tiles.revision`` when last counted
+
+    @property
+    def cells(self) -> int:
+        x0, y0, x1, y1 = self.box
+        return (x1 - x0 + 1) * (y1 - y0 + 1)
+
+    def why_changed(self, w: WorldModel, now: _Now, recount: bool = True) -> str:
+        """How the ground has changed since, or "" when it has not; without
+        ``recount``, only what needs no count of the box's cells."""
+        if now.capabilities != self.capabilities or now.fords != self.fords:
+            return "capabilities changed"
+        if self.health is not None and w.health is not None and w.health > self.health:
+            return "health rose"
+        if w.map_id != self.map_id:
+            return ""
+        if self.occupants - _occupants_in(now.where, self.box):
+            return "an occupant left"
+        if not recount or w.view.tiles.revision == self.revision:
+            return ""
+        known, walkable = _count(w, self.box)
+        if known != self.known:
+            return "new ground seen"
+        if walkable != self.walkable:
+            return "a block opened or closed"
+        return ""
+
+
+@dataclass(frozen=True)
+class _Now:
+    """What every give-up's ground is compared with, read once a call."""
+
+    capabilities: frozenset[str]
+    fords: bool
+    where: dict[Occupant, Pos]  # each character and NPC in view or remembered on this map
+
+
+def _now(w: WorldModel) -> _Now:
+    from ..break_memory import held_capabilities  # below the walk, but it reads the supplies table
+
+    where = {k: s.entity.pos for k, s in w.sightings.items() if s.map_id == w.map_id}
+    where.update({(e.kind, e.id): e.pos for e in w.entities if e.kind in ("character", "npc")})
+    return _Now(frozenset(held_capabilities(w)), w.fords, where)
+
+
+def _occupants_in(where: dict[Occupant, Pos], box: tuple[int, int, int, int]) -> frozenset[Occupant]:
+    x0, y0, x1, y1 = box
+    return frozenset(k for k, (x, y) in where.items() if x0 <= x <= x1 and y0 <= y <= y1)
+
+
+def _count(w: WorldModel, box: tuple[int, int, int, int]) -> tuple[int, int]:
+    tiles, walkable = w.view.tiles, w.walkable_test()
+    x0, y0, x1, y1 = box
+    known = open_ = 0
+    for x in range(x0, x1 + 1):
+        for y in range(y0, y1 + 1):
+            if (x, y) in tiles:
+                known += 1
+                open_ += walkable((x, y))
+    return known, open_
+
+
+def ground_seen(w: WorldModel, target: Pos) -> Ground | None:
+    """The ground a walk from where she stands to ``target`` on this map
+    saw, as ``Ground``; None when she is not placed."""
+    if w.map_id is None or w.pos is None:
+        return None
+    (ax, ay), (bx, by) = w.pos, target
+    x0, y0 = max(0, min(ax, bx) - GROUND_PAD_CELLS), max(0, min(ay, by) - GROUND_PAD_CELLS)
+    x1, y1 = max(ax, bx) + GROUND_PAD_CELLS, max(ay, by) + GROUND_PAD_CELLS
+    size = w.map_size
+    if size is not None:
+        x1, y1 = min(x1, size[0] - 1), min(y1, size[1] - 1)
+    box = (x0, y0, x1, y1)
+    known, walkable = _count(w, box)
+    now = _now(w)
+    return Ground(
+        w.map_id, box, known, walkable, _occupants_in(now.where, box), now.capabilities, now.fords, w.health,
+        w.view.tiles.revision,
+    )
+
+
+def note_ground(stuck: NavStuckMemory, w: WorldModel) -> list[GiveUp]:
+    """Once a decision (A171): every give-up past its backoff whose ground
+    has changed since it was given up stops holding on it (``GiveUp.holds``);
+    the ones that did, with why (``GiveUp.lifted``). A give-up whose ground
+    is unchanged keeps holding, however long ago it was: time alone never
+    lifts it. Within its backoff it holds anyway, and what changed meanwhile
+    still shows after. Recounting the cells is the costly part, so a decision
+    recounts at most ``GROUND_CELLS_PER_DECISION`` cells (always one box),
+    the boxes counted longest ago first; the rest wait a decision or two."""
+    out: list[GiveUp] = []
+    due: list[GiveUp] = []
+    held = [rec for rec in stuck.given_up.values() if rec.ground is not None and w.tick >= rec.until]
+    if not held:
+        return out
+    now = _now(w)
+    for rec in held:
+        g = rec.ground
+        why = g.why_changed(w, now, recount=False)
+        if why:
+            rec.ground, rec.lifted = None, why
+            out.append(rec)
+        elif w.map_id == g.map_id and w.view.tiles.revision != g.revision:
+            due.append(rec)
+    budget = GROUND_CELLS_PER_DECISION
+    for rec in sorted(due, key=lambda r: r.ground.revision):
+        g = rec.ground
+        if budget <= 0:
+            break
+        budget -= g.cells
+        why = g.why_changed(w, now)
+        if why:
+            rec.ground, rec.lifted = None, why
+            out.append(rec)
+        else:
+            rec.ground = dataclasses.replace(g, revision=w.view.tiles.revision)  # counted: unchanged
+    return out
 
 
 @dataclass(frozen=True)
@@ -250,43 +421,91 @@ def key_dest(key: str) -> tuple[int, Pos]:
 
 
 def is_backed_off(stuck: NavStuckMemory, key: str, tick: int) -> bool:
-    """``key``'s target was given up and its backoff has not ended."""
+    """``key``'s target was given up and still holds (``GiveUp.holds``):
+    its backoff has not ended, or the ground round it is unchanged (A171)."""
     rec = stuck.given_up.get(key)
-    return rec is not None and tick < rec.until
+    return rec is not None and rec.holds(tick)
 
 
-def remember_give_up(stuck: NavStuckMemory, key: str, goal: str, tick: int) -> GiveUp:
-    """Give up ``key``'s target now: backed off twice as long as the last time."""
+# Each reason a walk is given up for, in game terms, for the planner (A171).
+GIVE_UP_WORDS = {
+    "no_path": "no path over known ground",
+    "no_step": "no open step toward it",
+    "time": f"got no nearer in {PROGRESS_TICK_LIMIT} ticks",
+    "moves": f"got no nearer in {PROGRESS_MOVE_LIMIT} moves",
+    "rejections": f"{REJECT_STREAK_LIMIT} steps in a row were refused",
+    "oscillation": "paced between two cells",
+    "pacing": "paced between two cells",
+    "reveal_spent": "walking along the obstacle found no way",
+    "no_frontier": "no unseen ground left near it to look at",
+    "no_break": "no block on the way that a held item opens",
+    "arm_only": "arming a tool led to no break",
+}
+
+
+def why_given_up(rec: GiveUp) -> str:
+    """Why ``rec`` was given up, in game terms: each failed level's reason once, in order."""
+    words = [GIVE_UP_WORDS.get(r, r.replace("_", " ")) for r in rec.reasons] or ["stuck"]
+    return ", ".join(dict.fromkeys(words))
+
+
+def what_lifts(rec: GiveUp, tick: int) -> str:
+    """When ``rec`` is walked again (A171): after its backoff while that is
+    ahead, and once the ground round it changes, never on time alone."""
+    ground = ("once new ground is seen near it, a block there opens, an occupant or hostile there is gone, "
+              "a capability is gained or her health rises")
+    if rec.ground is None:
+        return f"retried after tick {rec.until}"
+    if tick < rec.until:
+        return f"retried after tick {rec.until}, {ground}"
+    return f"retried {ground}"
+
+
+def key_of(rec: GiveUp) -> str:
+    """The :func:`goal_key` ``rec`` is filed under."""
+    return goal_key(rec.goal, rec.map_id, rec.target)
+
+
+def remember_give_up(
+    stuck: NavStuckMemory, key: str, goal: str, tick: int, ground: Ground | None = None
+) -> GiveUp:
+    """Give up ``key``'s target now: backed off twice as long as the last
+    time, and past that until ``ground``, what the walk saw, changes (A171)."""
     old = stuck.given_up.pop(key, None)
     power = old.power if old is not None else 0
     map_id, target = key_dest(key)
-    rec = stuck.given_up[key] = GiveUp(goal, map_id, target, tick, tick + BACKOFF_BASE_TICKS * (2**power), power + 1)
+    rec = stuck.given_up[key] = GiveUp(
+        goal, map_id, target, tick, tick + BACKOFF_BASE_TICKS * (2**power), power + 1, ground=ground
+    )
     if len(stuck.given_up) > GIVE_UPS_KEPT:
-        lapsed_keys = [k for k, r in stuck.given_up.items() if tick >= r.until]
+        lapsed_keys = [k for k, r in stuck.given_up.items() if not r.holds(tick)]
         for k in lapsed_keys[: len(stuck.given_up) - GIVE_UPS_KEPT]:
             del stuck.given_up[k]
+    while len(stuck.given_up) > GIVE_UPS_HELD_KEPT:  # a hold can last for ever: the oldest goes
+        del stuck.given_up[min(stuck.given_up, key=lambda k: stuck.given_up[k].since)]
     return rec
 
 
 def given_up_dests(stuck: NavStuckMemory, tick: int, goal_prefix: str) -> dict[tuple[int, Pos], int]:
     """The (map, cell) of each target a walk whose goal starts with
     ``goal_prefix`` gave up and is still backed off from, with the tick it may
-    be walked to again."""
+    be walked to again at the soonest (A171: its ground must change too)."""
     out: dict[tuple[int, Pos], int] = {}
     for rec in stuck.given_up.values():
-        if rec.goal.startswith(goal_prefix) and tick < rec.until:
+        if rec.goal.startswith(goal_prefix) and rec.holds(tick):
             dest = (rec.map_id, rec.target)
             out[dest] = max(out.get(dest, 0), rec.until)
     return out
 
 
 def lapsed(stuck: NavStuckMemory, tick: int) -> list[GiveUp]:
-    """The give-ups whose backoff ended since the last call, each reported once.
+    """The give-ups that stopped holding since the last call (their backoff
+    ended and their ground changed, A171), each reported once.
 
     A lapsed give-up stays remembered for its power until it is reached
     (``finish``) or, past ``GIVE_UPS_KEPT``, pushed out by newer ones.
     """
-    out = [rec for rec in stuck.given_up.values() if not rec.lapse_noted and tick >= rec.until]
+    out = [rec for rec in stuck.given_up.values() if not rec.lapse_noted and not rec.holds(tick)]
     for rec in out:
         rec.lapse_noted = True
     return out
@@ -721,12 +940,14 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
     A leg toward another map gives up its ultimate destination
     (``backoff_key``). The signal's ``reason`` is why the attempt first got
     stuck; ``escalation`` is why each level after it failed; ``retry_at_tick``
-    is when the backoff ends. Whether to drop the goal is the planner's call.
+    is when the backoff ends, the soonest it may be walked again: only once
+    the ground it saw has changed too (A171). Whether to drop the goal is
+    the planner's call.
     """
     if reason is not None:
         att.reasons.append(reason)
     stuck = m.nav_stuck
-    rec = remember_give_up(stuck, att.backoff_key or att.key, att.goal, w.tick)
+    rec = remember_give_up(stuck, att.backoff_key or att.key, att.goal, w.tick, ground_seen(w, att.target))
     rec.reasons = tuple(att.reasons)
     stuck.stuck_signals.append(
         {
@@ -739,6 +960,7 @@ def give_up(m: Memory, w: WorldModel, att: NavAttempt, reason: str | None = None
             "map_id": att.map_id,
             "tick": w.tick,
             "retry_at_tick": rec.until,
+            "until_ground_changes": rec.ground is not None,
             "outline": [list(p) for p in sorted(att.outline)],
             "blocking": sorted(att.blocking | _blocking_types(w, att)),
         }

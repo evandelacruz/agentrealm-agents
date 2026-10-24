@@ -660,9 +660,9 @@ class LadderRunner:
             if idx < m.pending_next_index or idx >= len(m.pending_intents):
                 continue
             intent, tick = m.pending_intents[idx], int(res.get("tick", w.tick))
-            if intent.get("verb") in ("Use", "Arm"):
-                block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
-                note_break_use(self.knowledge, m, w, intent, res, block, list(m.pending_intents[idx:]))
+            # A break in flight is settled on every result, as in every agent's loop (A172).
+            block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
+            note_break_use(self.knowledge, m, w, intent, res, block, list(m.pending_intents[idx:]))
             if res.get("outcome") == "rejected":
                 if intent.get("verb") == "Step" and w.pos is not None:
                     code = (res.get("rejection") or {}).get("code")

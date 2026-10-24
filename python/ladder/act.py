@@ -539,6 +539,7 @@ class Target:
     why: str
     foes: tuple[Entity, ...] = ()
     gems: float = 0.0  # what working it is worth, in gems: priced per step (``per_step``)
+    lying: bool = False  # a gem in sight: taken before any work (A168)
 
 
 def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
@@ -557,12 +558,12 @@ def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
 
 
 def gather_targets(ctx: Ctx) -> list[Target]:
-    """Where a gather may work, best first (A168, A172): a gem in sight (its
-    count), grass to cut (with the cutter ``equip.weapon_to_arm`` picks,
-    worth the gems a cut drops there, ``gem_yield.region_yields``), and an
-    oddity a held capability may break (``gem_caches.cache_targets``, worth
-    its expected cache), each by its value per step (``per_step``), none
-    given up and still backed off. A target with known hostiles beside it
+    """Where a gather may work, best first (A168, A172): a gem in sight
+    before anything else, nearest first; then grass to cut (with the cutter
+    ``equip.weapon_to_arm`` picks, worth the gems a cut drops there,
+    ``gem_yield.region_yields``) and an oddity a held capability may break
+    (``gem_caches.cache_targets``, worth its expected cache), each by its
+    value per step (``per_step``); none given up and still backed off. A target with known hostiles beside it
     (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes
     after every other, and only when her margin now covers them all
     (``readiness.margin_now``, A139); its walk then passes their ground."""
@@ -573,7 +574,7 @@ def gather_targets(ctx: Ctx) -> list[Target]:
     found: list[Target] = []
     for e in w.entities:
         if e.kind == "supply" and e.gem_price is None and take_raises_gems(e.code):
-            found.append(Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem", gems=cache_gems(e.code) or 1))
+            found.append(Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem", gems=cache_gems(e.code) or 1, lying=True))
     for c in cache_targets(w, ctx.kb, ctx.tick_hz):
         found.append(Target(c.pos, supply_reach(ctx.kb, c.supply.code), lambda c=c: break_oddity(ctx, c),
                             f"break the {c.block} at {c.pos} for its cache, about {c.gems:.1f} gems", gems=c.gems))
@@ -591,9 +592,10 @@ def gather_targets(ctx: Ctx) -> list[Target]:
         if foes and not margin_now(Foes(foes, ctx.value), w, ctx.kb).ok:
             continue
         if foes:
-            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems)
+            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems, t.lying)
         steps = max(0, chebyshev(here, p) - t.reach)
-        out.append(((bool(foes), -per_step(t.gems, steps), chebyshev(here, p), p), t))
+        priced = 0.0 if t.lying else -per_step(t.gems, steps)  # a gem in sight first, nearest first (A168)
+        out.append(((bool(foes), not t.lying, priced, chebyshev(here, p), p), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
 
 

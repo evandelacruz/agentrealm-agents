@@ -1,7 +1,13 @@
 """A region's gem-cache oddity is a gather target for Lorraine, priced like any other (A172)."""
 
+import tempfile
+import threading
 import unittest
+from pathlib import Path
+from unittest import mock
 
+from agentrealm_adk import config
+from agentrealm_adk.config import CharacterConfig, Policy
 from agentrealm_adk import gem_caches
 from agentrealm_adk.break_memory import record_attempt
 from agentrealm_adk.break_results import note_break_use, resolve_pending_break
@@ -10,10 +16,12 @@ from agentrealm_adk.memory import Memory
 from agentrealm_adk.oddities import RETURN_SECONDS
 from agentrealm_adk.world import Entity
 from ladder import act
-from ladder.ask import node_state
+from ladder.ask import Planner, node_state
 from ladder.goals import Reading
+from ladder.play import Decision, LadderRunner
 from tests.test_ladder_act import ctx, first_step, nearer
 from tests.test_ladder_goals import GATHER, MAP, world
+from tests.test_starter_agent import FakeClient
 
 ROCK = (7, 5)  # two steps off where she stands, (5, 5)
 OP = {"op": "gather_gems", "count": 20}
@@ -52,6 +60,11 @@ class CacheTargetTest(unittest.TestCase):
         a = act.act(OP, c)
         self.assertEqual(a.intents[-1], use_on(ROCK))
         self.assertEqual(c.mem.break_pending, (MAP, ROCK, "cut"))
+
+    def test_a_gem_in_sight_still_comes_before_grass_and_the_oddity(self):
+        w, k = field_with_a_rock(), kb()
+        w.entities = [Entity("supply", 9, (5, 10), "gem")]  # five steps off, grass and the rock nearer
+        self.assertTrue(nearer(w, act.act(OP, ctx(w, k)), (5, 10)))
 
     def test_its_value_is_learned_from_breaks_with_the_reference_as_prior(self):
         w, k = field_with_a_rock(), kb()
@@ -119,6 +132,49 @@ class BreakResultTest(unittest.TestCase):
         resolve_pending_break(k, m, w)
         self.assertIsNone(m.break_pending)
         self.assertEqual(k.breaks[f"{MAP},7,5,smash"]["result"], "opened")
+
+
+class LoopTest(unittest.TestCase):
+    """Her loop settles a break and files the cache it drops (``LadderRunner.apply``)."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        patch = mock.patch.object(config, "STATE_DIR", Path(tmp.name))
+        patch.start()
+        self.addCleanup(patch.stop)
+        cfg = CharacterConfig("T", "sandbox", Policy(), Path("t.toml"))
+        self.r = LadderRunner(cfg, FakeClient(), 42, threading.Event(), Planner.off(), knowledge=kb(), out=lambda *_: None)
+        self.addCleanup(self.r.trace.close)
+        self.r.world = self.w = field_with_a_rock(pos=(6, 5))
+        gem_caches.oddities_here(self.w, self.r.knowledge)
+
+    def sent(self, intents: list[dict]) -> dict:
+        d = Decision(intents, "break", "gather_gems")
+        self.r.mem.break_pending = (MAP, ROCK, "cut")
+        self.r.apply({"tick": self.w.tick, "queue_id": 7}, d)
+        return {"tick": self.w.tick, "queue_id": 7}
+
+    def test_a_break_that_opens_files_it_and_its_cache(self):
+        r, w = self.r, self.w
+        base = self.sent([use_on(ROCK)])
+        r.apply({**base, "intent_results": [{"queue_id": 7, "index": 0, "outcome": "applied", "tick": w.tick}],
+                 "events_by_tick": [{"tick": w.tick, "events": [
+                     {"kind": "BlockChanged", "map_id": MAP, "x": ROCK[0], "y": ROCK[1], "block_type": "grass"}]}]},
+                Decision(None, "poll", "gather_gems"))
+        self.assertIsNone(r.mem.break_pending)
+        self.assertEqual(r.knowledge.breaks[f"{MAP},7,5,cut"]["result"], "opened")
+        w.entities = [Entity("supply", 70, ROCK, "gem_cache_7")]
+        r.apply({"tick": w.tick}, Decision(None, "poll", "gather_gems"))
+        self.assertEqual(gem_caches.drops(r.knowledge, MAP, ROCK), [7])
+
+    def test_a_rejection_ahead_of_the_break_drops_it_unfiled(self):
+        r, w = self.r, self.w
+        base = self.sent([{"verb": "Wait", "ticks": 2}, use_on(ROCK)])
+        r.apply({**base, "intent_results": [{"queue_id": 7, "index": 0, "outcome": "rejected", "tick": w.tick,
+                                             "rejection": {"code": "busy"}}]}, Decision(None, "poll", "gather_gems"))
+        self.assertIsNone(r.mem.break_pending)  # a later change there is not hers
+        self.assertNotIn(f"{MAP},7,5,cut", r.knowledge.breaks)
 
 
 if __name__ == "__main__":

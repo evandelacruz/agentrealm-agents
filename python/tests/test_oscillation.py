@@ -25,6 +25,7 @@ from agentrealm_agent.states.explore import ExploreState
 from agentrealm_agent.states.intents import set_position
 from agentrealm_agent.states.travel import TravelState
 from agentrealm_adk.world import WorldModel
+from tests.test_give_ups import see_new_ground
 
 # The module, not the ``dispatch`` function the package re-exports.
 dispatch_module = importlib.import_module("agentrealm_agent.states.dispatch")
@@ -397,8 +398,11 @@ class EveryWalkGivenUpTest(unittest.TestCase):
         w.pos = (5, 0)
         skip = given_up_blocks(m.nav_stuck, 1, w.tick)
         self.assertIsNone(nominate_on_path(w, None, w.pos, GOTO, skip))
-        w.tick = m.nav_stuck.given_up[nav_stuck.goal_key(BREAK_GOAL, 1, self.BLOCK)].until
-        self.assertEqual(given_up_blocks(m.nav_stuck, 1, w.tick), frozenset(), "aged by time")
+        rec = m.nav_stuck.given_up[nav_stuck.goal_key(BREAK_GOAL, 1, self.BLOCK)]
+        w.tick = rec.until
+        self.assertEqual(given_up_blocks(m.nav_stuck, 1, w.tick), {self.BLOCK}, "time alone lifts nothing (A171)")
+        see_new_ground(w, rec, m)
+        self.assertEqual(given_up_blocks(m.nav_stuck, 1, w.tick), frozenset(), "its backoff ended and its ground changed")
         self.assertEqual(given_up_blocks(m.nav_stuck, 2, 0), frozenset(), "only on its own map")
 
     def test_the_same_holds_with_the_travel_attempt_active(self):

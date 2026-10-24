@@ -282,7 +282,7 @@ def walk_given_up(w: WorldModel, m: Memory, owner: str, at: Pos) -> str | None:
     walks = OWNER_WALKS.get(owner, ())
     for rec in m.nav_stuck.given_up.values():
         mine = (rec.map_id, rec.target) == (w.map_id, at) and rec.goal.startswith(walks)
-        if mine and w.tick < rec.until and rec.reasons:
+        if mine and rec.holds(w.tick) and rec.reasons:
             return f"the walk, given up ({', '.join(rec.reasons)})"
     return None
 

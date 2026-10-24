@@ -63,7 +63,10 @@ from agentrealm_adk.executor import (
     queue_horizon_intents,
     step_landing,
 )
+from agentrealm_adk.break_results import note_break_use, resolve_pending_break
 from agentrealm_adk.fording import ford_gate, loadout_memory
+from agentrealm_adk.gem_caches import note_caches
+from agentrealm_adk.item_table import use_target_block
 from agentrealm_adk.executor.held_queue import STEP_DOUBT, open_step, possible_positions, unconfirmed_send
 from agentrealm_adk.knowledge_base import KnowledgeBase
 from agentrealm_adk.knowledge_base.death_chests import load_death_chests, save_death_chests
@@ -630,6 +633,8 @@ class LadderRunner:
         earlier = w.entities
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
+        resolve_pending_break(self.knowledge, m, w)  # a break that opened its block (A172)
+        note_caches(w, self.knowledge)
         w.note_level_clear(r.get("level_clear_ceremony"))
         w.learn_threat(events, earlier)
         if any(ev.get("kind") in ("Died", "Respawned") for ev in events):
@@ -655,6 +660,9 @@ class LadderRunner:
             if idx < m.pending_next_index or idx >= len(m.pending_intents):
                 continue
             intent, tick = m.pending_intents[idx], int(res.get("tick", w.tick))
+            if intent.get("verb") in ("Use", "Arm"):
+                block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
+                note_break_use(self.knowledge, m, w, intent, res, block, list(m.pending_intents[idx:]))
             if res.get("outcome") == "rejected":
                 if intent.get("verb") == "Step" and w.pos is not None:
                     code = (res.get("rejection") or {}).get("code")

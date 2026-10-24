@@ -41,7 +41,8 @@ from agentrealm_adk.executor import (
     trim_to_horizon,
     use_cooldown_ticks,
 )
-from agentrealm_adk.gem_yield import GATHER_BLOCKS, take_raises_gems
+from agentrealm_adk.gem_caches import CacheTarget, cache_gems, cache_targets
+from agentrealm_adk.gem_yield import GATHER_BLOCKS, region_of, region_yields, take_raises_gems
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, hostiles_within, off_safe, walk_reach
 from agentrealm_adk.knowledge_base import KnowledgeBase, knowledge_items
 from agentrealm_adk.memory import Memory
@@ -49,7 +50,7 @@ from agentrealm_adk.navigation import walk_toward
 from agentrealm_adk.navigation import stuck as nav_stuck
 from agentrealm_adk.passage import went_through
 from agentrealm_adk.pathing import attempt_plan, grid_params, guided_step, plan_sets
-from agentrealm_adk.reach import NEAR, weapon_reach
+from agentrealm_adk.reach import NEAR, supply_reach, weapon_reach
 from agentrealm_adk.sellers import sellers_of, walk_order
 from agentrealm_adk.survival import is_hostile
 from agentrealm_adk.targets import EXPLORE_ANYWHERE, GoalOp, explore_targets
@@ -537,6 +538,7 @@ class Target:
     then: Callable[[], list[dict]]
     why: str
     foes: tuple[Entity, ...] = ()
+    gems: float = 0.0  # what working it is worth, in gems: priced per step (``per_step``)
 
 
 def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
@@ -555,35 +557,49 @@ def gather_gems(op: GoalOp, ctx: Ctx) -> Act:
 
 
 def gather_targets(ctx: Ctx) -> list[Target]:
-    """Where a gather may work, best first (A168): a gem in sight before
-    grass to cut (with the cutter ``equip.weapon_to_arm`` picks), nearest
-    first, none given up and still backed off. A target with known hostiles
-    beside it (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``)
-    comes after every other, and only when her margin now covers them all
+    """Where a gather may work, best first (A168, A172): a gem in sight (its
+    count), grass to cut (with the cutter ``equip.weapon_to_arm`` picks,
+    worth the gems a cut drops there, ``gem_yield.region_yields``), and an
+    oddity a held capability may break (``gem_caches.cache_targets``, worth
+    its expected cache), each by its value per step (``per_step``), none
+    given up and still backed off. A target with known hostiles beside it
+    (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes
+    after every other, and only when her margin now covers them all
     (``readiness.margin_now``, A139); its walk then passes their ground."""
     w, m = ctx.world, ctx.mem
     if w.pos is None:
         return []
     here = w.pos
-    found: list[tuple[int, Pos, Target]] = []
+    found: list[Target] = []
     for e in w.entities:
         if e.kind == "supply" and e.gem_price is None and take_raises_gems(e.code):
-            found.append((0, e.pos, Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem")))
+            found.append(Target(e.pos, NEAR, lambda e=e: [take(e.id)], "take a gem", gems=cache_gems(e.code) or 1))
+    for c in cache_targets(w, ctx.kb, ctx.tick_hz):
+        found.append(Target(c.pos, supply_reach(ctx.kb, c.supply.code), lambda c=c: break_oddity(ctx, c),
+                            f"break the {c.block} at {c.pos} for its cache, about {c.gems:.1f} gems", gems=c.gems))
     reach = weapon_reach(w, ctx.kb)
+    rate, by_region = region_yields(ctx.kb, w.map_id)
     for p, b in w.view.tiles.items():
         if b in GATHER_BLOCKS:
-            found.append((1, p, Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}")))
+            found.append(Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}", gems=by_region.get(region_of(p), rate)))
     out: list[tuple[tuple, Target]] = []
-    for kind, p, t in found:
+    for t in found:
+        p = t.cell
         if nav_stuck.backed_off(m, GATHER, w.map_id, stand_by(w, p, t.reach), w.tick):
             continue
         foes = tuple(hostiles_within(w, ctx.policy, p, GATHER_HOSTILE_RADIUS))
         if foes and not margin_now(Foes(foes, ctx.value), w, ctx.kb).ok:
             continue
         if foes:
-            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes)
-        out.append(((bool(foes), kind, chebyshev(here, p), p), t))
+            t = Target(t.cell, t.reach, t.then, f"{t.why}, past {len(foes)} hostile(s)", foes, t.gems)
+        steps = max(0, chebyshev(here, p) - t.reach)
+        out.append(((bool(foes), -per_step(t.gems, steps), chebyshev(here, p), p), t))
     return [t for _, t in sorted(out, key=lambda x: x[0])]
+
+
+def per_step(gems: float, steps: int) -> float:
+    """A target's value per step: over the steps to it and the action that takes it."""
+    return gems / (steps + 1)
 
 
 def first_with_a_step(ctx: Ctx, goal: str, targets: list[Target]) -> Act | None:
@@ -617,6 +633,29 @@ def cut(ctx: Ctx, cell: Pos) -> list[dict]:
         arm(cutter.id), use, cooldown_ticks=use_cooldown_ticks(use, cutter.code, ctx.tick_hz),
         horizon_ticks=ctx.horizon, ticks_since_last_use=since,
     )
+
+
+def break_oddity(ctx: Ctx, c: CacheTarget) -> list[dict]:
+    """A ``Use`` on the oddity with the supply that breaks it in hand, armed
+    first when it is not, behind the cooldown a swing still owes (A153);
+    the break is filed in flight (``Memory.break_pending``), so the round
+    trip settles it into break memory (``break_results``)."""
+    w, m = ctx.world, ctx.mem
+    use = use_block(c.pos)
+    since = max(1, w.tick - m.last_use_tick) if m.last_use_tick is not None else None
+    if c.supply.id < 0 or c.supply.code == w.armed_code:
+        intents = build_attack_queue(
+            [use], poll_interval_ticks=ctx.horizon, horizon_ticks=ctx.horizon,
+            weapon_cooldown_ticks=attack_cooldown_ticks(w.armed_code, ctx.tick_hz), ticks_since_last_use=since,
+        )
+    else:
+        intents = arm_then_use(
+            arm(c.supply.id), use, cooldown_ticks=use_cooldown_ticks(use, c.supply.code, ctx.tick_hz),
+            horizon_ticks=ctx.horizon, ticks_since_last_use=since,
+        )
+    if intents and w.map_id is not None:
+        m.break_pending = (w.map_id, c.pos, c.capability)
+    return intents
 
 
 def swings(ctx: Ctx, foe: Entity, count: int = 1) -> list[dict]:

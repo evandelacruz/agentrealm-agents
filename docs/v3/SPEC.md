@@ -49,8 +49,9 @@ The agent holds this as a **needs graph**: what the objective requires, down to 
              Executive: picks and runs a Skill for that need
                   │  the skill's current target
                   ▼
-             Controller (every tick): the best action now,
-             with survival, fights, healing and pickups scored on one scale
+             Engines (every tick): the one for the situation
+             (combat, boss, travel, work, clues) acts in real time
+             on tactics the strategist wrote ahead
                   │
                   ▼
                intents
@@ -94,6 +95,7 @@ Every evaluation that needs a number nobody serves (how much power level 3 needs
 
 The strategist reads the needs graph with its status and evidence, the memory summary (map regions, entrances, shops seen, income, hostiles, clues, deaths) and the game reference, and answers:
 
+- **Tactics:** the rules each engine plays by (whom to fight, when to drink, when to leave), revised when evidence says they were wrong.
 - **Judgments:** what each unknown is likely to be ("level 2's boss likely needs iron-tier damage"; "this rumor points at the north-east entrance"), each with its reason and confidence.
 - **Choice:** which path through the graph to take now ("level 1 first: its entrance is nearest and the rumor says it is the easiest"), and which item satisfies a need ("bronze sword and bronze mail: within reach of 8 minutes of field work").
 - **Focus:** the need to work on.
@@ -104,11 +106,23 @@ It is asked when the focus need is met or fails, on a surprise (death, new map, 
 
 A **skill** is a reusable procedure that satisfies one kind of need: travel to a place (across maps and doors), explore toward something, earn gems, buy, equip, talk, read, scout a level, fight a boss (with its clock), recover the death chest. Each has preconditions, a target, a done test, a progress measure and failure reasons. The executive runs the skill for the focus need. A skill that fails reports why, as evidence on that need.
 
-Skills are the only place game procedures live, and each is small. A new behavior is a new skill or a new need kind, never a branch inside another.
+Skills say what to do toward a need; engines say how to act in the moment. A new behavior is a new need kind, skill, engine or tactic, never a branch inside another.
 
-### 5. Controller
+### 5. Engines: real-time play
 
-Every tick it scores the actions open now (continue the skill's walk, step to safety, swing, drink, pick up) and sends the best. Danger is one model, from the Manual's rules: hostiles chase at our pace and stop at walls, swing on their cooldown when in reach, and deal nothing on safe ground; a fight ends when one side dies. Each action is scored by our expected health after it plays out, so walking on under attack, fleeing, fighting and drinking compare on one scale. The strategist sets one knob, risk, from the need's value.
+Every tick one **engine** runs the moment. Each is a small real-time algorithm for one kind of situation, decides without a model call, and reads **tactics** the strategist wrote ahead of time (Create a Character Agent: "ask it what to do when the fight starts ... it writes those answers down as ordinary rules"):
+
+| Engine | Runs when | Does | Tactics it reads |
+|---|---|---|---|
+| Combat | a hostile threatens us | fight, back off to safe ground or behind a wall, drink, by the expected-health model below | which hostiles to fight or avoid, when to drink, when to leave |
+| Boss | in a boss room | the fight on its clock; leaves by the exit door before the limit or when losing | when to leave, when to drink |
+| Travel | the skill's target is a place | the path, replanned every decision as obstacles come into view; doors and warps | how much danger to walk past |
+| Work | the skill works blocks or pickups | cut, break, pick up drops, move to the next block | none |
+| Clues | an unheard helper or an unread sign is in reach and nothing threatens | `Say` hello, `Read` | none |
+
+The situation picks the engine each tick: a threat outranks everything, then the boss room, then the engine of the skill under way, with clues taken in passing. The strategist never acts in the moment; it revises tactics between moments, when evidence says they were wrong (a death, a fight lost, a hostile stronger than estimated).
+
+**The danger model** (Manual §11 Hostiles, Combat): hostiles chase at our pace, step to the neighbouring block nearest us and stop at walls, swing on their cooldown when in reach, and deal nothing on safe ground; a fight ends when one side dies. Every option the combat engine weighs (fight on, walk on, back off, drink) is played forward and scored by our expected health after it, on one scale.
 
 Navigation replans every decision from what is known, with unseen ground priced as probably open, and sends only a few steps at a time, so an obstacle that comes into view is routed around on the next decision.
 
@@ -130,7 +144,7 @@ A live view, readable at a glance:
 
 ## Delivery
 
-One delivery, not discovery runs. Every layer is built end to end (memory, the needs graph, the strategist, the skills, the controller, the live view) and tested offline against recorded and fake game states. The first live run is the acceptance of the whole product: a fresh character, unattended, works toward clearing levels, every step explained in the view. Iteration after that is fixes, and each fix names its home: a need kind, a skill, an estimate, or the strategist's input.
+One delivery, not discovery runs. Every layer is built end to end (memory, the needs graph, the strategist, the skills, the controller, the live view) and tested offline against recorded and fake game states. The first live run is the acceptance of the whole product: a fresh character, unattended, works toward clearing levels, every step explained in the view. Iteration after that is fixes, and each fix names its home: a need kind, a skill, an engine, a tactic, an estimate, or the strategist's input.
 
 Build order inside the delivery: memory and perception; the controller and its danger model; travel and explore; clues (read, talk); earn gems, buy, equip, recover the death chest; the needs graph; the strategist; level skills (scout, boss fight on its clock, leave before the limit); the live view and the run report.
 

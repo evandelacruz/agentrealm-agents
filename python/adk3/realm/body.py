@@ -428,6 +428,10 @@ class Body:
             npc = next((e for e in w.entities if e.id == intent.get("npc_id") and e.kind == "npc"), None)
             if npc is not None:
                 mem.greeted(npc.code, w.map_id, npc.pos, answered=False)
+        elif verb == "Take" and outcome == "rejected":
+            item = next((e for e in w.entities if e.id == intent.get("supply_id")), None)
+            if item is not None:
+                mem.changed_nothing(w.map_id, item.pos)  # full, or not ours to take: not tried again
         elif verb == "WithdrawFromChest" and outcome == "rejected":
             chest = next((e for e in w.entities if e.id == intent.get("chest_id")), None)
             if chest is not None:

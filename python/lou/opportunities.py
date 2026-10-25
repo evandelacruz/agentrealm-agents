@@ -23,6 +23,7 @@ SAY_REACH = 20  # blocks: a Say to an NPC reaches 25 (Manual §11 Speech); a lit
 READ_REACH = 5  # blocks: near enough that the sign is in sight in any light
 CLUE_WORTH = 15  # gems a new clue is worth at curiosity 5: about two and a half minutes of field work
 ODD_BLOCK_WORTH = 5  # gems: the smallest gem cache an oddity drops (Manual §16)
+LOOT_WORTH = 2  # gems an unpriced item lying free is worth at greed 5, when it is not sold anywhere
 CHEST_LOOK_WORTH = 5  # gems a look into an unknown ground chest is worth at curiosity 5: its contents show only in reach
 
 
@@ -50,6 +51,22 @@ class Hearts:
     def find(self, ctx: Ctx) -> list[Chance]:
         return [Chance(actions.Take(e.id, e.code), e.pos, 1, ctx.levers.life_worth, "pick up a life")
                 for e in ctx.state.supplies() if not e.gem_price and supplies.is_life(e.code)]
+
+
+class Loot:
+    """Any other item lying free (a weapon, a tool, a chest upgrade): its list price, by greed. Gems, lives and
+    food have their own rules; a priced supply is a shop shelf; what we dropped ourselves is not picked back up."""
+
+    def find(self, ctx: Ctx) -> list[Chance]:
+        s, mem = ctx.state, ctx.memory
+        out = []
+        for e in s.supplies():
+            if (e.gem_price or s.world.is_our_drop(e.id) or value.gems_of(e.code) or supplies.is_life(e.code)
+                    or supplies.eaten_on_pickup(e.code) or place_key(s.map_id, e.pos) in mem.no_effect):
+                continue
+            worth = (value.item(e.code) or LOOT_WORTH) * ctx.levers.greed_weight
+            out.append(Chance(actions.Take(e.id, e.code), e.pos, 1, worth, f"pick up {e.code}"))
+        return out
 
 
 class Food:
@@ -154,7 +171,7 @@ class Chests:
         return out
 
 
-ALL = [Gems(), Hearts(), Food(), Signs(), Helpers(), OddBlocks(), DeathChest(), Chests()]
+ALL = [Gems(), Hearts(), Loot(), Food(), Signs(), Helpers(), OddBlocks(), DeathChest(), Chests()]
 
 
 def chances(ctx: Ctx) -> list[Chance]:

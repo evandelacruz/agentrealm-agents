@@ -421,6 +421,11 @@ class OpportunitiesTest(unittest.TestCase):
         self.assertEqual(found[0].why, "take what the chest holds")
         self.assertGreater(found[0].worth, 0)
 
+    def test_a_chest_upgrade_lying_free_is_picked_up(self):
+        w = world(OPEN)
+        w.entities = [Entity("supply", 7, (6, 5), "red_chest")]
+        self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Take)
+
     def test_food_waits_until_she_is_hurt_by_its_worth(self):
         w = world(OPEN, health=10)
         w.entities = [Entity("supply", 8, (6, 5), "apple")]

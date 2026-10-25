@@ -121,8 +121,9 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
     where = {f.entity.id: f.entity.pos for f in foes}
     alive = {f.entity.id: f.health for f in foes}
     period = step_ticks(s)
-    weapon = fighting_weapon(s.armed)
-    our_every = attack_interval_ticks(s.armed)
+    best = s.best_weapon()  # combat arms it before a swing
+    weapon = best.code if best is not None else fighting_weapon(s.armed)
+    our_every = attack_interval_ticks(weapon)
     our_top = max(1, BASE_ATTACK_POWER + (weapon_damage(weapon) or 0))
     our_hit = hit_chance()
     our_reach = s.world.attack_range or 1

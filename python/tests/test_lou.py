@@ -238,6 +238,15 @@ class CombatTest(unittest.TestCase):
         self.assertFalse(combat.applies(ctx, None))
         self.assertIn("backed off from chugbug", ctx.memory.held_up[1])
 
+    def test_before_a_swing_she_arms_her_best_weapon(self):
+        w = world(OPEN, armed=None)
+        w.armed_id = None
+        w.held_supplies = [InventorySupply(3, "pocket_knife"), InventorySupply(4, "bronze_sword")]
+        self.snotlings(w, [(6, 5)])
+        action = engines.Combat().swing_at(ctx_of(w), w.entities[0])
+        self.assertIsInstance(action, actions.Equip)
+        self.assertEqual(action.code, "bronze_sword")
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

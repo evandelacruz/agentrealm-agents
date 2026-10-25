@@ -279,6 +279,9 @@ class Combat:
 
     def swing_at(self, ctx: Ctx, e: Entity) -> Action | None:
         s = ctx.state
+        best = s.best_weapon()
+        if best is not None and best.where != "armed":
+            return actions.Equip(best.id, "Arm", best.code)  # a drink or a tool may have taken the weapon's place
         stand = travel.to_strike(ctx, e.pos, s.world.attack_range or 1)
         if stand:
             return walk_or_break(ctx, stand, f"close on {e.code}")

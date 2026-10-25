@@ -66,9 +66,11 @@ def breakable(s: State, memory: Memory) -> set[tuple[int, int]]:
 
 
 def weapon_for(s: State, block: str) -> int | None:
-    """The id of a carried weapon that breaks ``block``, the armed one first; None when none does."""
+    """The id of a carried weapon that breaks ``block``: the armed one first, then the best weapon (so a break
+    never swaps a better fighting weapon for a worse one); None when none does."""
     openers = BLOCK_OPENERS.get(block, frozenset())
-    ranked = sorted((c for c in s.carried if supplies.is_weapon(c.code)), key=lambda c: c.where != "armed")
+    ranked = sorted((c for c in s.carried if supplies.is_weapon(c.code)),
+                    key=lambda c: (c.where != "armed", c != s.best_weapon()))
     return next((c.id for c in ranked if capabilities_for_code(c.code) & openers), None)
 
 

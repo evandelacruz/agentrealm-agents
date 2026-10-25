@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from agentrealm_adk import supplies
+from agentrealm_adk.equip import weapon_rank
 from agentrealm_adk.survival import known_hostile
 from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -73,6 +74,11 @@ class State:
     @property
     def worn(self) -> list[str]:
         return [c.code for c in self.carried if c.where == "worn"]
+
+    def best_weapon(self) -> Carried | None:
+        """The carried weapon a fight is fought with: the best by the ADK's one ranking (``equip.weapon_rank``)."""
+        weapons = [c for c in self.carried if supplies.is_weapon(c.code)]
+        return max(weapons, key=lambda c: (weapon_rank(c.code, self.world, None), c.where == "armed"), default=None)
 
     def has(self, code: str) -> bool:
         return any(c.code == code for c in self.carried)

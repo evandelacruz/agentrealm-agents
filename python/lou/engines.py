@@ -38,7 +38,7 @@ def course_of(ctx: Ctx, order: Order | None) -> tuple[Pos, ...]:
     elif isinstance(order, Do):
         path = travel.to_beside(ctx, order.at, order.reach)
     elif isinstance(order, Work) and order.cells:
-        path = travel.to_beside(ctx, order.cells[0])
+        path = work_path(ctx, order)
     else:
         path = None
     return tuple(path or ())
@@ -96,8 +96,8 @@ class Combat:
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
         if isinstance(order, Fight) and order.boss:
             return False
-        if not harm.threats_near(ctx.state) or ctx.state.on_safe_ground:
-            return False
+        if not harm.threats_near(ctx.state):
+            return False  # on safe ground too: stepping off it toward a threat is a choice to weigh like any other
         return self.choose(ctx, order).action is not None
 
     def act(self, ctx: Ctx, order: Order | None) -> Action | None:
@@ -325,8 +325,16 @@ class WorkBlocks:
             weapon = travel.weapon_for(s, "bush")  # a cutter: grass falls to what cuts bushes
             arm = None if weapon is None or any(c.id == weapon and c.where == "armed" for c in s.carried) else weapon
             return actions.UseOn(cell[0], cell[1], arm, order.why)
-        target = order.cells[0] if order.cells else None
-        return walk_or_break(ctx, travel.to_beside(ctx, target) or (), order.why) if target else None
+        return walk_or_break(ctx, work_path(ctx, order) or (), order.why)
+
+
+def work_path(ctx: Ctx, order: Work) -> list[Pos] | None:
+    """The cheapest way to stand beside one of the blocks to work: the cost grid prices ground near threats,
+    so work goes where they are not."""
+    s = ctx.state
+    stands = {(x + dx, y + dy) for x, y in order.cells for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx, dy) != (0, 0)}
+    stands = {p for p in stands if p not in order.cells and (p not in s.world.view.tiles or s.world.walkable(p))}
+    return travel.to_nearest(ctx, stands)
 
 
 ALL = [Boss(), Combat(), Opportunities(), Travel(), Interact(), WorkBlocks()]

@@ -140,6 +140,12 @@ class CombatTest(unittest.TestCase):
         choice = engines.Combat().choose(ctx_of(w), None)
         self.assertFalse(choice.name.startswith("fight"), choice.name)
 
+    def test_on_safe_ground_beside_a_pack_she_does_not_step_back_out_to_work(self):
+        w = world(OPEN, health=6, safe={(5, 5), (4, 5), (4, 4), (5, 4)})
+        self.snotlings(w, [(6, 6), (7, 5)])
+        choice = engines.Combat().choose(ctx_of(w), Work(((7, 6),), "cut"))
+        self.assertNotEqual(choice.name, "go on")
+
     def test_the_odds_count_deaths(self):
         w = world(OPEN, health=1)
         self.snotlings(w, [(6, 5), (6, 6), (5, 6), (4, 6)])

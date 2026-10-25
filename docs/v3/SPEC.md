@@ -29,7 +29,7 @@ The agent works backwards from the objective, the way a person would:
 
 **The world tells you how to progress through text** (Manual §16): rumor helpers give rough directions toward level doors, waystation helpers say what locked doors need, a helper near a secret hints at it, signs and statues carry text, and an odd block out of place is often breakable. So clues are the first source of knowledge, not a side task:
 
-- Lou reads every sign and talks to every helper she has not heard yet, whenever one is in reach and nothing more urgent is on: a `Read` costs no cooldown, a `Say` reaches 25 blocks, and the line comes back the same tick.
+- Lou reads every sign and talks to every helper she has not heard yet, whenever one is in reach and nothing more urgent is on (an opportunity, below): a `Read` costs no cooldown, a `Say` reaches 25 blocks, and the line comes back the same tick.
 - Every line is kept in memory with who said it and where, and handed to the strategist, whose first job is to turn clues into judgments on the needs graph ("this rumor points at the north-east entrance"; "the locked door needs a key from the level 2 boss").
 
 The agent holds this as a **needs graph**: what the objective requires, down to what can be done now. Each need is evaluated against what the agent knows: **met**, **unmet**, or **unknown**. The first unmet or unknown need on the cheapest path to the objective is what to work on.
@@ -118,9 +118,22 @@ Every tick one **engine** runs the moment. Each is a small real-time algorithm f
 | Boss | in a boss room | the fight on its clock; leaves by the exit door before the limit or when losing | when to leave, when to drink |
 | Travel | the skill's target is a place | the path, replanned every decision as obstacles come into view; doors and warps | how much danger to walk past |
 | Work | the skill works blocks or pickups | cut, break, pick up drops, move to the next block | none |
-| Clues | an unheard helper or an unread sign is in reach and nothing threatens | `Say` hello, `Read` | none |
+| Opportunities | nothing threatens and something in view is worth its detour | takes the best opportunity (below) | what a life, health and knowledge are worth in gems |
 
-The situation picks the engine each tick: a threat outranks everything, then the boss room, then the engine of the skill under way, with clues taken in passing. The strategist never acts in the moment; it revises tactics between moments, when evidence says they were wrong (a death, a fight lost, a hostile stronger than estimated).
+The situation picks the engine each tick: a threat outranks everything, then the boss room, then an opportunity worth its detour, then the engine of the skill under way.
+
+**Opportunities** are the reactive rules: things in view the Manual says are worth stopping for. Each is priced in one unit, gems, against its detour (the extra steps, and the danger on the way, from the danger model), and the best one worth more than its detour is taken:
+
+| Opportunity | Worth |
+|---|---|
+| Gems on the ground, free | their count |
+| Food, when hurt; a bush to cut for berries when no food is near | the health it gives back, at what a potion costs per health |
+| A sign not read, a helper not heard | knowledge: the strategist sets its worth |
+| An odd block (one type alone where it does not belong, Manual §16) that a capability we carry may break | the gem cache it may hold |
+| Our death chest | what it holds, at the gems each item cost |
+| A heart (a life) | the strategist's worth of a life |
+
+A new reactive rule is one row in that list, priced like the rest, never a branch elsewhere. The strategist never acts in the moment; it revises tactics between moments, when evidence says they were wrong (a death, a fight lost, a hostile stronger than estimated).
 
 **The danger model** (Manual §11 Hostiles, Combat): hostiles chase at our pace, step to the neighbouring block nearest us and stop at walls, swing on their cooldown when in reach, and deal nothing on safe ground; a fight ends when one side dies. Every option the combat engine weighs (fight on, walk on, back off, drink) is played forward and scored by our expected health after it, on one scale.
 

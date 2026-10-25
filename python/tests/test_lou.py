@@ -152,6 +152,16 @@ class TravelTest(unittest.TestCase):
         self.assertNotIn((4, 1), action.path)
 
 
+class ShelfTest(unittest.TestCase):
+    def test_a_shelf_is_never_where_she_stands_to_read(self):
+        w = world(OPEN, at=(2, 5))
+        w.view.readable[(8, 5)] = True
+        w.entities = [Entity("supply", 50 + i, p, "bronze_mail", gem_price=20) for i, p in enumerate([(7, 5), (7, 4), (7, 6)])]
+        action = engines.Opportunities().pick(ctx_of(w))
+        self.assertIsInstance(action, actions.Walk)
+        self.assertNotIn(action.path[-1], {(7, 5), (7, 4), (7, 6)})
+
+
 class OpportunitiesTest(unittest.TestCase):
     def test_a_gem_beside_her_is_taken(self):
         w = world(OPEN)

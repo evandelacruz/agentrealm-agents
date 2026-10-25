@@ -82,7 +82,10 @@ def to_place(ctx: Ctx, map_id: int, cell: Pos, *, door: bool = False) -> list[Po
 
 
 def to_nearest(ctx: Ctx, cells: set[Pos], *, door: bool = False) -> list[Pos] | None:
-    """The path to the cheapest of ``cells`` on this map; [] when standing on one; None when none is reachable."""
+    """The path to the cheapest of ``cells`` on this map; [] when standing on one; None when none is reachable.
+
+    A shelf is never a place to stand: stepping onto a priced supply buys it (Manual §11 Shops)."""
+    cells = set(cells) - ctx.state.world.for_sale()
     if not cells:
         return None
     found = nearest_target(ctx.state.world, set(cells), grid(ctx, door=door))

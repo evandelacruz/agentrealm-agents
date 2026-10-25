@@ -13,7 +13,7 @@ Gary is v1: rules grown case by case. Lorraine is v2 and was meant to be a syste
 3. **The process stayed the same.** Each live-run failure became a backlog item, and each item added a clause (A168 to A172: blocks, waits, stall guards, give-ups). Her "how it thinks" is one paragraph of about 2,000 words over 3,400 lines.
 4. **Nothing measured her.** With no progress number, added complexity was never weighed against what it bought.
 
-v3 starts over on structure, keeps only plumbing with no opinions, and guards against each of those four: the strategist owns the plan, the ADK carries no strategy, size caps hold the code and this spec, and the measure below gates every change.
+v3 starts over on structure, keeps only plumbing with no opinions, and guards against each of those four: the strategist owns the plan, the ADK carries no strategy, every change lands in a named extension point, and the measure below gates every change.
 
 ## The measure
 
@@ -160,7 +160,9 @@ Allowlist: `client`, `pacer`, `world`, `pathing`, `navigation`, `executor` (queu
 | `python/adk3/realm/` | Agent Realm `Perception`, `Actuator`, `State`, candidate actions | `core`, the allowlist |
 | `python/<agent>/` | strategist prompt, task kinds, considerations | `adk3` only |
 
-Size rules: no module over 300 lines; this spec stays under 300 lines. If the spec needs more, the design is wrong.
+Every change lands in one of four extension points: a task kind, a consideration, a weight, or the strategist's prompt. A change that fits none of them is a change to the architecture and gets decided here first.
+
+A change that adds behavior ships with a live run showing what it bought: more milestones per hour or fewer stall stops. A change that buys nothing measurable does not go in. The spec describes structure and extension points; what each task or consideration does lives in its docstring.
 
 ## Seeing it work
 

@@ -132,7 +132,7 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
                 path, then = then, []  # the fight is won: go on
             if path:
                 here = path.pop(0)
-                walked += 1
+                walked += course.target is None or alive.get(course.target, 0) <= 0  # closing on a target is no progress
             for f in foes:
                 if alive[f.entity.id] > 0:
                     where[f.entity.id] = _chase(s, where[f.entity.id], here, f.ground)

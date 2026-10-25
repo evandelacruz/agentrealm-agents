@@ -7,8 +7,8 @@ Each decision the game binding says is due::
     take the strategist's answer if one landed; ask again when due
     path = graph.focus(ctx)             # what to work on now
     skill = executive.step(path)        # how
-    engine = first engine whose situation holds
-    agent.act(engine.act(ctx, skill.order(ctx)))
+    every proposer offers options; one judge takes the best
+    agent.act(the best option's action)
 
 The run stops itself after ``stall_minutes`` with no milestone and prints
 its report, so nobody watches a character do nothing.
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .asker import Asker
-from .engines import Engine, pick
+from .engines import Judge, Proposer
 from .ledger import Ledger
 from .needs import Graph, Row
 from .skills import Executive, Outcome
@@ -32,7 +32,8 @@ class Agent(Protocol):
     """What the game binding and the agent fill in."""
 
     graph: Graph
-    engines: list[Engine]
+    proposers: list[Proposer]
+    judge: Judge
 
     def sense(self) -> Any:
         """Spend this window; the decision context when a decision is due, else None."""
@@ -136,17 +137,18 @@ class Run:
         self.maybe_ask(ctx, path, now)
 
         order = skill.order(ctx) if skill is not None else None
-        engine = pick(agent.engines, ctx, order)
-        action = engine.act(ctx, order) if engine is not None else None
+        best = agent.judge.choose(ctx, agent.proposers, order)
+        action = best.option.action if best is not None else None
         agent.act(action)
         agent.record({"t": now, "focus": path[-1].key if path else None, "skill": skill.name if skill else None,
-                      "engine": engine.name if engine else None, "action": str(action) if action else None})
+                      "by": best.by if best else None, "option": str(best.option) if best else None,
+                      "score": round(best.score, 2) if best else None, "action": str(action) if action else None})
         if now - self._status_at >= self.settings.status_seconds:
             self._status_at = now
             focus = path[-1].title if path else "(nothing to work)"
-            self.out(f"{focus} | {skill.name if skill else '-'} | {engine.name if engine else '-'}: "
-                     f"{action or 'nothing'} | {agent.status(ctx)} | "
-                     f"last milestone {self.ledger.minutes_since_last(now):.1f}m ago")
+            chose = f"{best.by}: {best.option} ({best.score:+.1f})" if best else "-"
+            self.out(f"{focus} | {skill.name if skill else '-'} | {chose} | {action or 'nothing'} | "
+                     f"{agent.status(ctx)} | last milestone {self.ledger.minutes_since_last(now):.1f}m ago")
 
     def take_answer(self) -> None:
         answer, error = self.asker.take()

@@ -1,0 +1,5 @@
+# Layered Lou, the v3 agent (docs/v3/SPEC.md): python -m lou run characters/lou.toml
+world = "olympuff"
+
+[policy]
+entity_refresh = 5

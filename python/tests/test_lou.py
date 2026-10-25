@@ -146,6 +146,10 @@ class FieldTest(unittest.TestCase):
         cells = skills.EarnGems((3, 5)).cells(ctx_of(w))
         self.assertIn((3, 5), cells)
 
+    def test_no_grass_and_nowhere_to_look_fails_at_once(self):
+        w = world(["w" * 11] + ["w" + "d" * 9 + "w"] * 9 + ["w" * 11])  # walled in, all seen
+        self.assertIn("no cuttable grass", skills.EarnGems().failed(ctx_of(w)))
+
     def test_the_strategists_field_is_where_she_works(self):
         w = world(["g" * 41] * 11, at=(5, 5))
         order = skills.EarnGems((35, 5)).order(ctx_of(w))

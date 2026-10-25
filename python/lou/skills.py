@@ -160,7 +160,7 @@ class EarnGems:
             return "nothing we carry cuts grass"
         if self.field is not None and chebyshev(s.pos, self.field) <= FIELD_SEARCH and not self.cells(ctx):
             return f"the field around {self.field[0]},{self.field[1]} is out of cuttable grass"
-        return None
+        return nowhere_to_look(ctx, self.order(ctx), "no cuttable grass in view and no unseen ground left to look in")
 
     def minutes_since_gem(self, ctx: Ctx) -> float:
         now, gems = time.time(), ctx.state.gems
@@ -194,7 +194,7 @@ class Forage:
         return Explore("look for food", toward)
 
     def failed(self, ctx: Ctx) -> str | None:
-        return None
+        return nowhere_to_look(ctx, self.order(ctx), "no food or bushes in view and no unseen ground left to look in")
 
     def progress(self, ctx: Ctx) -> float:
         return ctx.state.health + sum(y.breaks for y in ctx.memory.yields.values()) / 10.0
@@ -295,6 +295,11 @@ class FightBoss:
     def progress(self, ctx: Ctx) -> float:
         boss = ctx.state.boss()
         return -float(boss.health or 0) if boss is not None else 0.0
+
+
+def nowhere_to_look(ctx: Ctx, order: Order, why: str) -> str | None:
+    """A skill reduced to exploring, with no unseen ground in reach, cannot go on: say so now, not after its patience."""
+    return why if isinstance(order, Explore) and travel.to_unseen(ctx, order.toward) is None else None
 
 
 def seen(s: State, memory: Memory, what: str) -> bool:

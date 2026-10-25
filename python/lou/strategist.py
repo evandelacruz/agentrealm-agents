@@ -169,7 +169,7 @@ def describe(b: Briefing, last: dict[str, Any] | None = None) -> str:
     lines += [f"- {k.breaks} kills of {code} dropped {k.gems} gems" for code, k in mem.kills.items()]
     if mem.deaths:
         lines += ["", "## Deaths (newest last)"]
-        lines += [f"- killed by {d.killer or '?'} at {d.map_id}:{d.x},{d.y}; chest {'still out, holding ' + ', '.join(d.items) if d.chest_id else 'gone or empty'}"
+        lines += [f"- killed by {d.killer or '?'} at {d.map_id}:{d.x},{d.y}; chest {('still out at ' + f'{d.chest_map}:{d.chest_x},{d.chest_y}, holding ' + (', '.join(d.items) or 'what she carried (not recorded)')) if d.chest_id else 'gone or empty'}"
                   for d in mem.deaths[-5:]]
 
     lines += ["", "## How it has gone",

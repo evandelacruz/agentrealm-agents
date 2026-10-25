@@ -64,6 +64,7 @@ class Body:
         self.last_attack_tick: int | None = None
         self.last_speech_tick: int | None = None
         self.events: list[dict] = []  # this round trip's events
+        self.carried_alive: list[str] = []  # what we carried at the last decision alive
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
         self.cuts: dict[Pos, int] = {}  # blocks we broke on this map -> the tick, waiting to see a drop
         self.boss_fight: tuple[int, float] | None = None  # (level, when the fight began)
@@ -120,6 +121,9 @@ class Body:
 
     def state(self) -> State:
         armed = self.world.armed_code
+        if self.world.inventory_read and self.world.alive:
+            self.carried_alive = [x.code for x in self.world.held_supplies] + ([armed] if armed else []) \
+                + list(self.world.worn_codes.values())  # what a death would drop: the inventory resets by the Died event
         return State.of(self.world, self.tick_hz, self.last_attack_tick, attack_cooldown_ticks(armed, self.tick_hz),
                         self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick,
                         frozenset(self.memory.townsfolk))
@@ -441,7 +445,7 @@ class Body:
                         self.surprises.append(f"a {code} told us something new")
             elif kind == "Died":
                 at = w.pos or (0, 0)
-                carried = [x.code for x in w.held_supplies] + ([w.armed_code] if w.armed_code else []) + list(w.worn_codes.values())
+                carried = self.carried_alive
                 mem.died(Death(time.time(), w.map_id or 0, *at, killer=self.last_hitter(),
                                chest_id=ev.get("chest_id"), chest_map=ev.get("map_id"), chest_x=ev.get("x"),
                                chest_y=ev.get("y"), items=[c for c in carried if c != "pocket_knife"]))

@@ -99,6 +99,8 @@ The executive runs the approach's method and checks the goal's test and the appr
 | explore | toward a place, looking for what | walk to unseen ground that way until it is found |
 | break open | block, item | arm the item, use it on the block |
 | forage | | eat food in view, cut bushes for berries, look toward town |
+| drink | potion | drink it now, unless the health it gives (weighted by how low she is) is less than it heals |
+| wait | minutes | stand until the goal is met (a shelf restocking), up to the minutes |
 | recover | our death chest | walk back, take everything that fits |
 | find the boss | level | inside the level, take doors not taken and explore until the boss is in view |
 | fight the boss | level | the boss fight on its clock |

@@ -134,6 +134,19 @@ class CombatTest(unittest.TestCase):
         self.assertEqual(harm.odds(ctx_of(w).state, harm.Course()).hits_taken, 0)
 
 
+class TerritoryTest(unittest.TestCase):
+    def test_a_snotling_that_keeps_to_grass_does_not_follow_onto_the_road(self):
+        rows = ["ggggggdddddd"] * 12
+        w = world(rows, at=(7, 5))
+        w.entities = [Entity("npc", 101, (5, 5), "snotling")]
+        w.hostile_types.add(("npc", "snotling"))
+        s = ctx_of(w).state
+        free = harm.odds(s, harm.Course(), territory={})
+        kept = harm.odds(s, harm.Course(), territory={"snotling": ["grass"]})
+        self.assertGreater(free.hits_taken, 0)
+        self.assertEqual(kept.hits_taken, 0)
+
+
 class TravelTest(unittest.TestCase):
     def test_a_bush_in_the_way_is_cut(self):
         rows = ["wwwwwwwwwww", "wwwwwwwwwww", "ggggbgggggg", "wwwwwwwwwww"]

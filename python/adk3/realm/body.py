@@ -44,6 +44,8 @@ SELF_EVERY = 60  # windows between self reads
 ENTITIES_EVERY = 5  # ticks between entity reads
 QUEUE_SLACK = 5  # ticks past a queue's length before it is taken as run out unseen
 CUT_DROP_TICKS = 5  # a gem showing on a block we broke this soon after is the break's drop
+HELD_TICKS = 20  # a hostile standing this long without closing on us, with open ground toward us, is held
+HELD_WITHIN = 8  # blocks: near enough that a chaser would be closing on us
 
 
 class Body:
@@ -65,6 +67,7 @@ class Body:
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
         self.cuts: dict[Pos, int] = {}  # blocks we broke on this map -> the tick, waiting to see a drop
         self.boss_fight: tuple[int, float] | None = None  # (level, when the fight began)
+        self.stood_on: dict[str, set[str]] = {}  # hostile type -> block types seen under it this run
         if kb is not None:
             load_hostiles(kb, self.world)
 
@@ -358,10 +361,27 @@ class Body:
                     mem.learned()
                     self.surprises.append(f"found level {w.map_level}'s boss: {e.code}, health {e.health}/{e.max_health}")
         self.cuts = {p: t for p, t in self.cuts.items() if w.tick - t <= CUT_DROP_TICKS}
+        self.learn_territory()
         for e in mem.entrances.values():
             if e.map_id == w.map_id and not e.reached and chebyshev((e.x, e.y), w.pos) <= 1:
                 e.reached = True
                 mem.learned()
+
+    def learn_territory(self) -> None:
+        """A hostile that stands still, not beside us, though open ground would bring it closer, stops at
+        its zone's edge (Manual §11 Hostiles: a zone spawn never leaves its zone). Keep the ground it keeps to."""
+        w = self.world
+        for e in w.entities:
+            if e.kind != "npc" or e.pos not in w.view.tiles:
+                continue
+            seen = self.stood_on.setdefault(e.code, set())
+            seen.add(w.view.tiles[e.pos])
+            if (w.pos is None or chebyshev(e.pos, w.pos) <= 1 or chebyshev(e.pos, w.pos) > HELD_WITHIN
+                    or w.npc_still_ticks(e) < HELD_TICKS):
+                continue
+            closer = [n for n in w.open_neighbours(e.pos) if chebyshev(n, w.pos) < chebyshev(e.pos, w.pos)]
+            if closer and all(w.view.tiles.get(n) not in seen for n in closer):
+                self.memory.keeps_to(e.code, set(seen))
 
     def learn_result(self, intent: dict, res: dict) -> None:
         w, mem = self.world, self.memory

@@ -140,6 +140,7 @@ class Memory:
     shops: dict[str, Sighting] = field(default_factory=dict)  # place key -> what was for sale there
     yields: dict[str, Yield] = field(default_factory=dict)  # region key -> our breaks there
     no_effect: list[str] = field(default_factory=list)  # place keys a Use on changed nothing
+    territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
     deaths: list[Death] = field(default_factory=list)
     revision: int = 0
 
@@ -201,6 +202,13 @@ class Memory:
         if key not in self.no_effect:
             self.no_effect.append(key)
 
+    def keeps_to(self, code: str, ground: set[str]) -> None:
+        """A hostile of ``code`` stopped at the edge of ``ground``: it keeps to its zone (Manual §11 Hostiles)."""
+        known = set(self.territory.get(code, []))
+        if not ground <= known:
+            self.territory[code] = sorted(known | ground)
+            self.learned()
+
     def died(self, death: Death) -> None:
         self.deaths = (self.deaths + [death])[-20:]
         self.learned()
@@ -243,6 +251,7 @@ class Memory:
         m.shops = {k: Sighting(**v) for k, v in raw.get("shops", {}).items()}
         m.yields = {k: Yield(**v) for k, v in raw.get("yields", {}).items()}
         m.no_effect = list(raw.get("no_effect", []))
+        m.territory = {k: list(v) for k, v in raw.get("territory", {}).items()}
         m.deaths = [Death(**d) for d in raw.get("deaths", [])]
         return m
 

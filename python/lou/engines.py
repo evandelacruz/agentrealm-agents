@@ -22,6 +22,7 @@ from .opportunities import chances, near_first
 from .orders import Do, Explore, Fight, GoTo, Order, Work
 
 KILL_DROP = 0.3  # gems a kill is expected to drop: the Manual's rate for a snotling in the ring-1 fields (§16)
+SWITCH_MARGIN = 1.0  # gems: another option must beat the one under way by this much to replace it
 BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Bosses and levels); the real one is not served
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
 
@@ -73,17 +74,24 @@ class Option:
     name: str
     course: harm.Course
     action: Action | None  # None: go on with the skill's own engine
-    reward: float  # gems
+    reward: float = 0.0  # gems it wins or spends for sure (a potion drunk is spent)
+    kill_worth: float = 0.0  # gems a kill of its target is worth
 
 
 class Combat:
-    """When a threat can reach us: weigh every option as reward less risk, in gems, and take the best."""
+    """When a threat can reach us: weigh every option as reward less risk, in gems, and take the best.
+
+    Reward is the progress an option makes over the horizon (a fight goes on along the skill's way once
+    its target is dead) and what a kill drops; risk is the health it is expected to cost and the chance
+    it kills us. Within one engagement every option is weighed on the same dice, and the option under
+    way is kept unless another beats it by ``SWITCH_MARGIN``, so noise never flips the choice."""
 
     name = "combat"
 
     def __init__(self):
         self._tick = -1
         self._choice: Option | None = None
+        self._seed: int | None = None  # the engagement's dice
 
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
         if isinstance(order, Fight) and order.boss:
@@ -99,38 +107,48 @@ class Combat:
         s = ctx.state
         if self._tick == s.tick and self._choice is not None:
             return self._choice
-        options = self.options(ctx, order)
+        if self._seed is None or s.tick - self._tick > 50:
+            self._seed = s.tick  # a new engagement
         price = Price(ctx)
-        self._choice = max(options, key=lambda o: o.reward - price.risk(harm.odds(s, o.course)))
-        self._tick = s.tick
-        return self._choice
+        per_step = value.per_tick(ctx.levers, s.tick_hz) * harm.step_ticks(s) * value_scale(s)
+
+        def net(o: Option) -> float:
+            odds = harm.odds(s, o.course, seed=self._seed, territory=ctx.memory.territory)
+            return o.reward + odds.steps * per_step + odds.kill * o.kill_worth - price.risk(odds)
+
+        scored = [(net(o), o) for o in self.options(ctx, order)]
+        best_net, best = max(scored, key=lambda x: x[0])
+        if self._choice is not None:
+            kept = next(((n, o) for n, o in scored if o.name == self._choice.name), None)
+            if kept is not None and kept[0] >= best_net - SWITCH_MARGIN:
+                best = kept[1]
+        self._choice, self._tick = best, s.tick
+        return best
 
     def options(self, ctx: Ctx, order: Order | None) -> list[Option]:
         s = ctx.state
-        tick = value.per_tick(ctx.levers, s.tick_hz) * value_scale(s)
         ahead = course_of(ctx, order)
-        steps = min(len(ahead), harm.HORIZON_TICKS // harm.step_ticks(s))
-        out = [Option("go on", harm.Course(ahead), None, steps * harm.step_ticks(s) * tick)]
+        out = [Option("go on", harm.Course(ahead), None)]
         avoid = set(ctx.tactics.get("avoid") or [])
         for e in harm.threats_near(s):
             if e.code in avoid:
                 continue
             reach = s.world.attack_range or 1
             approach = tuple(travel.to_beside(ctx, e.pos, reach) or ()) if chebyshev(e.pos, s.pos) > reach else ()
-            out.append(Option(f"fight {e.code}", harm.Course(approach, target=e.id), self.fight(ctx, e, approach),
-                              KILL_DROP * ctx.levers.greed_weight))
+            out.append(Option(f"fight {e.code}", harm.Course(approach, target=e.id, then=ahead),
+                              self.fight(ctx, e, approach), kill_worth=KILL_DROP * ctx.levers.greed_weight))
         away = travel.to_safe(ctx)
         if away:
-            out.append(Option("back off to safe ground", harm.Course(tuple(away)), walk_or_break(ctx, away, "to safe ground"), 0.0))
+            out.append(Option("back off to safe ground", harm.Course(tuple(away)), walk_or_break(ctx, away, "to safe ground")))
         else:
             run = flee_run(s.world, harm.threats_near(s), set(), _first_away(ctx))
             if run:
-                out.append(Option("back off", harm.Course(tuple(run)), actions.Walk(tuple(run), "away"), 0.0))
+                out.append(Option("back off", harm.Course(tuple(run)), actions.Walk(tuple(run), "away")))
         drink = best_potion(ctx)
         if drink is not None:
             heal = supplies.heal_of(drink.code)
-            out.append(Option(f"drink {drink.code}", harm.Course(heal=heal), drink, -value.item(drink.code)))
-        out.append(Option("stand", harm.Course(), actions.Stop("hold ground"), 0.0))
+            out.append(Option(f"drink {drink.code}", harm.Course(heal=heal, path=ahead), drink, -value.item(drink.code)))
+        out.append(Option("stand", harm.Course(), actions.Stop("hold ground")))
         return out
 
     def fight(self, ctx: Ctx, e: Entity, approach: tuple[Pos, ...]) -> Action | None:
@@ -201,7 +219,7 @@ class Boss:
         boss = next((e for e in s.npcs() if e.id == order.npc_id), None)
         limit = float(ctx.tactics.get("boss_seconds", BOSS_LIMIT_SECONDS))
         leave_at = limit - float(ctx.tactics.get("leave_with_seconds", LEAVE_MARGIN_SECONDS))
-        odds = harm.odds(s, harm.Course(target=order.npc_id)) if boss is not None else None
+        odds = harm.odds(s, harm.Course(target=order.npc_id), territory=ctx.memory.territory) if boss is not None else None
         losing = odds is not None and odds.death > 0.5 and odds.kill < 0.2
         if time.time() - self.began >= leave_at or losing:
             exit_path = travel.to_nearest(ctx, set(s.doors()), door=True)
@@ -249,7 +267,8 @@ class Opportunities:
                 path = travel.to_beside(ctx, c.at, c.reach)
                 if path is None:
                     continue
-                danger = price.risk(harm.odds(s, harm.Course(tuple(path)))) if harm.threats_near(s) else 0.0
+                danger = (price.risk(harm.odds(s, harm.Course(tuple(path)), territory=ctx.memory.territory))
+                          if harm.threats_near(s) else 0.0)
                 net, action = c.worth - len(path) * per_step - danger, walk_or_break(ctx, path, c.why)
             if net > best_net and action is not None:
                 best, best_net = action, net

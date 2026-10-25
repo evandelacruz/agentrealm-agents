@@ -143,6 +143,7 @@ class Memory:
     yields: dict[str, Yield] = field(default_factory=dict)  # region key -> our breaks there
     kills: dict[str, Yield] = field(default_factory=dict)  # hostile type -> our kills of it and the gems they dropped
     no_effect: list[str] = field(default_factory=list)  # place keys a Use on changed nothing
+    refused: dict[str, str] = field(default_factory=dict)  # place key -> why the game refused a Use on it
     territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
     townsfolk: list[str] = field(default_factory=list)  # NPC types seen standing on safe ground (State.is_threat)
     chests_seen: list[str] = field(default_factory=list)  # place keys of ground chests looked into (contents shown in reach)
@@ -238,6 +239,11 @@ class Memory:
         if key not in self.no_effect:
             self.no_effect.append(key)
 
+    def use_refused(self, map_id: int, pos: Pos, code: str) -> None:
+        """The game refused a Use on this block (not_allowed_in_safe_zone, ...): it is not tried again."""
+        self.changed_nothing(map_id, pos)
+        self.refused[place_key(map_id, pos)] = code
+
     def keeps_to(self, code: str, ground: set[str]) -> None:
         """A hostile of ``code`` stopped at the edge of ``ground``: it keeps to its zone (Manual §11 Hostiles)."""
         known = set(self.territory.get(code, []))
@@ -298,6 +304,7 @@ class Memory:
         m.yields = {k: Yield(**v) for k, v in raw.get("yields", {}).items()}
         m.kills = {k: Yield(**v) for k, v in raw.get("kills", {}).items()}
         m.no_effect = list(raw.get("no_effect", []))
+        m.refused = dict(raw.get("refused", {}))
         m.territory = {k: list(v) for k, v in raw.get("territory", {}).items()}
         m.townsfolk = list(raw.get("townsfolk", []))
         m.chests_seen = list(raw.get("chests_seen", []))

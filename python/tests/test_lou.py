@@ -433,6 +433,19 @@ class MemoryTest(unittest.TestCase):
         self.assertEqual(back.sellers("bronze_sword")[0].price, 15)
         self.assertEqual(back.last_death().items, ["bronze_sword"])
 
+    def test_a_refused_use_fails_the_break_open_with_why(self):
+        ctx = ctx_of(world(OPEN))
+        ctx.memory.use_refused(MAP, (3, 3), "not_allowed_in_safe_zone")
+        self.assertIn("not_allowed_in_safe_zone", skills.BreakOpen(MAP, (3, 3), "bronze_mallet").failed(ctx))
+
+    def test_a_block_that_broke_ends_the_break_open(self):
+        w = world(OPEN)
+        w.maps[MAP].tiles[(3, 3)] = "rock"
+        skill = skills.BreakOpen(MAP, (3, 3), "bronze_mallet")
+        self.assertIn("we do not carry", skill.failed(ctx_of(w)))
+        w.maps[MAP].tiles[(3, 3)] = "dirt"
+        self.assertIn("is broken", skill.failed(ctx_of(w)))
+
     def test_a_clue_is_kept_once(self):
         mem = Memory()
         self.assertTrue(mem.add_clue(Clue("x", "sign", "", MAP, 1, 1)))

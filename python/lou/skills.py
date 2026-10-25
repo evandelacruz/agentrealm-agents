@@ -247,6 +247,16 @@ class BreakOpen:
 
     def __init__(self, map_id: int, cell: Pos, code: str):
         self.map_id, self.cell, self.code = map_id, cell, code
+        self.block: str | None = None  # what stood there when first seen: a change means it broke
+
+    def broken(self, ctx: Ctx) -> bool:
+        s = ctx.state
+        if s.map_id != self.map_id:
+            return False
+        tile = s.world.view.tiles.get(self.cell)
+        if self.block is None:
+            self.block = tile
+        return tile is not None and tile != self.block
 
     def order(self, ctx: Ctx) -> Order:
         s = ctx.state
@@ -257,8 +267,13 @@ class BreakOpen:
         return Do(actions.UseOn(self.cell[0], self.cell[1], arm, f"break with {self.code}"), self.cell)
 
     def failed(self, ctx: Ctx) -> str | None:
-        if place_key(self.map_id, self.cell) in ctx.memory.no_effect:
-            return f"{self.code} did not break the block at {self.cell[0]},{self.cell[1]}"
+        if self.broken(ctx):
+            return f"the {self.block} at {self.cell[0]},{self.cell[1]} is broken: nothing more to do here"
+        key = place_key(self.map_id, self.cell)
+        if key in ctx.memory.no_effect:
+            why = ctx.memory.refused.get(key)
+            return (f"the game refused a Use on the block at {self.cell[0]},{self.cell[1]}: {why}" if why
+                    else f"{self.code} did not break the block at {self.cell[0]},{self.cell[1]}")
         return None if ctx.state.has(self.code) else f"we do not carry {self.code}"
 
     def progress(self, ctx: Ctx) -> float:

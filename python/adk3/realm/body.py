@@ -434,7 +434,10 @@ class Body:
                 mem.changed_nothing(w.map_id, chest.pos)  # full, or not ours to take: not tried again
         elif verb == "Use" and target.get("kind") == "block":
             cell = (int(target["x"]), int(target["y"]))
-            if outcome == "applied_no_effect":
+            code = (res.get("rejection") or {}).get("code")
+            if outcome == "rejected" and code not in (None, "attack_cooldown", "movement_cooldown", "target_out_of_range"):
+                mem.use_refused(w.map_id, cell, code)
+            elif outcome == "applied_no_effect":
                 mem.changed_nothing(w.map_id, cell)
             elif outcome == "applied":
                 mem.broke(w.map_id, cell)

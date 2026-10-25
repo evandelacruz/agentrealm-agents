@@ -157,16 +157,21 @@ class Decision:
 @dataclass
 class Judged:
     """One send of the op's, read against what it was for (A173): the op
-    and why it was sent (``key``, the act), the cells its block ``Use``s
-    strike, those whose ``Use`` is known to have run (``landed``: a result
-    came back for it, or the queue ran to its end, which may bring no result
-    at all) and those a ``BlockChanged`` showed changing (``changed``), whether anything came
-    of it (``effect``), and whether it was refused "not yet" (``not_yet``),
-    which is judged neither way."""
+    and why it was sent (``key``, the act); the cells its block ``Use``s
+    strike, but a break in flight, which break memory settles per capability
+    (``note_break_use``); those whose ``Use`` is known to have run
+    (``landed``: an ``applied`` result, or the queue ran to its end, which
+    may bring no result at all); those their own result settled
+    (``settled``: refused, which says nothing about the cell, or
+    ``applied_no_effect``, noted as it came back); those a ``BlockChanged``
+    showed changing (``changed``); whether anything came of it (``effect``);
+    and whether it was refused "not yet" (``not_yet``), which is judged
+    neither way."""
 
     key: tuple[str | None, str]
     cells: frozenset[Pos]
     landed: set[Pos] = field(default_factory=set)
+    settled: set[Pos] = field(default_factory=set)
     changed: set[Pos] = field(default_factory=set)
     effect: bool = False
     not_yet: bool = False
@@ -422,21 +427,23 @@ class LadderRunner:
         if not intents or any(i.get("verb") == "Step" for i in intents):
             self.judged = None
             return d
-        self.judged = Judged(key, frozenset(c for i in intents if (c := struck_block(i)) is not None))
+        breaking = self.mem.break_pending[1] if self.mem.break_pending is not None else None
+        self.judged = Judged(key, frozenset(c for i in intents if (c := struck_block(i)) is not None and c != breaking))
         return d
 
     def judged_done(self) -> None:
         """The op's send ran out: a strike that ran with no ``BlockChanged``
-        on its cell changed nothing there, whatever result code came back or
-        none, so the cell is noted as an ``applied_no_effect`` one is
-        (``apply_results``); an act that changed
+        on its cell and that no result of its own settled changed nothing
+        there, whether it came back ``applied`` or with no result at all, so
+        the cell is noted as an ``applied_no_effect`` one is (``apply_results``);
+        a refused strike notes nothing. An act that changed
         nothing counts toward ``NO_EFFECT_REPEATS`` in a row, one that changed
         something ends the run."""
         j, self.judged = self.judged, None
         if j is None:
             return
         w = self.world
-        for p in sorted(j.landed - j.changed):
+        for p in sorted(j.landed - j.settled - j.changed):
             note_no_effect_strike(self.knowledge, w, p, w.view.tiles.get(p), w.armed_code, w.tick)
         if j.not_yet:
             return
@@ -758,7 +765,7 @@ class LadderRunner:
         finished = r.get("finished_queue")
         if finished and finished.get("queue_id") == m.pending_queue:
             if self.judged is not None:
-                self.judged.landed |= self.judged.cells  # every intent ran, a result or not (A173)
+                self.judged.landed |= self.judged.cells  # every intent ran, with no rejection, a result or not (A173)
             self.drop_queue()
         elif m.pending_intents is not None and w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
             # The queue had time to run out and the server never said so: she may
@@ -822,16 +829,21 @@ class LadderRunner:
         any intent but a block ``Use`` that came back ``applied`` changed
         something; a block ``Use`` that ran changes something once its
         cell shows a ``BlockChanged`` (``apply``), and a break in flight is
-        settled by break memory, so it is not ``struck`` here; a refusal that
-        says "not yet" is no verdict."""
+        settled by break memory, so it is not ``struck`` here. A refused
+        strike says nothing about its cell, and one ``applied_no_effect`` was
+        noted as it came back (``settled``); a refusal that says "not yet" is
+        no verdict."""
         j = self.judged
         if j is None:
             return
-        if res.get("outcome") == "rejected":
+        outcome = res.get("outcome")
+        if struck is not None and outcome in ("rejected", "applied_no_effect"):
+            j.settled.add(struck)
+        if outcome == "rejected":
             j.not_yet |= (res.get("rejection") or {}).get("code") in NOT_YET
-        elif res.get("outcome") in ("applied", "applied_no_effect") and struck is not None:
+        elif outcome == "applied" and struck is not None:
             j.landed.add(struck)
-        elif res.get("outcome") == "applied":
+        elif outcome == "applied":
             j.effect = True
 
     def drop_queue(self) -> None:

@@ -220,6 +220,24 @@ class LoopTest(unittest.TestCase):
                 d = self.round(outcome="rejected", code="attack_cooldown")
                 self.assertEqual(d.intents, [use_on(HERE)])
         self.assertIsNone(r.no_effect)
+        self.assertIsNone(no_yield(r.knowledge, MAP, HERE, self.w.tick), "a refusal says nothing about the cell")
+
+    def test_a_refused_cut_notes_nothing_whatever_the_refusal(self):
+        self.round(outcome="rejected", code="target_out_of_range")
+        self.assertIsNone(no_yield(self.r.knowledge, MAP, HERE, self.w.tick))
+
+    def test_a_break_in_flight_is_left_to_break_memory(self):
+        """An oddity's break is settled per capability (``note_break_use``), never noted here."""
+        r = self.r
+        breaking = Act([use_on(HERE)], "break the grass at (5, 5) for its cache")
+
+        def act_and_file(op, c):
+            c.mem.break_pending = (MAP, HERE, "cut")
+            return breaking
+
+        with mock.patch.object(play, "act", side_effect=act_and_file):
+            self.round(outcome=None)
+        self.assertIsNone(no_yield(r.knowledge, MAP, HERE, self.w.tick))
 
     def test_a_walk_is_judged_by_the_stuck_ladder_not_here(self):
         walk = Act([{"verb": "Step", "direction": "right"}], "lorraine:gather → (9, 5)")

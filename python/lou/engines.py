@@ -146,7 +146,8 @@ class Combat:
     - **back off** to safe ground, then plan again from there: **hold**, or go on when the way is safe;
     - **go on** with the method, until we are hit or a new hostile turns up.
 
-    Holding means the approach cannot go on past these hostiles: it is reported as held up, which fails
+    Holding, or a back-off run until clear, means the approach cannot go on past these hostiles: it is
+    reported as held up, which fails
     the approach (``lou.publish``), so plan B or the strategist moves her elsewhere. A hold lasts until
     the approach changes or the hostiles are gone. It is planned again only when the engagement ends
     or the bar is reached, never tick by tick.
@@ -165,8 +166,8 @@ class Combat:
         s = ctx.state
         threats = harm.threats_near(s)
         if not threats:
-            if self.now is not None and self.now.kind == "back_off":
-                self.report(ctx, f"backed off from {self.now.why}; clear now")
+            if self.now is not None and self.now.kind == "back_off":  # the way was held: the approach is held up
+                ctx.memory.held_up_by(f"backed off from {self.now.why} near {s.pos[0]},{s.pos[1]}")
             self.now = None
             return False
         if self.now is None or self.over(ctx, threats):

@@ -221,6 +221,14 @@ class CombatTest(unittest.TestCase):
         self.assertEqual(combat.now.kind, "go_on")
         self.assertIsNone(ctx.memory.held_up)
 
+    def test_a_back_off_run_until_clear_holds_the_approach_up(self):
+        w = world(OPEN)
+        combat = engines.Combat()
+        ctx = ctx_of(w)
+        combat.now = combat.make(ctx, "back_off", None, "chugbug")
+        self.assertFalse(combat.applies(ctx, None))
+        self.assertIn("backed off from chugbug", ctx.memory.held_up[1])
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

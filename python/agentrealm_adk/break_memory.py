@@ -383,3 +383,143 @@ def given_up_blocks(stuck: NavStuckMemory, map_id: int | None, tick: int) -> fro
     return frozenset(
         r.target for r in stuck.given_up.values() if r.goal == BREAK_GOAL and r.map_id == map_id and r.holds(tick)
     )
+
+
+# What a strike that changed nothing teaches about its target (A173). A
+# ``Use`` on a block that comes back ``applied_no_effect`` broke nothing, so
+# the cell is noted as not yielding now, with why: it is regrowing from a
+# break (until its timer runs), it does not break with a capability its type
+# should (it never breaks), or the capabilities struck with do not break it.
+# A note is kept per cell, in ``kb.extra[NO_YIELD_KEY]`` as
+# ``"<map_id>,<x>,<y>": {"why", "tick", "until", "capabilities"}``; ``until``
+# is absent where it never lapses. A ``BlockChanged`` on the cell lifts it
+# (``lift_no_yield``): the ground changed, so the note may no longer hold.
+NO_YIELD_KEY = "no_yield"
+NO_YIELD_KEPT = 1000  # notes kept, the oldest forgotten first
+REGROWING, UNBREAKABLE, NOT_BY_THESE = "regrowing", "unbreakable", "not_by_these"
+
+
+@dataclass(frozen=True)
+class NoYield:
+    """A cell noted as not yielding (A173): why, when, until when (None:
+    never lapses), and the capabilities struck with."""
+
+    why: str
+    tick: int
+    until: int | None
+    capabilities: tuple[str, ...]
+
+    def holds(self, tick: int, held: Iterable[str] | None = None) -> bool:
+        """The note stands at ``tick`` for a strike with ``held`` (every
+        capability in hand; None: any): a regrowing cell until its timer, an
+        unbreakable one for good, and one the capabilities struck with do
+        not break while every capability held is among them."""
+        if self.until is not None and tick >= self.until:
+            return False
+        if self.why == NOT_BY_THESE and held is not None:
+            return set(held) <= set(self.capabilities)
+        return True
+
+    def says(self) -> str:
+        """The note in game terms, with when it lapses."""
+        if self.why == REGROWING:
+            return f"broken and regrowing until tick {self.until}"
+        if self.why == UNBREAKABLE:
+            return "does not break"
+        return f"{', '.join(self.capabilities)} does not break it"
+
+
+def _cell_key(map_id: int, pos: Pos) -> str:
+    return f"{map_id},{pos[0]},{pos[1]}"
+
+
+def note_no_yield(kb: KnowledgeBase | None, map_id: int | None, pos: Pos, note: NoYield) -> None:
+    """File ``note`` on the cell, replacing any older one there."""
+    if kb is None or map_id is None:
+        return
+    row: dict[str, Any] = {"why": note.why, "tick": note.tick, "capabilities": list(note.capabilities)}
+    if note.until is not None:
+        row["until"] = note.until
+    with kb.lock:
+        notes = kb.extra.get(NO_YIELD_KEY)
+        notes = dict(notes) if isinstance(notes, dict) else {}
+        notes.pop(_cell_key(map_id, pos), None)
+        notes[_cell_key(map_id, pos)] = row
+        while len(notes) > NO_YIELD_KEPT:
+            del notes[next(iter(notes))]
+        kb.extra[NO_YIELD_KEY] = notes
+
+
+def _note(row: object) -> NoYield | None:
+    if not isinstance(row, dict) or not isinstance(row.get("tick"), int):
+        return None
+    until = row.get("until")
+    caps = row.get("capabilities")
+    return NoYield(
+        str(row.get("why")), row["tick"], until if isinstance(until, int) else None,
+        tuple(c for c in caps if isinstance(c, str)) if isinstance(caps, list) else (),
+    )
+
+
+def no_yield(
+    kb: KnowledgeBase | None, map_id: int | None, pos: Pos, tick: int, held: Iterable[str] | None = None
+) -> NoYield | None:
+    """The note on ``pos`` that stands at ``tick`` for a strike with ``held``, or None."""
+    if kb is None or map_id is None:
+        return None
+    with kb.lock:
+        notes = kb.extra.get(NO_YIELD_KEY)
+        row = notes.get(_cell_key(map_id, pos)) if isinstance(notes, dict) else None
+    note = _note(row)
+    return note if note is not None and note.holds(tick, held) else None
+
+
+def no_yield_cells(
+    kb: KnowledgeBase | None, map_id: int | None, tick: int, held: Iterable[str] | None = None
+) -> set[Pos]:
+    """The cells of ``map_id`` whose note stands at ``tick`` for a strike with ``held``: read once a decision."""
+    if kb is None or map_id is None:
+        return set()
+    held = None if held is None else frozenset(held)
+    with kb.lock:
+        notes = kb.extra.get(NO_YIELD_KEY)
+        rows = list(notes.items()) if isinstance(notes, dict) else []
+    out: set[Pos] = set()
+    for key, row in rows:
+        parts = key.split(",")
+        note = _note(row)
+        if len(parts) != 3 or note is None or not note.holds(tick, held):
+            continue
+        try:
+            mid, x, y = (int(p) for p in parts)
+        except ValueError:
+            continue
+        if mid == map_id:
+            out.add((x, y))
+    return out
+
+
+def lift_no_yield(kb: KnowledgeBase | None, changed: Iterable[tuple[int, Pos]]) -> None:
+    """A ``BlockChanged`` on a noted cell lifts its note: the block it was
+    noted on is not what stands there now."""
+    if kb is None:
+        return
+    keys = {_cell_key(map_id, p) for map_id, p in changed}
+    if not keys:
+        return
+    with kb.lock:
+        notes = kb.extra.get(NO_YIELD_KEY)
+        if isinstance(notes, dict) and keys & notes.keys():
+            kb.extra[NO_YIELD_KEY] = {k: v for k, v in notes.items() if k not in keys}
+
+
+def last_opened(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> int | None:
+    """The tick a break of ours last opened ``pos`` (any capability), or None."""
+    if map_id is None:
+        return None
+    ticks = [
+        row["tick"] for c in CAPABILITIES
+        if (row := _break_row(kb, break_key(map_id, pos, c))) is not None
+        and row.get("result") == "opened" and isinstance(row.get("tick"), int)
+    ]
+    return max(ticks) if ticks else None

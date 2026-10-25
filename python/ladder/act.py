@@ -52,7 +52,7 @@ from agentrealm_adk.executor import (
     trim_to_horizon,
     use_cooldown_ticks,
 )
-from agentrealm_adk.break_memory import choice_at
+from agentrealm_adk.break_memory import choice_at, held_capabilities
 from agentrealm_adk.gem_caches import CacheTarget, cache_targets
 from agentrealm_adk.gem_yield import GATHER_BLOCKS, region_of, region_yields
 from agentrealm_adk.hostile_ground import GATHER_HOSTILE_RADIUS, hostiles_within, off_safe, walk_reach
@@ -80,6 +80,7 @@ from agentrealm_adk.value import (
     finds,
     net,
     step_gems,
+    struck_value,
 )
 from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 
@@ -714,7 +715,9 @@ def gather_targets(ctx: Ctx) -> list[Target]:
     cut), each by its net (``value.net``: its value less the gems of the walk
     to it, surcharges and all, ``walk_costs``; one the grid does not reach
     after every one it does), distance breaking ties, none given up and
-    still backed off. A target with known hostiles beside it
+    still backed off, and none worth nothing: a block a strike left
+    unchanged is worth nothing while its note stands (``value.struck_value``,
+    A173). A target with known hostiles beside it
     (``hostile_ground.hostiles_within`` ``GATHER_HOSTILE_RADIUS``) comes after
     every other, and only when her margin now covers them all
     (``readiness.margin_now``, A139); its walk then passes their ground."""
@@ -732,13 +735,20 @@ def gather_targets(ctx: Ctx) -> list[Target]:
                             f"break the {c.block} at {c.pos} for its cache, about {c.gems:.1f} gems", gems=c.gems))
     reach = weapon_reach(w, kb)
     rate, by_region = region_yields(kb, w.map_id)
+    held = held_capabilities(w, kb)
     for p, b in w.view.tiles.items():
         if b in GATHER_BLOCKS:
-            found.append(Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}", gems=by_region.get(region_of(p), rate)))
-        elif b in BLOCK_FOOD and (gems := bush_value(b, w, kb)) > 0 and cuts_bush(ctx, p):
+            gems = struck_value(by_region.get(region_of(p), rate), kb, w.map_id, p, w.tick, held)
+            found.append(Target(p, reach, lambda p=p: cut(ctx, p), f"cut {p}", gems=gems))
+        elif b in BLOCK_FOOD and (gems := struck_value(bush_value(b, w, kb), kb, w.map_id, p, w.tick, held)) > 0 \
+                and cuts_bush(ctx, p):
             found.append(Target(p, NEAR, lambda p=p: cut(ctx, p), f"cut the bush at {p} for food worth {gems:.1f} gems",
                                 gems=gems))
-    kept = [(t, stand) for t in found if not nav_stuck.backed_off(m, GATHER, w.map_id, stand := stand_by(w, t.cell, t.reach), w.tick)]
+    # A target worth nothing is no target (A173).
+    kept = [
+        (t, stand) for t in found
+        if t.gems > 0 and not nav_stuck.backed_off(m, GATHER, w.map_id, stand := stand_by(w, t.cell, t.reach), w.tick)
+    ]
     costs = walk_costs(ctx, {stand for _, stand in kept})
     out: list[tuple[tuple, Target]] = []
     for t, stand in kept:

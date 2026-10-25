@@ -513,6 +513,19 @@ def exhausted_cells(
     return pending | {(int(c["x"]), int(c["y"])) for c in recent if "x" in c and "y" in c}
 
 
+def last_cut(kb: KnowledgeBase | None, map_id: int | None, pos: Pos) -> int | None:
+    """The tick of our latest filed cut of ``pos``, or None (A173)."""
+    if kb is None or map_id is None:
+        return None
+    with kb.lock:
+        row = _stored_row(kb, map_id)
+        cuts = row.get("cuts") if row is not None else None
+        ticks = [
+            int(c.get("tick", 0)) for c in cuts if isinstance(c, dict) and (c.get("x"), c.get("y")) == pos
+        ] if isinstance(cuts, list) else []
+    return max(ticks) if ticks else None
+
+
 def _parse(key: str) -> tuple[int, int] | None:
     try:
         rx, ry = (int(p) for p in key.split(",", 1))

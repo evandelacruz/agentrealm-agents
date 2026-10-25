@@ -458,9 +458,15 @@ class Interact:
 
 
 class WorkBlocks:
-    """Break blocks for their drops, the best first; a weapon's break waits on its cooldown (Manual §11)."""
+    """Break blocks for their drops, the best first; a weapon's break waits on its cooldown (Manual §11).
+
+    It commits to one block until it is broken or leaves the method's list, so the walk to it is not
+    re-aimed every decision as the list re-sorts around where we stand."""
 
     name = "work"
+
+    def __init__(self):
+        self.target: Pos | None = None
 
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
         return isinstance(order, Work)
@@ -471,9 +477,19 @@ class WorkBlocks:
         if beside:
             if not s.attack_ready:
                 return None
-            cell = beside[0]
+            cell = self.target if self.target in beside else beside[0]
             return actions.UseOn(cell[0], cell[1], arm_for(ctx, "bush"), order.why)  # grass falls to what cuts bushes
-        return walk_or_break(ctx, work_path(ctx, order) or (), order.why)
+        if self.target in order.cells:
+            path = travel.to_beside(ctx, self.target)
+            if path:
+                return walk_or_break(ctx, path, order.why)
+        path = work_path(ctx, order)
+        if not path:
+            self.target = None
+            return None
+        end = path[-1]
+        self.target = next((p for p in order.cells if chebyshev(p, end) <= 1), None)
+        return walk_or_break(ctx, path, order.why)
 
 
 ALL = [Combat(), Boss(), Opportunities(), Travel(), Interact(), WorkBlocks()]

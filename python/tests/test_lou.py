@@ -342,6 +342,17 @@ class TravelTest(unittest.TestCase):
         self.assertNotIn((4, 1), action.path)
 
 
+class WorkTest(unittest.TestCase):
+    def test_the_walk_to_a_block_keeps_its_aim_as_the_list_resorts(self):
+        w = world(OPEN, at=(5, 5))
+        work = engines.WorkBlocks()
+        first = work.act(ctx_of(w), Work(((9, 9), (1, 1)), "cut"))
+        aim = work.target
+        w.pos = first.path[0]
+        work.act(ctx_of(w), Work(((1, 1), (9, 9)), "cut"))
+        self.assertEqual(work.target, aim)
+
+
 class ShelfTest(unittest.TestCase):
     def test_a_shelf_is_never_where_she_stands_to_read(self):
         w = world(OPEN, at=(2, 5))

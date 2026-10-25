@@ -144,6 +144,7 @@ class Memory:
     kills: dict[str, Yield] = field(default_factory=dict)  # hostile type -> our kills of it and the gems they dropped
     no_effect: list[str] = field(default_factory=list)  # place keys a Use on changed nothing
     territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
+    townsfolk: list[str] = field(default_factory=list)  # NPC types seen standing on safe ground (State.is_threat)
     deaths: list[Death] = field(default_factory=list)
     revision: int = 0
     happened: list[str] = field(default_factory=list)  # this run: what the reactions did and why, newest last
@@ -243,6 +244,11 @@ class Memory:
             self.territory[code] = sorted(known | ground)
             self.learned()
 
+    def saw_in_town(self, code: str) -> None:
+        if code not in self.townsfolk:
+            self.townsfolk.append(code)
+            self.learned()
+
     def died(self, death: Death) -> None:
         self.deaths = (self.deaths + [death])[-20:]
         self.learned()
@@ -287,6 +293,7 @@ class Memory:
         m.kills = {k: Yield(**v) for k, v in raw.get("kills", {}).items()}
         m.no_effect = list(raw.get("no_effect", []))
         m.territory = {k: list(v) for k, v in raw.get("territory", {}).items()}
+        m.townsfolk = list(raw.get("townsfolk", []))
         m.deaths = [Death(**d) for d in raw.get("deaths", [])]
         return m
 

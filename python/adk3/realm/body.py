@@ -33,6 +33,7 @@ from agentrealm_adk.knowledge_maps import record_locked_door, record_map_level, 
 from agentrealm_adk.memory import Memory as NavMemory
 from agentrealm_adk.navigation.rejection import end_decision, learn_step_rejection
 from agentrealm_adk.pacer import WINDOW_MARGIN, pacer_of
+from agentrealm_adk.survival import known_hostile
 from agentrealm_adk.world import DOORS, Pos, WorldModel, chebyshev
 
 from .actions import Action, Stop, Walk
@@ -120,7 +121,8 @@ class Body:
     def state(self) -> State:
         armed = self.world.armed_code
         return State.of(self.world, self.tick_hz, self.last_attack_tick, attack_cooldown_ticks(armed, self.tick_hz),
-                        self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick)
+                        self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick,
+                        frozenset(self.memory.townsfolk))
 
     def step_ticks(self) -> int:
         return ticks_per_step(tick_rate_hz=self.tick_hz, movement_speed_milli=max(1, self.world.movement_speed))
@@ -350,6 +352,8 @@ class Body:
         if w.map_id is None or w.pos is None:
             return
         for e in w.entities:
+            if e.kind == "npc" and e.pos in w.view.safe and not e.is_boss and not known_hostile(w, e):
+                mem.saw_in_town(e.code)
             if e.kind == "supply" and e.gem_price and not w.is_our_drop(e.id):
                 mem.saw_for_sale(e.code, e.gem_price, w.map_id, e.pos)
             if e.kind == "npc" and e.is_boss and w.map_level:

@@ -123,7 +123,8 @@ class Equip:
 
 class EarnGems:
     """Field work: cut grass in the field the strategist named (around ``field``), or near us, for its gems
-    (Manual §16 How to make money). Grass a known hostile would reach first is not worked: it holds that ground."""
+    (Manual §16 How to make money). Hostiles on the field are combat's to weigh, by the approach's tactics: a
+    field they hold is reported held up by combat, not judged here."""
 
     name = "earn gems"
 
@@ -137,7 +138,7 @@ class EarnGems:
         safe = s.world.view.safe
         out = [p for p, block in s.world.view.tiles.items()
                if block == "grass" and p not in safe and chebyshev(p, center) <= FIELD_SEARCH
-               and place_key(s.map_id, p) not in mem.no_effect and not s.ground_held(p)]
+               and place_key(s.map_id, p) not in mem.no_effect]
 
         def worth(p: Pos) -> tuple:
             rate = mem.gems_per_break(s.map_id, p)
@@ -151,16 +152,14 @@ class EarnGems:
             return Work(tuple(cells), "cut grass for gems")
         if self.field is not None:
             return GoTo(ctx.state.map_id, self.field, "to the field")
-        return Explore("look for grass no hostile holds")
+        return Explore("look for grass")
 
     def failed(self, ctx: Ctx) -> str | None:
         s = ctx.state
         if "cut" not in travel.weapon_breaks(s):
             return "nothing we carry cuts grass"
         if self.field is not None and chebyshev(s.pos, self.field) <= FIELD_SEARCH and not self.cells(ctx):
-            holders = sorted({e.code for e in s.known_threats() if chebyshev(e.pos, self.field) <= FIELD_SEARCH + 6})
-            return f"the field around {self.field[0]},{self.field[1]} is " + (
-                f"held by {', '.join(holders)}" if holders else "out of cuttable grass")
+            return f"the field around {self.field[0]},{self.field[1]} is out of cuttable grass"
         return None
 
     def minutes_since_gem(self, ctx: Ctx) -> float:

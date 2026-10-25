@@ -139,13 +139,12 @@ class StayAliveTest(unittest.TestCase):
 
 
 class FieldTest(unittest.TestCase):
-    def test_grass_a_snotling_would_reach_first_is_not_worked(self):
-        w = world(["g" * 21] * 11, at=(10, 5))
+    def test_a_hostile_on_the_field_is_combats_to_weigh_not_the_fields(self):
+        w = world(OPEN, at=(5, 5))
         w.entities = [Entity("npc", 101, (2, 5), "snotling")]
         w.hostile_types.add(("npc", "snotling"))
-        cells = skills.EarnGems().cells(ctx_of(w))
-        self.assertTrue(cells)
-        self.assertTrue(all(c[0] > 6 for c in cells), cells)
+        cells = skills.EarnGems((3, 5)).cells(ctx_of(w))
+        self.assertIn((3, 5), cells)
 
     def test_the_strategists_field_is_where_she_works(self):
         w = world(["g" * 41] * 11, at=(5, 5))
@@ -265,11 +264,24 @@ class CombatTest(unittest.TestCase):
 
 
 class TownsfolkTest(unittest.TestCase):
-    def test_a_townsperson_walking_about_is_no_threat(self):
+    def moving(self, code: str) -> WorldModel:
         w = world(OPEN)
-        w.entities = [Entity("npc", 5, (6, 5), "pond_fisher")]
+        w.entities = [Entity("npc", 5, (6, 5), code)]
         w.npc_still[5] = ((6, 5), w.tick)
-        self.assertEqual(harm.threats_near(ctx_of(w).state), [])
+        return w
+
+    def test_a_type_seen_in_town_walking_about_is_no_threat(self):
+        s = State.of(self.moving("pond_fisher"), 10, None, 8, None, 4, townsfolk=frozenset({"pond_fisher"}))
+        self.assertEqual(harm.threats_near(s), [])
+
+    def test_a_moving_type_never_seen_in_town_is_a_threat_before_it_swings(self):
+        self.assertEqual([e.code for e in harm.threats_near(ctx_of(self.moving("chugbug")).state)], ["chugbug"])
+
+    def test_one_that_swung_is_hostile_even_if_seen_in_town(self):
+        w = self.moving("snotling")
+        w.hostile_types.add(("npc", "snotling"))
+        s = State.of(w, 10, None, 8, None, 4, townsfolk=frozenset({"snotling"}))
+        self.assertEqual(len(harm.threats_near(s)), 1)
 
 
 class TerritoryTest(unittest.TestCase):

@@ -53,7 +53,7 @@ Goal tests (the executive checks them; pick the one that says the dependency is 
 - boss_seen: the level's boss is in view.
 
 Methods (what an approach does):
-- earn_gems {x?, y?}: cut grass in the field around x,y (near Lou when left out), taking the drops. Grass a known hostile would reach first is skipped.
+- earn_gems {x?, y?}: cut grass in the field around x,y (near Lou when left out), taking the drops. Hostiles there are fought or not by combat, by your tactics; when combat will not take them on, the approach fails as held up.
 - buy {item, x?, y?}: walk onto a known shelf selling it (the nearest, or the one at x,y). Needs the gems; only shelves listed below can be named.
 - equip {item}: arm or wear a carried item.
 - travel {x, y, map?, door?}: walk there, across maps by known doors; door true to go through the door at x,y.

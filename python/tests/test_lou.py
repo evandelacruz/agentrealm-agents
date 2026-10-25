@@ -271,6 +271,14 @@ class CombatTest(unittest.TestCase):
         action = engines.Combat().swing_at(ctx_of(w), w.entities[0])
         self.assertEqual((action.verb, action.code), ("Wear", "bronze_mail"))
 
+    def test_hit_unseen_with_no_safe_ground_known_she_heads_for_town(self):
+        w = world(OPEN, health=5)
+        s = State.of(w, 10, None, 8, None, 4, last_hit_tick=w.tick - 5)
+        ctx = Ctx(s, Memory(), None, NavMemory(), (MAP, (1, 1)), Levers(), {})
+        combat = engines.Combat()
+        combat.applies(ctx, None)
+        self.assertIsInstance(combat.act(ctx, None), actions.Walk)
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

@@ -203,7 +203,11 @@ class Combat:
             away = travel.to_safe(ctx)
             if away:
                 return walk_or_break(ctx, away, "to safe ground")
-            run = flee_run(s.world, harm.threats_near(s), set(), _first_away(ctx))
+            threats = harm.threats_near(s)
+            if not threats:  # hit by something unseen, no safe ground known: head for town, where it is
+                home = travel.to_place(ctx, ctx.town[0], ctx.town[1]) if ctx.town is not None else None
+                return walk_or_break(ctx, home or (), "toward town") or actions.Stop("nowhere known to go")
+            run = flee_run(s.world, threats, set(), _first_away(ctx))
             return actions.Walk(tuple(run), "away") if run else actions.Stop("cornered")
         if e.kind == "drink":
             self.now = None

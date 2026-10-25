@@ -94,6 +94,8 @@ class Approach:
             return skills.Buy(a["item"], _seller(ctx, a))
         if m == "equip":
             return skills.Equip(a["item"])
+        if m == "wait":
+            return skills.Wait(float(a.get("minutes", 3)))
         if m == "drink":
             return skills.DrinkPotion(a.get("item"))
         if m == "travel":
@@ -133,7 +135,7 @@ class Approach:
 
 
 METHODS = {
-    "earn_gems": [], "buy": ["item"], "equip": ["item"], "drink": [], "travel": ["x", "y"], "explore": [],
+    "earn_gems": [], "buy": ["item"], "equip": ["item"], "drink": [], "wait": [], "travel": ["x", "y"], "explore": [],
     "break_open": ["x", "y", "item"], "forage": [], "recover": [], "find_boss": [], "fight_boss": [],
 }
 

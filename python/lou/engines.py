@@ -168,6 +168,10 @@ class Combat:
             return False
         s = ctx.state
         threats = harm.threats_near(s)
+        if s.hit_unseen(UNSEEN_HIT_TICKS) and s.health <= bar(ctx, None) and best_potion(ctx) is not None \
+                and (self.now is None or self.now.kind != "drink"):
+            self.now = self.make(ctx, "drink", None, "an attacker out of sight")  # at the bar: drink, then back off
+            return True
         if s.hit_unseen(UNSEEN_HIT_TICKS) and (self.now is None or self.now.kind != "back_off"):
             ctx.memory.note(f"hit by an attacker out of sight near {s.pos[0]},{s.pos[1]}; backing off")
             self.now = self.make(ctx, "back_off", None, "an attacker out of sight")

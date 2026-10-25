@@ -28,6 +28,7 @@ from adk3.core.ledger import Ledger
 from adk3.core.loop import Run, Settings
 from adk3.realm.body import Body
 from adk3.realm.memory import Memory
+from adk3.realm import value
 from adk3.realm.value import Levers
 
 from .agent import Lou
@@ -96,6 +97,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
         print(f"{cfg.profile} ({cid}): {e}", file=sys.stderr)
         return 2
     levers = levers_of(cfg)
+    value.use_world(cfg.world)
     print(f"world {world.get('code')} at {body.tick_hz}Hz, {world.get('level_count')} levels; levers {levers}")
     lou = Lou(body, levers, strategist, state_dir / f"{cfg.profile}.{cid}.lou.jsonl")
     strategist.record = lou.record

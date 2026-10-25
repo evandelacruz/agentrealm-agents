@@ -46,9 +46,19 @@ class Levers:
         return self.greed / 5
 
 
+WORLD: str | None = None  # the world played: prices are that world's (``use_world``)
+
+
+def use_world(code: str) -> None:
+    """Price everything in this world's gems: the reference lists a price per world, and the cheapest across
+    worlds (a sandbox potion for 2) undervalues everything here."""
+    global WORLD
+    WORLD = code
+
+
 def item(code: str) -> float:
-    """An item's worth: its listed price (the Supplies reference), 0 when it is not sold."""
-    return float(supplies.list_price(code) or 0)
+    """An item's worth: its listed price in the world played (the Supplies reference), 0 when it is not sold there."""
+    return float(supplies.list_price(code, WORLD) or 0)
 
 
 def health() -> float:

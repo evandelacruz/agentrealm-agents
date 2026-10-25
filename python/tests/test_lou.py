@@ -17,7 +17,7 @@ from agentrealm_adk.world import Entity, MapView, WorldModel
 
 from adk3.core.executive import Executive
 from adk3.core.loop import Briefing
-from adk3.realm import actions, harm
+from adk3.realm import actions, harm, value
 from adk3.realm.context import Ctx
 from adk3.realm.memory import Clue, Death, Memory
 from adk3.realm.state import State
@@ -28,6 +28,7 @@ from lou.orders import Do, GoTo, Work
 from lou.strategist import describe
 
 MAP = 1
+value.use_world("olympuff")  # price in the world Lou plays, as her run does
 
 
 def world(rows: list[str], at=(5, 5), health=10, gems=0, armed="pocket_knife", safe=()) -> WorldModel:
@@ -86,10 +87,26 @@ class PublicationTest(unittest.TestCase):
 
 class DrinkTest(unittest.TestCase):
     def test_a_drink_approach_drinks_the_carried_potion(self):
-        w = world(OPEN, health=4)
+        w = world(OPEN, health=2)
         w.held_supplies = [InventorySupply(9, "small_potion")]
         p = publish.publication({"goal": {"test": "health", "n": 9}, "approach": {"method": "drink"}}, ctx_of(w))
         self.assertIsInstance(p.approach.skill(ctx_of(w)).order(ctx_of(w)).action, actions.Drink)
+
+
+class WaitAndDrinkWorthTest(unittest.TestCase):
+    def test_a_wait_approach_stands_still_and_never_stalls(self):
+        ctx = ctx_of(world(OPEN))
+        p = publish.publication({"goal": {"test": "gems", "n": 99}, "approach": {"method": "wait", "minutes": 2}}, ctx)
+        skill = p.approach.skill(ctx)
+        self.assertIsInstance(skill.order(ctx).action, actions.Stop)
+        self.assertIsNone(p.approach.failed(ctx, skill, 90.0, 0.0))
+
+    def test_a_potion_at_near_full_health_is_not_drunk(self):
+        w = world(OPEN, health=8)
+        w.held_supplies = [InventorySupply(9, "small_potion")]
+        self.assertIn("wastes it", skills.DrinkPotion().failed(ctx_of(w)))
+        w.health = 2
+        self.assertIsNone(skills.DrinkPotion().failed(ctx_of(w)))
 
 
 class ExecutiveTest(unittest.TestCase):
@@ -278,6 +295,15 @@ class CombatTest(unittest.TestCase):
         combat = engines.Combat()
         combat.applies(ctx, None)
         self.assertIsInstance(combat.act(ctx, None), actions.Walk)
+
+    def test_hit_unseen_at_the_bar_with_a_potion_she_drinks_first(self):
+        w = world(OPEN, health=3)
+        w.held_supplies = [InventorySupply(9, "small_potion")]
+        s = State.of(w, 10, None, 8, None, 4, last_hit_tick=w.tick - 5)
+        ctx = Ctx(s, Memory(), None, NavMemory(), (MAP, (1, 1)), Levers(), {})
+        combat = engines.Combat()
+        combat.applies(ctx, None)
+        self.assertIsInstance(combat.act(ctx, None), actions.Drink)
 
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
@@ -527,6 +553,12 @@ class ParkTest(unittest.TestCase):
         self.assertIsNone(Lou.park(None, ctx_of(w)))
 
 
+class PriceTest(unittest.TestCase):
+    def test_items_are_priced_in_the_world_played(self):
+        self.assertEqual(value.item("small_potion"), 10.0)
+        self.assertEqual(value.health(), 1.0)
+
+
 class MemoryTest(unittest.TestCase):
     def test_it_keeps_everything_across_runs(self):
         path = Path(tempfile.mkdtemp()) / "m.json"
@@ -587,6 +619,13 @@ class StrategistBriefTest(unittest.TestCase):
         text = describe(Briefing(ctx, "starting", "nothing", [], [], 0.0), {"chain": ["beat the world", "hold 15 gems"]})
         for part in ("seek the door by the old oak", "1:9,9", "hold 15 gems", "backed off from snotling", "stock back in about"):
             self.assertIn(part, text)
+
+    def test_the_brief_shows_where_field_work_paid(self):
+        mem = Memory()
+        mem.broke(MAP, (3, 3), gems=2)
+        text = describe(Briefing(ctx_of(world(OPEN), mem), "x", "nothing", [], [], 0.0))
+        self.assertIn("2 gems in 1 breaks", text)
+        self.assertIn("Ground seen on this map", text)
 
     def test_a_reaction_note_is_news_once(self):
         mem = Memory()

@@ -19,6 +19,7 @@ from agentrealm_adk.world import chebyshev
 
 from adk3.core.loop import Briefing
 from adk3.realm.context import Ctx
+from adk3.realm.memory import REGION
 
 MANUAL = ("/docs/manual / 3. how the world works", "/docs/manual / 11. game rules", "/docs/manual / 16. playing the world")
 SHOPS_SHOWN = 30
@@ -56,10 +57,11 @@ Methods (what an approach does):
 - earn_gems {x?, y?}: cut grass in the field around x,y (near Lou when left out), taking the drops. Hostiles there are fought or not by combat, by your tactics; when combat will not take them on, the approach fails as held up.
 - buy {item, x?, y?}: walk onto a known shelf selling it (the nearest, or the one at x,y). Needs the gems; only shelves listed below can be named.
 - equip {item}: arm or wear a carried item. Arming a potion does not drink it.
-- drink {item?}: drink a carried potion now (the smallest when no item is named). Combat also drinks at the bar in a fight; this is for healing outside one.
+- drink {item?}: drink a carried potion now (the smallest when no item is named). Refused when the health it gives is worth less than the potion (near full health). Combat also drinks at the bar in a fight; this is for healing outside one.
 - travel {x, y, map?, door?}: walk there, across maps by known doors; door true to go through the door at x,y.
 - explore {x?, y?}: walk to unseen ground, toward x,y when given. Pair it with a found or seller goal.
 - break_open {x, y, item, map?}: arm the item and use it on the block at x,y (a locked or hidden entrance, an odd block).
+- wait {minutes?}: stand where she is until the goal is met (a shelf restocking, a hostile moving off), up to minutes (default 3). Reactions still run.
 - forage: eat food in view, cut bushes for berries. recover: walk to her death chest and take everything back.
 - find_boss: inside a level, take doors not taken and explore until the boss is in view. fight_boss: the boss fight on its clock.
 
@@ -111,6 +113,31 @@ class Strategist:
             raise ValueError("the reply is not a JSON object")
         self.last = answer
         return answer
+
+
+REGIONS_SHOWN = 12
+
+
+def regions(ctx: Ctx) -> list[str]:
+    """Where her own field work has paid, region by region, and how far each is from town, so where to work is
+    judged on what she has seen (the Manual gives the rates by ring)."""
+    mem, s = ctx.memory, ctx.state
+    town = ctx.town[1] if ctx.town is not None else s.pos
+    rows = []
+    for key, y in mem.yields.items():
+        map_id, xy = key.split(":")
+        rx, ry = (int(v) for v in xy.split(","))
+        center = (rx * REGION + REGION // 2, ry * REGION + REGION // 2)
+        if y.breaks:
+            rows.append((chebyshev(center, town), f"- around {map_id}:{center[0]},{center[1]} ({chebyshev(center, town)} blocks"
+                         f" from town): {y.gems} gems in {y.breaks} breaks"))
+    seen = [p for p in s.world.view.tiles]
+    out = ["Where our field work has paid (nearest town first):"] + [r for _, r in sorted(rows)[:REGIONS_SHOWN]]
+    if seen:
+        xs, ys = [p[0] for p in seen], [p[1] for p in seen]
+        out.append(f"Ground seen on this map: x {min(xs)} to {max(xs)}, y {min(ys)} to {max(ys)} ({len(seen)} blocks);"
+                   f" town at {town[0]},{town[1]}. Ground farther out is unseen.")
+    return out
 
 
 RESTOCK_SECONDS = 120  # stock returns 2 minutes after a sale (Manual §11 Shops)
@@ -179,6 +206,7 @@ def describe(b: Briefing, last: dict[str, Any] | None = None) -> str:
     breaks = sum(y.breaks for y in mem.yields.values())
     gems = sum(y.gems for y in mem.yields.values())
     lines += ["", f"## Income: our breaks dropped {gems} gems in {breaks} breaks"]
+    lines += regions(ctx)
     lines += [f"- {k.breaks} kills of {code} dropped {k.gems} gems" for code, k in mem.kills.items()]
     if mem.deaths:
         lines += ["", "## Deaths (newest last)"]

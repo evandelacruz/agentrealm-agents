@@ -485,7 +485,13 @@ class Body:
             elif kind == "Damaged":
                 if ev.get("source_kind") == "npc":
                     self.last_hit_tick = w.tick
-                self.out(f"hit for {ev.get('amount')} by {ev.get('source_kind')} {ev.get('source_id', '')}")
+                where = ""
+                if ev.get("source_kind") == "npc" and w.pos is not None:
+                    src = next((e for e in w.entities if e.kind == "npc" and str(e.id) == str(ev.get("source_id"))), None)
+                    safe = "on safe ground" if w.pos in w.view.safe else "off safe ground"
+                    where = (f" ({src.code} in view, {chebyshev(src.pos, w.pos)} away; we are {safe})" if src is not None
+                             else f" (not in view; we are {safe})")
+                self.out(f"hit for {ev.get('amount')} by {ev.get('source_kind')} {ev.get('source_id', '')}{where}")
         if ceremony:
             number = int(ceremony.get("level_number", 0))
             self.out(f"cleared level {number}")

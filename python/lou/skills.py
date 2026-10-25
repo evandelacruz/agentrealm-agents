@@ -14,7 +14,7 @@ from agentrealm_adk import supplies
 from agentrealm_adk.knowledge_maps import door_warp_known, iter_doors
 from agentrealm_adk.world import Pos, chebyshev
 
-from adk3.realm import actions, travel
+from adk3.realm import actions, travel, value
 from adk3.realm.context import Ctx
 from adk3.realm.memory import Death, Memory, Sighting, place_key
 from adk3.realm.state import State
@@ -71,10 +71,41 @@ class DrinkPotion:
         return None if p is None else Do(actions.Drink(p.id, p.where == "armed", p.code), ctx.state.pos, reach=0)
 
     def failed(self, ctx: Ctx) -> str | None:
-        return None if self.potion(ctx) is not None else f"we carry no {self.code or 'potion'}"
+        p = self.potion(ctx)
+        if p is None:
+            return f"we carry no {self.code or 'potion'}"
+        s = ctx.state
+        heal = supplies.heal_of(p.code)
+        gain = min(heal, s.max_health - s.health)
+        weighted = value.health_change(gain, s.health, s.max_health) / value.health()  # health, weighted by how low
+        if weighted < heal:
+            return (f"drinking {p.code} now wastes it: it heals {heal}, and at {s.health}/{s.max_health} only {gain} counts;"
+                    f" eat food instead, or keep it for a fight")
+        return None
 
     def progress(self, ctx: Ctx) -> float:
         return float(ctx.state.health)
+
+
+class Wait:
+    """Stand where she is until the goal is met (a shelf restocks, a hostile moves on), up to ``minutes``. The
+    reactions still run: a threat is still met, food in view still eaten."""
+
+    name = "wait"
+
+    def __init__(self, minutes: float):
+        self.minutes = minutes
+        self.began = time.time()
+
+    def order(self, ctx: Ctx) -> Order:
+        return Do(actions.Stop("waiting"), ctx.state.pos, reach=0)
+
+    def failed(self, ctx: Ctx) -> str | None:
+        waited = (time.time() - self.began) / 60
+        return f"waited {self.minutes:g} minutes and the goal is still not met" if waited >= self.minutes else None
+
+    def progress(self, ctx: Ctx) -> float:
+        return time.time()  # waiting is the work: it never stalls
 
 
 class Seek:

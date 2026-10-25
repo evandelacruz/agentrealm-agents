@@ -33,6 +33,7 @@ KILL_DROP = 0.3  # gems a kill drops before we have our own kills of a type: the
 CLOSE_CALL = 1.0  # gems: options this close to the best are rolled for, not taken by strict order
 BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Bosses and levels); the real one is not served
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
+DETOUR_DICE = 0  # one fixed set of dice for pricing detours, so the same detour is priced the same each tick
 
 
 # What the reactions share.
@@ -388,26 +389,32 @@ class Opportunities:
         return self.pick(ctx)
 
     def pick(self, ctx: Ctx) -> Action | None:
+        """The chance worth most net of its detour: its extra steps at what time is worth, and, with hostiles
+        near, the danger on the way, priced like a combat option on fixed dice (so the pick does not flip as
+        she steps on and off safe ground)."""
         s = ctx.state
         if self._tick == s.tick:
             return self._pick
         self._tick, self._pick = s.tick, None
-        if harm.threats_near(s) and not s.on_safe_ground:
-            return None
         reach = ctx.tactics.get("detour")  # the approach's limit on how far to stray, in blocks
         per_step = step_worth(ctx)
+        price = Price(ctx) if harm.threats_near(s) else None
         best, best_net = None, 0.0
         for c in near_first(ctx, chances(ctx)):
             if reach is not None and chebyshev(s.pos, c.at) - c.reach > float(reach):
                 continue
             if chebyshev(s.pos, c.at) <= c.reach:
-                net, action = c.worth, c.action
+                path, net, action = (), c.worth, c.action
             else:
                 path = travel.to_beside(ctx, c.at, c.reach)
                 if path is None:
                     continue
                 net, action = c.worth - len(path) * per_step, walk_or_break(ctx, path, c.why)
-            if net > best_net and action is not None:
+            if net <= best_net or action is None:
+                continue
+            if price is not None:
+                net -= price.risk(harm.odds(s, harm.Course(tuple(path)), seed=DETOUR_DICE, territory=ctx.memory.territory))
+            if net > best_net:
                 best, best_net = action, net
         self._pick = best
         return best

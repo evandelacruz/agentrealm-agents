@@ -331,6 +331,12 @@ class OpportunitiesTest(unittest.TestCase):
         w.entities = [Entity("supply", 7, (6, 5), "gem")]
         self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Take)
 
+    def test_a_gem_beside_a_pack_is_not_worth_the_walk(self):
+        w = world(OPEN, at=(1, 5), safe={(1, 5), (0, 5), (1, 4)})
+        w.entities = [Entity("supply", 7, (8, 5), "gem")] + [Entity("npc", 100 + i, p, "chugbug") for i, p in enumerate([(9, 4), (9, 5), (9, 6), (8, 6)])]
+        w.hostile_types.add(("npc", "chugbug"))
+        self.assertIsNone(engines.Opportunities().pick(ctx_of(w)))
+
     def test_an_unread_sign_is_read_and_a_read_one_is_not(self):
         w = world(OPEN)
         w.view.readable[(7, 5)] = True

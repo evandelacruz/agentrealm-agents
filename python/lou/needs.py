@@ -16,11 +16,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from agentrealm_adk import supplies
 from agentrealm_adk.world import DOORS, chebyshev
 
 from adk3.core.needs import Check
 from adk3.realm.context import Ctx
-from adk3.realm.memory import Entrance, place_key
+from adk3.realm.memory import Entrance
 
 from . import skills
 
@@ -99,6 +100,7 @@ class ClearLevel:
     """The level behind one entrance: ready for it, reach its boss, beat the boss (Manual §11 Bosses and levels)."""
 
     entrance: str  # the entrance's place key
+    ordered = True  # ready, then through the door, then the boss
 
     @property
     def key(self) -> str:
@@ -106,8 +108,7 @@ class ClearLevel:
 
     @property
     def title(self) -> str:
-        e = self.entrance
-        return f"clear the level behind {e}"
+        return f"clear the level behind {self.entrance}"
 
     def check(self, ctx: Ctx) -> Check:
         e = ctx.memory.entrances.get(self.entrance)
@@ -376,8 +377,8 @@ class StayAlive:
     key = "alive"
     title = "stay alive"
 
-    def floor(self, ctx: Ctx) -> int:
-        return int(ctx.tactics.get("heal_below", max(3, ctx.state.max_health // 3)))
+    def floor(self, ctx: Ctx) -> float:
+        return ctx.levers.heal_below * ctx.state.max_health
 
     def check(self, ctx: Ctx) -> Check:
         s = ctx.state
@@ -421,9 +422,6 @@ def _hidden(e: Entrance) -> bool:
 
 
 def _equippable(code: str) -> bool:
-    from agentrealm_adk import supplies
     row = supplies.row(code)
     return row is not None and row.supply_class in ("weapon", "armor", "accessory")
 
-
-__all__ = ["BeatTheWorld", "place_key"]

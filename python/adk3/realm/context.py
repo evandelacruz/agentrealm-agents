@@ -10,6 +10,7 @@ from agentrealm_adk.world import Pos
 
 from .memory import Memory
 from .state import State
+from .value import Levers
 
 
 @dataclass
@@ -19,6 +20,7 @@ class Ctx:
     kb: KnowledgeBase | None  # tiles and door warps, for travel
     nav: Any  # the ADK's navigation memory: what rejections taught the map
     town: tuple[int, Pos] | None  # the town's map and one block in it (GetWorld)
+    levers: Levers = field(default_factory=Levers)  # the agent's temperament, from its profile
     judgments: dict[str, Any] = field(default_factory=dict)  # the strategist's, by need key
     tactics: dict[str, Any] = field(default_factory=dict)  # the strategist's, by engine name
 

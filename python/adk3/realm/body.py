@@ -38,6 +38,7 @@ from agentrealm_adk.world import DOORS, Pos, WorldModel, chebyshev
 from .actions import Action, Stop, Walk
 from .memory import Attempt, Clue, Death, Memory
 from .state import State
+from .value import gems_of
 
 SELF_EVERY = 60  # windows between self reads
 ENTITIES_EVERY = 5  # ticks between entity reads
@@ -59,6 +60,7 @@ class Body:
         self.walk_left: list[Pos] = []  # cells the running walk has still to enter
         self.not_before = 0.0
         self.last_attack_tick: int | None = None
+        self.last_speech_tick: int | None = None
         self.events: list[dict] = []  # this round trip's events
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
         self.cuts: dict[Pos, int] = {}  # blocks we broke on this map -> the tick, waiting to see a drop
@@ -114,7 +116,7 @@ class Body:
     def state(self) -> State:
         armed = self.world.armed_code
         return State.of(self.world, self.tick_hz, self.last_attack_tick, attack_cooldown_ticks(armed, self.tick_hz),
-                        self.nav.last_step_tick, self.step_ticks())
+                        self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick)
 
     def step_ticks(self) -> int:
         return ticks_per_step(tick_rate_hz=self.tick_hz, movement_speed_milli=max(1, self.world.movement_speed))
@@ -264,6 +266,8 @@ class Body:
                     return
             elif is_weapon_swing(intent, w.armed_code) and outcome == "applied":
                 self.last_attack_tick = tick
+            elif intent.get("verb") in ("Say", "Broadcast"):
+                self.last_speech_tick = tick
 
     def drop_queue(self) -> None:
         nav = self.nav
@@ -345,7 +349,7 @@ class Body:
             if e.kind == "supply" and e.gem_price and not w.is_our_drop(e.id):
                 mem.saw_for_sale(e.code, e.gem_price, w.map_id, e.pos)
             if e.kind == "supply" and e.pos in self.cuts and w.tick - self.cuts[e.pos] <= CUT_DROP_TICKS:
-                mem.dropped_gems(w.map_id, e.pos, _gem_count(e.code))
+                mem.dropped_gems(w.map_id, e.pos, gems_of(e.code))
                 del self.cuts[e.pos]
             if e.kind == "npc" and e.is_boss and w.map_level:
                 level = mem.level(w.map_level)
@@ -396,9 +400,10 @@ class Body:
                         self.surprises.append(f"a {code} told us something new")
             elif kind == "Died":
                 at = w.pos or (0, 0)
+                carried = [x.code for x in w.held_supplies] + ([w.armed_code] if w.armed_code else []) + list(w.worn_codes.values())
                 mem.died(Death(time.time(), w.map_id or 0, *at, killer=self.last_hitter(),
                                chest_id=ev.get("chest_id"), chest_map=ev.get("map_id"), chest_x=ev.get("x"),
-                               chest_y=ev.get("y")))
+                               chest_y=ev.get("y"), items=[c for c in carried if c != "pocket_knife"]))
                 self.out(f"died, killed by {self.last_hitter() or 'something'}")
                 self.surprises.append("we died")
                 self.end_boss_fight("died")
@@ -431,8 +436,3 @@ class Body:
         out, self.surprises = self.surprises, []
         return out
 
-
-def _gem_count(code: str) -> int:
-    """Gems a gem supply adds: ``gem_cache_7`` seven, a plain ``gem`` one (Manual §11 Supplies)."""
-    tail = code.rsplit("_", 1)[-1]
-    return int(tail) if tail.isdigit() else (1 if code == "gem" else 0)

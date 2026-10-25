@@ -44,10 +44,11 @@ class State:
     level_count: int | None
     attack_ready: bool
     move_ready_in: int  # ticks until the next step may land
+    speech_ready: bool = True  # one Say or Broadcast a second (Manual §11 Speech)
 
     @classmethod
     def of(cls, w: WorldModel, tick_hz: int, last_attack_tick: int | None, attack_ticks: int,
-           last_step_tick: int | None, step_ticks: int) -> State:
+           last_step_tick: int | None, step_ticks: int, last_speech_tick: int | None = None) -> State:
         carried = [Carried(s.id, s.code, "held") for s in w.held_supplies]
         if w.armed_code and w.armed_id is not None:
             carried = [c for c in carried if c.id != w.armed_id] + [Carried(w.armed_id, w.armed_code, "armed")]
@@ -61,6 +62,7 @@ class State:
             gems=w.gems or 0, alive=w.alive and w.placed and w.pos is not None, carried=tuple(carried),
             levels_cleared=tuple(sorted(w.levels_cleared)), level_count=w.level_count,
             attack_ready=attack_ready, move_ready_in=move_in,
+            speech_ready=last_speech_tick is None or w.tick - last_speech_tick > tick_hz,
         )
 
     # Self.
@@ -107,6 +109,10 @@ class State:
         if e.kind != "npc":
             return False
         return known_hostile(self.world, e) or self.world.npc_still_ticks(e) < STILL_TICKS
+
+    def fights(self, e: Entity) -> bool:
+        """Of a type seen to fight: it has swung at us, hit us or died in view (``agentrealm_adk.survival``)."""
+        return e.kind == "npc" and known_hostile(self.world, e)
 
     def threats(self) -> list[Entity]:
         return [e for e in self.npcs() if self.is_threat(e)]

@@ -1,6 +1,6 @@
 # v3 agent: plan
 
-Status: plan, agreed with Evan. Being built. The draft code under `python/adk3/` and `python/lou/` came before this plan and is reworked to it, not kept as is.
+Status: built (`python/adk3/`, `python/lou/`); first live run next. The draft code under `python/adk3/` and `python/lou/` came before this plan and is reworked to it, not kept as is.
 
 Sources read in full before writing this: the Manual (all sixteen sections), the API rules, Create a Character Agent, the State machine guide, the Changelog, and `docs/GAME_NOTES.md`.
 
@@ -145,6 +145,20 @@ A new reactive rule is one row in that list, priced like the rest, never a branc
 So a fight with good odds and a small reward is taken, one with a real chance of death is not, and walking past a slow hostile is taken when the place ahead is worth the hit.
 
 Navigation replans every decision from what is known, with unseen ground priced as probably open, and sends only a few steps at a time, so an obstacle that comes into view is routed around on the next decision.
+
+## Levers
+
+An agent's temperament is a few numbers in its profile (`[levers]` in `characters/lou.toml`), each feeding one price that already exists (`adk3/realm/value.py`). Two agents on this kit differ in their levers, not their code. The strategist sees them and works within them; it never changes them.
+
+| Lever | Feeds | Lou |
+|---|---|---|
+| `risk` (0 to 10) | how heavily a chance of death weighs in every fight and detour | 5 |
+| `life_worth` (gems) | what a death costs, besides the gear it drops | 40 |
+| `time_worth` (gems a minute) | what time is worth, so detours and backing off cost something | 6 |
+| `curiosity` (0 to 10) | what a sign, a helper or unseen ground is worth stopping for | 5 |
+| `greed` (0 to 10) | what loot in view is worth stopping for | 5 |
+| `heal_below` (share of health) | when she heals before going on | 0.4 |
+| `patience` (seconds) | how long a skill may make no progress before it has failed | 60 |
 
 ## The measure
 

@@ -6,6 +6,10 @@ skill). The graph is walked from the objective each decision: a met need
 is passed over, an unmet one is entered, and the first need with nothing
 left under it to work is the **focus**, worked by its skill.
 
+Parts are either **steps** (``ordered``: each must be met before the next
+is worked, as a level's: ready, then through the door, then the boss) or
+**choices** (any order: the first that can be worked now is).
+
 A need whose skill failed is **blocked** with why, and the walk goes on
 past it to its next sibling. The block lifts when what the agent knows
 changes (a new fact in memory, a new item, a new map), so a failure is
@@ -65,6 +69,11 @@ class Need(Protocol[Ctx]):
         """The skill that works it once its parts are met, or None when nothing can."""
 
 
+def ordered(need: Need) -> bool:
+    """Its parts are steps, each met before the next is worked."""
+    return bool(getattr(need, "ordered", False))
+
+
 @dataclass
 class Block:
     why: str
@@ -105,6 +114,8 @@ class Graph(Generic[Ctx]):
             path = self._visit(part, ctx, seen)
             if path:
                 return [need, *path]
+            if ordered(need) and part.check(ctx).status is not Status.MET:
+                return None  # a step that cannot be worked now holds the steps after it
         if any(p.check(ctx).status is not Status.MET for p in parts):
             return None  # a part is unmet and none of them can be worked now
         return [need] if need.skill(ctx) is not None else None

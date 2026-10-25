@@ -126,6 +126,7 @@ class Death:
     chest_map: int | None = None
     chest_x: int | None = None
     chest_y: int | None = None
+    items: list[str] = field(default_factory=list)  # what the chest holds: everything carried but gems and the starting kit
 
 
 @dataclass

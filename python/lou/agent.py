@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from adk3.core.engines import Judge
 from adk3.core.loop import Briefing
 from adk3.core.needs import Graph
 from adk3.realm import milestones
@@ -16,7 +15,6 @@ from adk3.realm.context import Ctx
 from adk3.realm.value import Levers
 
 from . import registry
-from .engines import SWITCH_MARGIN, Scorer
 from .strategist import Strategist, adopt
 
 
@@ -25,8 +23,7 @@ class Lou:
                  out: Callable[[str], None] = print):
         self.body, self.levers, self.strategist, self.out = body, levers, strategist, out
         self.graph = Graph(registry.ROOT)
-        self.proposers = registry.PROPOSERS
-        self.judge = Judge(Scorer(), SWITCH_MARGIN)
+        self.engines = registry.ENGINES
         self.judgments: dict[str, Any] = {}
         self.tactics: dict[str, Any] = {}
         self.trace = open(trace, "a", buffering=1)

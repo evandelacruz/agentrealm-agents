@@ -2,7 +2,7 @@
 
 - Need kinds (``lou.needs``): what the objective requires; the graph grows from ``ROOT``.
 - Skills (``lou.skills``): the procedures a need is worked by; each need kind names its own.
-- Proposers (``PROPOSERS``): real-time play; each offers options, one judge takes the best.
+- Engines (``ENGINES``): real-time play, most urgent first.
 - Opportunities (``OPPORTUNITIES``): the reactive rules, each priced in gems.
 - Milestones (``adk3.realm.milestones``): what counts as progress.
 """
@@ -12,5 +12,5 @@ from __future__ import annotations
 from . import engines, needs, opportunities
 
 ROOT = needs.BeatTheWorld()
-PROPOSERS = engines.PROPOSERS
+ENGINES = engines.ALL
 OPPORTUNITIES = opportunities.ALL

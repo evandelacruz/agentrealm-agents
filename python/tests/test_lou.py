@@ -20,7 +20,6 @@ from adk3.realm.context import Ctx
 from adk3.realm.memory import Clue, Death, Memory
 from adk3.realm.state import State
 from adk3.realm.value import Levers
-from adk3.core.engines import Judge
 from lou import engines, needs, opportunities
 from lou.orders import GoTo, Work
 from lou.registry import ROOT
@@ -54,16 +53,6 @@ def ctx_of(w: WorldModel, memory: Memory | None = None, levers: Levers | None = 
 
 
 OPEN = ["g" * 11] * 11
-
-
-def decide(ctx: Ctx, order=None):
-    """What the one judge takes, from every proposer."""
-    return Judge(engines.Scorer(), engines.SWITCH_MARGIN).choose(ctx, engines.PROPOSERS, order)
-
-
-def action_of(ctx: Ctx, order=None):
-    best = decide(ctx, order)
-    return best.option.action if best is not None else None
 
 
 class NeedsGraphTest(unittest.TestCase):
@@ -142,20 +131,20 @@ class CombatTest(unittest.TestCase):
         w = world(OPEN)
         self.snotlings(w, [(6, 5)])
         ctx = ctx_of(w)
-        choice = decide(ctx).option
+        choice = engines.Combat().choose(ctx, None)
         self.assertTrue(choice.name.startswith("fight"), choice.name)
 
     def test_a_pack_against_a_hurt_lou_is_not_fought(self):
         w = world(OPEN, health=2, safe={(0, 0), (1, 0), (0, 1)})
         self.snotlings(w, [(6, 5), (6, 6), (5, 6)])
-        choice = decide(ctx_of(w)).option
+        choice = engines.Combat().choose(ctx_of(w), None)
         self.assertFalse(choice.name.startswith("fight"), choice.name)
 
     def test_on_safe_ground_beside_a_pack_she_does_not_step_back_out_to_work(self):
         w = world(OPEN, health=6, safe={(5, 5), (4, 5), (4, 4), (5, 4)})
         self.snotlings(w, [(6, 6), (7, 5)])
-        choice = decide(ctx_of(w), Work(((7, 6),), "cut")).option
-        self.assertNotEqual(choice.key, ("work", (7, 6)))
+        choice = engines.Combat().choose(ctx_of(w), Work(((7, 6),), "cut"))
+        self.assertNotEqual(choice.name, "go on")
 
     def test_the_odds_count_deaths(self):
         w = world(OPEN, health=1)
@@ -186,7 +175,7 @@ class TravelTest(unittest.TestCase):
     def test_a_bush_in_the_way_is_cut(self):
         rows = ["wwwwwwwwwww", "wwwwwwwwwww", "ggggbgggggg", "wwwwwwwwwww"]
         ctx = ctx_of(world(rows, at=(3, 2)))
-        action = action_of(ctx, GoTo(MAP, (10, 2), "east"))
+        action = engines.Travel().act(ctx, GoTo(MAP, (10, 2), "east"))
         self.assertIsInstance(action, actions.UseOn)
         self.assertEqual((action.x, action.y), (4, 2))
 
@@ -195,7 +184,7 @@ class TravelTest(unittest.TestCase):
         mem = Memory()
         mem.changed_nothing(MAP, (4, 1))
         ctx = ctx_of(world(rows, at=(3, 1)), mem)
-        action = action_of(ctx, GoTo(MAP, (10, 1), "east"))
+        action = engines.Travel().act(ctx, GoTo(MAP, (10, 1), "east"))
         self.assertIsInstance(action, actions.Walk)
         self.assertNotIn((4, 1), action.path)
 
@@ -205,7 +194,7 @@ class ShelfTest(unittest.TestCase):
         w = world(OPEN, at=(2, 5))
         w.view.readable[(8, 5)] = True
         w.entities = [Entity("supply", 50 + i, p, "bronze_mail", gem_price=20) for i, p in enumerate([(7, 5), (7, 4), (7, 6)])]
-        action = action_of(ctx_of(w))
+        action = engines.Opportunities().pick(ctx_of(w))
         self.assertIsInstance(action, actions.Walk)
         self.assertNotIn(action.path[-1], {(7, 5), (7, 4), (7, 6)})
 
@@ -214,15 +203,15 @@ class OpportunitiesTest(unittest.TestCase):
     def test_a_gem_beside_her_is_taken(self):
         w = world(OPEN)
         w.entities = [Entity("supply", 7, (6, 5), "gem")]
-        self.assertIsInstance(action_of(ctx_of(w)), actions.Take)
+        self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Take)
 
     def test_an_unread_sign_is_read_and_a_read_one_is_not(self):
         w = world(OPEN)
         w.view.readable[(7, 5)] = True
         ctx = ctx_of(w)
-        self.assertIsInstance(action_of(ctx), actions.Read)
+        self.assertIsInstance(engines.Opportunities().pick(ctx), actions.Read)
         ctx.memory.read_sign(MAP, (7, 5))
-        self.assertIsNone(action_of(ctx))
+        self.assertIsNone(engines.Opportunities().pick(ctx))
 
     def test_food_waits_until_she_is_hurt_by_its_worth(self):
         w = world(OPEN, health=10)
@@ -235,7 +224,7 @@ class OpportunitiesTest(unittest.TestCase):
         w = world(OPEN)
         w.entities = [Entity("npc", 9, (9, 9), "town_helper")]
         w.npc_still[9] = ((9, 9), w.tick - 200)
-        self.assertIsInstance(action_of(ctx_of(w)), actions.Say)
+        self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Say)
 
 
 class MemoryTest(unittest.TestCase):

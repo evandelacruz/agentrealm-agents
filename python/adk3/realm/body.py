@@ -65,6 +65,7 @@ class Body:
         self.last_speech_tick: int | None = None
         self.events: list[dict] = []  # this round trip's events
         self.carried_alive: list[str] = []  # what we carried at the last decision alive
+        self.where_alive: tuple[int, Pos] = (0, (0, 0))
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
         self.cuts: dict[Pos, int] = {}  # blocks we broke on this map -> the tick, waiting to see a drop
         self.boss_fight: tuple[int, float] | None = None  # (level, when the fight began)
@@ -124,6 +125,8 @@ class Body:
         if self.world.inventory_read and self.world.alive:
             self.carried_alive = [x.code for x in self.world.held_supplies] + ([armed] if armed else []) \
                 + list(self.world.worn_codes.values())  # what a death would drop: the inventory resets by the Died event
+            if self.world.pos is not None and self.world.map_id is not None:
+                self.where_alive = (self.world.map_id, self.world.pos)  # where a death happens: unplaced by then
         return State.of(self.world, self.tick_hz, self.last_attack_tick, attack_cooldown_ticks(armed, self.tick_hz),
                         self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick,
                         frozenset(self.memory.townsfolk))
@@ -444,9 +447,9 @@ class Body:
                         self.out(f"{code} said: {ev['text']}")
                         self.surprises.append(f"a {code} told us something new")
             elif kind == "Died":
-                at = w.pos or (0, 0)
+                map_id, at = self.where_alive
                 carried = self.carried_alive
-                mem.died(Death(time.time(), w.map_id or 0, *at, killer=self.last_hitter(),
+                mem.died(Death(time.time(), map_id, *at, killer=self.last_hitter(),
                                chest_id=ev.get("chest_id"), chest_map=ev.get("map_id"), chest_x=ev.get("x"),
                                chest_y=ev.get("y"), items=[c for c in carried if c != "pocket_knife"]))
                 self.out(f"died, killed by {self.last_hitter() or 'something'}")

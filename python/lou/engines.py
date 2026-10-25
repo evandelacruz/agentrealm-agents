@@ -143,7 +143,7 @@ class Combat:
 
     - **fight** to the end, unless health reaches the bar: then drink if we carry a potion and fight on,
       else break off to safe ground and say so;
-    - **back off** to safe ground, then plan again from there: **hold**, or go on when the way is safe;
+    - **back off** to safe ground (the approach is held up), then plan again from there;
     - **go on** with the method, until we are hit or a new hostile turns up.
 
     Holding, or a back-off run until clear, means the approach cannot go on past these hostiles: it is
@@ -209,7 +209,9 @@ class Combat:
                 self.report(ctx, f"the fight with {e.target.code} is over")
             return gone
         if e.kind == "back_off":
-            return s.on_safe_ground  # safe: plan again from here (go on, or hold); clear ends it in ``applies``
+            if s.on_safe_ground:  # the way was held: the approach is held up, then plan again from here
+                ctx.memory.held_up_by(f"backed off from {e.why} near {s.pos[0]},{s.pos[1]}")
+            return s.on_safe_ground  # clear ends it in ``applies``
         if e.kind == "hold":
             return e.approach is not ctx.approach
         if e.kind == "go_on":

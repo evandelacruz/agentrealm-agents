@@ -214,7 +214,7 @@ class CombatTest(unittest.TestCase):
         self.assertIsInstance(action, actions.Walk)
         self.assertNotIn(action.path[-1], w.maps[MAP].safe)
 
-    def test_backed_off_onto_safe_ground_she_goes_on_when_the_way_is_safe(self):
+    def test_backed_off_onto_safe_ground_the_approach_is_held_up_and_she_plans_again(self):
         safe = {(x, y) for x in range(0, 6) for y in range(0, 11)}
         w = world(OPEN, at=(5, 5), safe=safe)
         self.snotlings(w, [(7, 5)])
@@ -223,7 +223,7 @@ class CombatTest(unittest.TestCase):
         combat.now = combat.make(ctx, "back_off", None, "snotling")
         combat.applies(ctx, GoTo(MAP, (1, 5), "into town"))
         self.assertEqual(combat.now.kind, "go_on")
-        self.assertIsNone(ctx.memory.held_up)
+        self.assertIn("backed off from snotling", ctx.memory.held_up[1])
 
     def test_a_back_off_run_until_clear_holds_the_approach_up(self):
         w = world(OPEN)

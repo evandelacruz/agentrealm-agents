@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 Pos = tuple[int, int]
@@ -46,7 +46,6 @@ class Clue:
     x: int
     y: int
     at: float = 0.0
-    empty_at: float = 0.0  # when the shelf was last found empty (a sale; stock returns later)
 
 
 @dataclass
@@ -74,6 +73,7 @@ class Sighting:
     x: int
     y: int
     at: float = 0.0
+    empty_at: float = 0.0  # when the shelf was last found empty (a sale; stock returns later)
 
 
 @dataclass
@@ -301,20 +301,20 @@ class Memory:
             raw = json.loads(path.read_text())
         except (OSError, ValueError):
             return m
-        m.clues = [Clue(**c) for c in raw.get("clues", [])]
+        m.clues = [_of(Clue, c) for c in raw.get("clues", [])]
         m.signs_read = list(raw.get("signs_read", []))
-        m.helpers = {k: Helper(**v) for k, v in raw.get("helpers", {}).items()}
-        m.entrances = {k: Entrance(**v) for k, v in raw.get("entrances", {}).items()}
+        m.helpers = {k: _of(Helper, v) for k, v in raw.get("helpers", {}).items()}
+        m.entrances = {k: _of(Entrance, v) for k, v in raw.get("entrances", {}).items()}
         m.levels = {int(k): _level(v) for k, v in raw.get("levels", {}).items()}
-        m.shops = {k: Sighting(**v) for k, v in raw.get("shops", {}).items()}
-        m.yields = {k: Yield(**v) for k, v in raw.get("yields", {}).items()}
-        m.kills = {k: Yield(**v) for k, v in raw.get("kills", {}).items()}
+        m.shops = {k: _of(Sighting, v) for k, v in raw.get("shops", {}).items()}
+        m.yields = {k: _of(Yield, v) for k, v in raw.get("yields", {}).items()}
+        m.kills = {k: _of(Yield, v) for k, v in raw.get("kills", {}).items()}
         m.no_effect = list(raw.get("no_effect", []))
         m.refused = dict(raw.get("refused", {}))
         m.territory = {k: list(v) for k, v in raw.get("territory", {}).items()}
         m.townsfolk = list(raw.get("townsfolk", []))
         m.chests_seen = list(raw.get("chests_seen", []))
-        m.deaths = [Death(**d) for d in raw.get("deaths", [])]
+        m.deaths = [_of(Death, d) for d in raw.get("deaths", [])]
         return m
 
     def save(self) -> None:
@@ -326,5 +326,12 @@ class Memory:
 
 
 def _level(raw: dict) -> Level:
-    attempts = [Attempt(**a) for a in raw.pop("attempts", [])]
-    return Level(**raw, attempts=attempts)
+    attempts = [_of(Attempt, a) for a in raw.pop("attempts", [])]
+    return _of(Level, {**raw, "attempts": attempts})
+
+
+def _of(cls, raw: dict):
+    """A record from its saved fields, keeping only the fields it has now: memory saved before a field was
+    added or after one was dropped still loads."""
+    names = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in raw.items() if k in names})

@@ -488,6 +488,13 @@ class MemoryTest(unittest.TestCase):
         w.maps[MAP].tiles[(3, 3)] = "dirt"
         self.assertIn("is broken", skill.failed(ctx_of(w)))
 
+    def test_memory_saved_with_other_fields_still_loads(self):
+        import json
+        path = Path(tempfile.mkdtemp()) / "m.json"
+        path.write_text(json.dumps({"clues": [{"text": "x", "source": "sign", "speaker": "", "map_id": 1, "x": 1, "y": 1,
+                                               "at": 0.0, "dropped_field": 1}]}))
+        self.assertEqual(Memory.load(path).clues[0].text, "x")
+
     def test_a_clue_is_kept_once(self):
         mem = Memory()
         self.assertTrue(mem.add_clue(Clue("x", "sign", "", MAP, 1, 1)))
@@ -500,9 +507,11 @@ class StrategistBriefTest(unittest.TestCase):
         mem.entrance(MAP, (9, 9))
         mem.add_clue(Clue("seek the door by the old oak", "helper", "town_helper", MAP, 3, 3))
         mem.note("backed off from snotling; clear now near 4,4")
+        mem.saw_for_sale("small_potion", 10, MAP, (2, 2))
+        mem.shelf_empty(MAP, (2, 2))
         ctx = ctx_of(world(OPEN), mem)
         text = describe(Briefing(ctx, "starting", "nothing", [], [], 0.0), {"chain": ["beat the world", "hold 15 gems"]})
-        for part in ("seek the door by the old oak", "1:9,9", "hold 15 gems", "backed off from snotling"):
+        for part in ("seek the door by the old oak", "1:9,9", "hold 15 gems", "backed off from snotling", "stock back in about"):
             self.assertIn(part, text)
 
     def test_a_reaction_note_is_news_once(self):

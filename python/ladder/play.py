@@ -158,8 +158,9 @@ class Decision:
 class Judged:
     """One send of the op's, read against what it was for (A173): the op
     and why it was sent (``key``, the act), the cells its block ``Use``s
-    strike, those whose ``Use`` came back ``applied`` (``landed``) and those
-    a ``BlockChanged`` showed changing (``changed``), whether anything came
+    strike, those whose ``Use`` is known to have run (``landed``: a result
+    came back for it, or the queue ran to its end, which may bring no result
+    at all) and those a ``BlockChanged`` showed changing (``changed``), whether anything came
     of it (``effect``), and whether it was refused "not yet" (``not_yet``),
     which is judged neither way."""
 
@@ -425,9 +426,10 @@ class LadderRunner:
         return d
 
     def judged_done(self) -> None:
-        """The op's send ran out: a strike that landed with no ``BlockChanged``
-        on its cell changed nothing there, so the cell is noted as an
-        ``applied_no_effect`` one is (``apply_results``); an act that changed
+        """The op's send ran out: a strike that ran with no ``BlockChanged``
+        on its cell changed nothing there, whatever result code came back or
+        none, so the cell is noted as an ``applied_no_effect`` one is
+        (``apply_results``); an act that changed
         nothing counts toward ``NO_EFFECT_REPEATS`` in a row, one that changed
         something ends the run."""
         j, self.judged = self.judged, None
@@ -755,6 +757,8 @@ class LadderRunner:
             self.resync()
         finished = r.get("finished_queue")
         if finished and finished.get("queue_id") == m.pending_queue:
+            if self.judged is not None:
+                self.judged.landed |= self.judged.cells  # every intent ran, a result or not (A173)
             self.drop_queue()
         elif m.pending_intents is not None and w.tick > m.queue_sent_tick + len(m.pending_intents) + QUEUE_RESULT_SLACK:
             # The queue had time to run out and the server never said so: she may
@@ -816,7 +820,7 @@ class LadderRunner:
     def note_effect(self, res: dict, struck: Pos | None) -> None:
         """Read one result of the op's send against what it was for (A173):
         any intent but a block ``Use`` that came back ``applied`` changed
-        something; a block ``Use`` that landed changes something once its
+        something; a block ``Use`` that ran changes something once its
         cell shows a ``BlockChanged`` (``apply``), and a break in flight is
         settled by break memory, so it is not ``struck`` here; a refusal that
         says "not yet" is no verdict."""
@@ -825,7 +829,7 @@ class LadderRunner:
             return
         if res.get("outcome") == "rejected":
             j.not_yet |= (res.get("rejection") or {}).get("code") in NOT_YET
-        elif res.get("outcome") == "applied" and struck is not None:
+        elif res.get("outcome") in ("applied", "applied_no_effect") and struck is not None:
             j.landed.add(struck)
         elif res.get("outcome") == "applied":
             j.effect = True

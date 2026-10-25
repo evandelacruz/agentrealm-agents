@@ -155,7 +155,7 @@ class LoopTest(unittest.TestCase):
         q = self.queue
         refused = {"rejection": {"code": code}} if outcome == "rejected" else {}
         results = [{"queue_id": q, "index": i, "outcome": outcome, "tick": w.tick, **refused}
-                   for i, x in enumerate(d.intents) if x["verb"] != "Wait"]
+                   for i, x in enumerate(d.intents) if x["verb"] != "Wait" and outcome is not None]
         events = [{"tick": w.tick, "events": [{"kind": "BlockChanged", "map_id": MAP, "x": p[0], "y": p[1],
                                                 "block_type": "dirt"} for p in changed or []]}]
         r.apply({"tick": w.tick, "queue_id": q, "intent_results": results, "events_by_tick": events,
@@ -174,6 +174,20 @@ class LoopTest(unittest.TestCase):
     def test_a_cut_that_lands_with_no_block_changed_is_noted_too(self):
         self.round(outcome="applied")
         self.assertEqual(no_yield(self.r.knowledge, MAP, HERE, self.w.tick).why, UNBREAKABLE)
+
+    def test_a_cut_whose_queue_finished_with_no_result_at_all_is_noted(self):
+        """The server may send no result code for it: the queue ran out, nothing changed."""
+        d = self.round(outcome=None)
+        self.assertEqual(d.intents[-1], use_on(HERE))
+        self.assertEqual(no_yield(self.r.knowledge, MAP, HERE, self.w.tick).why, UNBREAKABLE)
+
+    def test_the_same_act_with_no_result_at_all_n_times_ends_the_op(self):
+        repeat = Act([use_on(HERE)], "cut (5, 5)")
+        with mock.patch.object(play, "act", return_value=repeat):
+            for _ in range(NO_EFFECT_REPEATS):
+                self.assertEqual(self.round(outcome=None).intents, [use_on(HERE)])
+            self.assertFalse(self.round(outcome=None).intents)
+        self.assertIn(GATHER, self.r.done)
 
     def test_a_cut_that_opens_its_cell_is_not_noted(self):
         self.round(outcome="applied", changed=[HERE])

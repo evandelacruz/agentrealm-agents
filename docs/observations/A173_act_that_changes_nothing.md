@@ -9,7 +9,11 @@ About 1 min in she stood on a grass cell in town, a safe cell, with goal
 gather and op `gather_gems`, and sent "cut (421, 379)", a `Use` on the cell
 she stood on, 143+ times over 2+ min. No `BlockChanged` came back and no
 events; every tick record read `stalled: false`, `stalls: 0`. She held there
-until the run was stopped.
+until the run was stopped. The runner's read of the trace: town grass inside
+the safe zone (`safe: true`), 197 `Use`s on (421, 379) and 13 on (424, 376);
+a probe's queue finished with no result entry for the `Use`, no events and no
+rejection, the block still grass. So a strike that changes nothing may bring
+back no result code at all, and only the observation shows it.
 
 ## Why
 
@@ -22,7 +26,9 @@ this one sent every round.
 
 ## The rule
 
-Every act's result is read against what it was for. A strike that changed
+Every act's result is read against what it was for, from the observation
+as well as the result code: a strike whose queue ran with no `BlockChanged`
+on its cell changed nothing, whatever result came back or none. A strike that changed
 nothing notes its cell as not yielding now, with why (regrowing until its
 timer, never breaking, or not breaking with what was in hand), in the ADK's
 break memory; the value reads the note, so the cell is worth nothing until

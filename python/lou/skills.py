@@ -51,6 +51,30 @@ class Travel:
         return -float(chebyshev(s.pos, self.cell))
 
 
+class DrinkPotion:
+    """Drink a carried potion now: armed, then used on yourself (Manual §11 Food and potions). Combat arms the
+    best weapon again before its next swing."""
+
+    name = "drink"
+
+    def __init__(self, code: str | None = None):
+        self.code = code  # None: the smallest potion carried
+
+    def potion(self, ctx: Ctx):
+        potions = [c for c in ctx.state.carried if supplies.is_potion(c.code) and (self.code is None or c.code == self.code)]
+        return min(potions, key=lambda c: supplies.heal_of(c.code), default=None)
+
+    def order(self, ctx: Ctx) -> Order | None:
+        p = self.potion(ctx)
+        return None if p is None else Do(actions.Drink(p.id, p.where == "armed", p.code), ctx.state.pos, reach=0)
+
+    def failed(self, ctx: Ctx) -> str | None:
+        return None if self.potion(ctx) is not None else f"we carry no {self.code or 'potion'}"
+
+    def progress(self, ctx: Ctx) -> float:
+        return float(ctx.state.health)
+
+
 class Seek:
     """Explore toward ``toward`` (unseen ground nearest it), until ``found``."""
 

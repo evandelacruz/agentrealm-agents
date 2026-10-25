@@ -55,7 +55,8 @@ Goal tests (the executive checks them; pick the one that says the dependency is 
 Methods (what an approach does):
 - earn_gems {x?, y?}: cut grass in the field around x,y (near Lou when left out), taking the drops. Hostiles there are fought or not by combat, by your tactics; when combat will not take them on, the approach fails as held up.
 - buy {item, x?, y?}: walk onto a known shelf selling it (the nearest, or the one at x,y). Needs the gems; only shelves listed below can be named.
-- equip {item}: arm or wear a carried item.
+- equip {item}: arm or wear a carried item. Arming a potion does not drink it.
+- drink {item?}: drink a carried potion now (the smallest when no item is named). Combat also drinks at the bar in a fight; this is for healing outside one.
 - travel {x, y, map?, door?}: walk there, across maps by known doors; door true to go through the door at x,y.
 - explore {x?, y?}: walk to unseen ground, toward x,y when given. Pair it with a found or seller goal.
 - break_open {x, y, item, map?}: arm the item and use it on the block at x,y (a locked or hidden entrance, an odd block).

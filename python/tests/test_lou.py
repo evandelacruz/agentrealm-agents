@@ -84,6 +84,14 @@ class PublicationTest(unittest.TestCase):
             publish.publication(answer, ctx_of(world(OPEN)))
 
 
+class DrinkTest(unittest.TestCase):
+    def test_a_drink_approach_drinks_the_carried_potion(self):
+        w = world(OPEN, health=4)
+        w.held_supplies = [InventorySupply(9, "small_potion")]
+        p = publish.publication({"goal": {"test": "health", "n": 9}, "approach": {"method": "drink"}}, ctx_of(w))
+        self.assertIsInstance(p.approach.skill(ctx_of(w)).order(ctx_of(w)).action, actions.Drink)
+
+
 class ExecutiveTest(unittest.TestCase):
     def test_nothing_published_runs_the_fallback(self):
         ex = Executive(fallback)

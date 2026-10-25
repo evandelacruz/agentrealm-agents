@@ -94,6 +94,8 @@ class Approach:
             return skills.Buy(a["item"], _seller(ctx, a))
         if m == "equip":
             return skills.Equip(a["item"])
+        if m == "drink":
+            return skills.DrinkPotion(a.get("item"))
         if m == "travel":
             return skills.Travel(int(a.get("map", s.map_id)), _cell(a), a.get("why", "travel"), bool(a.get("door")))
         if m == "explore":
@@ -131,7 +133,7 @@ class Approach:
 
 
 METHODS = {
-    "earn_gems": [], "buy": ["item"], "equip": ["item"], "travel": ["x", "y"], "explore": [],
+    "earn_gems": [], "buy": ["item"], "equip": ["item"], "drink": [], "travel": ["x", "y"], "explore": [],
     "break_open": ["x", "y", "item"], "forage": [], "recover": [], "find_boss": [], "fight_boss": [],
 }
 

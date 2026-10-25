@@ -206,6 +206,17 @@ class CombatTest(unittest.TestCase):
         self.assertIsInstance(action, actions.Walk)
         self.assertNotIn(action.path[-1], w.maps[MAP].safe)
 
+    def test_backed_off_onto_safe_ground_she_goes_on_when_the_way_is_safe(self):
+        safe = {(x, y) for x in range(0, 6) for y in range(0, 11)}
+        w = world(OPEN, at=(5, 5), safe=safe)
+        self.snotlings(w, [(7, 5)])
+        combat = engines.Combat()
+        ctx = ctx_of(w, avoid=["snotling"])
+        combat.now = combat.make(ctx, "back_off", None, "snotling")
+        combat.applies(ctx, GoTo(MAP, (1, 5), "into town"))
+        self.assertEqual(combat.now.kind, "go_on")
+        self.assertIsNone(ctx.memory.held_up)
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

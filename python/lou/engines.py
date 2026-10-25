@@ -143,7 +143,7 @@ class Combat:
 
     - **fight** to the end, unless health reaches the bar: then drink if we carry a potion and fight on,
       else break off to safe ground and say so;
-    - **back off** to safe ground, then **hold** there;
+    - **back off** to safe ground, then plan again from there: **hold**, or go on when the way is safe;
     - **go on** with the method, until we are hit or a new hostile turns up.
 
     Holding means the approach cannot go on past these hostiles: it is reported as held up, which fails
@@ -171,8 +171,6 @@ class Combat:
             return False
         if self.now is None or self.over(ctx, threats):
             self.now = self.plan(ctx, order, threats)
-        if self.now.kind == "back_off" and s.on_safe_ground:
-            self.hold(ctx, self.now.why)
         self.threat_ids = {e.id for e in threats}
         return self.now.kind not in ("go_on",)
 
@@ -210,7 +208,7 @@ class Combat:
                 self.report(ctx, f"the fight with {e.target.code} is over")
             return gone
         if e.kind == "back_off":
-            return False  # until safe ground (then held) or clear (``applies``)
+            return s.on_safe_ground  # safe: plan again from here (go on, or hold); clear ends it in ``applies``
         if e.kind == "hold":
             return e.approach is not ctx.approach
         if e.kind == "go_on":
@@ -223,10 +221,11 @@ class Combat:
         price = Price(ctx)
         ahead = course_of(ctx, order)
         per_step = step_worth(ctx)
-        scored = []
+        weighed = []  # (gain, risk, option)
         for o in self.options(ctx, ahead, threats):
             odds = harm.odds(s, o.course, seed=seed, territory=ctx.memory.territory)
-            scored.append((o.reward + odds.steps * per_step + odds.kill * o.kill_worth - price.risk(odds), o))
+            weighed.append((o.reward + odds.steps * per_step + odds.kill * o.kill_worth, price.risk(odds), o))
+        scored = [(gain - risk, o) for gain, risk, o in undominated(weighed)]
         pick, odds_text = roll(scored, ctx.levers.risk, random.Random(seed))
         why = pick.target.code if pick.target is not None else ", ".join(sorted({e.code for e in threats}))
         ctx.memory.note(f"engaged: {pick.name} ({odds_text})", news=False)
@@ -284,6 +283,13 @@ class Combat:
 
     def report(self, ctx: Ctx, text: str) -> None:
         ctx.memory.note(f"{text} near {ctx.state.pos[0]},{ctx.state.pos[1]}")
+
+
+def undominated(weighed: list[tuple[float, float, Option]]) -> list[tuple[float, float, Option]]:
+    """Options no other beats on both counts: an option that gains as much at no more risk, and is better on
+    one, leaves nothing to roll for (going on along a safe way beats holding)."""
+    return [(g, r, o) for g, r, o in weighed
+            if not any(g2 >= g and r2 <= r and (g2 > g or r2 < r) for g2, r2, _ in weighed)]
 
 
 def roll(scored: list[tuple[float, Option]], risk: float, rng: random.Random) -> tuple[Option, str]:

@@ -115,6 +115,7 @@ class Buy:
         if s.gems < self.seen.price:
             return f"{self.code} costs {self.seen.price} gems; we hold {s.gems}"
         if s.map_id == self.seen.map_id and chebyshev(s.pos, (self.seen.x, self.seen.y)) <= 3 and self.stock(ctx) is None:
+            ctx.memory.shelf_empty(self.seen.map_id, (self.seen.x, self.seen.y))
             return f"no {self.code} on its shelf now (stock returns 2 minutes after a sale)"
         return None
 

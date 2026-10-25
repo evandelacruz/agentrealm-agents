@@ -112,6 +112,17 @@ class Strategist:
         return answer
 
 
+RESTOCK_SECONDS = 120  # stock returns 2 minutes after a sale (Manual §11 Shops)
+
+
+def restock(v) -> str:
+    """When a shelf found empty should have stock again, so a buy is not planned before then."""
+    if not v.empty_at:
+        return ""
+    left = v.empty_at + RESTOCK_SECONDS - time.time()
+    return f" (found empty; stock back in about {left:.0f}s)" if left > 0 else ""
+
+
 def describe(b: Briefing, last: dict[str, Any] | None = None) -> str:
     ctx: Ctx = b.ctx
     s, mem = ctx.state, ctx.memory
@@ -157,7 +168,7 @@ def describe(b: Briefing, last: dict[str, Any] | None = None) -> str:
 
     lines += ["", "## Seen for sale"]
     shops = sorted(mem.shops.items(), key=lambda kv: (kv[1].map_id != s.map_id, chebyshev((kv[1].x, kv[1].y), s.pos)))
-    lines += [f"- {v.code} for {v.price} gems at {v.map_id}:{v.x},{v.y}" for _, v in shops[:SHOPS_SHOWN]] or ["nothing yet"]
+    lines += [f"- {v.code} for {v.price} gems at {v.map_id}:{v.x},{v.y}" + restock(v) for _, v in shops[:SHOPS_SHOWN]] or ["nothing yet"]
 
     threats = s.known_threats()
     if threats or mem.territory:

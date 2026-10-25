@@ -46,6 +46,7 @@ class Clue:
     x: int
     y: int
     at: float = 0.0
+    empty_at: float = 0.0  # when the shelf was last found empty (a sale; stock returns later)
 
 
 @dataclass
@@ -212,6 +213,11 @@ class Memory:
         if known is None or known.code != code or known.price != price:
             self.learned()
         self.shops[key] = Sighting(code, price, map_id, pos[0], pos[1], time.time())
+
+    def shelf_empty(self, map_id: int, pos: Pos) -> None:
+        known = self.shops.get(place_key(map_id, pos))
+        if known is not None:
+            known.empty_at = time.time()
 
     def broke(self, map_id: int, pos: Pos, gems: int = 0) -> None:
         y = self.yields.setdefault(region_key(map_id, pos), Yield())

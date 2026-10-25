@@ -115,7 +115,7 @@ def bar(ctx: Ctx, foe: Entity | None) -> float:
 @dataclass(frozen=True)
 class Option:
     name: str
-    kind: str  # go_on | fight | back_off | drink | stand
+    kind: str  # go_on | fight | back_off | hold | drink
     course: harm.Course
     reward: float = 0.0  # gems won (or spent, below 0) for sure
     kill_worth: float = 0.0
@@ -131,6 +131,7 @@ class Engagement:
     seed: int
     hits_at_start: int  # our health when it began
     why: str
+    approach: object = None  # the approach it was planned for
 
 
 class Combat:
@@ -141,10 +142,13 @@ class Combat:
 
     - **fight** to the end, unless health reaches the bar: then drink if we carry a potion and fight on,
       else break off to safe ground and say so;
-    - **back off** until no hostile can reach us, then say what held the ground;
+    - **back off** to safe ground, then **hold** there;
     - **go on** with the method, until we are hit or a new hostile turns up.
 
-    It is planned again only when the engagement ends or the bar is reached, never tick by tick.
+    Holding means the approach cannot go on past these hostiles: it is reported as held up, which fails
+    the approach (``lou.publish``), so plan B or the strategist moves her elsewhere. A hold lasts until
+    the approach changes or the hostiles are gone. It is planned again only when the engagement ends
+    or the bar is reached, never tick by tick.
     """
 
     name = "combat"
@@ -166,6 +170,8 @@ class Combat:
             return False
         if self.now is None or self.over(ctx, threats):
             self.now = self.plan(ctx, order, threats)
+        if self.now.kind == "back_off" and s.on_safe_ground:
+            self.hold(ctx, self.now.why)
         self.threat_ids = {e.id for e in threats}
         return self.now.kind not in ("go_on",)
 
@@ -187,14 +193,12 @@ class Combat:
             away = travel.to_safe(ctx)
             if away:
                 return walk_or_break(ctx, away, "to safe ground")
-            if away == []:
-                return actions.Stop("on safe ground")
             run = flee_run(s.world, harm.threats_near(s), set(), _first_away(ctx))
             return actions.Walk(tuple(run), "away") if run else actions.Stop("cornered")
         if e.kind == "drink":
             self.now = None
             return best_potion(ctx)
-        return actions.Stop("hold ground")
+        return actions.Stop(f"holding on safe ground: {e.why} in the way")
 
     def over(self, ctx: Ctx, threats: list[Entity]) -> bool:
         """The engagement has run its course: its target is dead or gone, we are clear, or a go-on was hit or met a new hostile."""
@@ -205,7 +209,9 @@ class Combat:
                 self.report(ctx, f"the fight with {e.target.code} is over")
             return gone
         if e.kind == "back_off":
-            return False  # until no hostile can reach us (``applies``)
+            return False  # until safe ground (then held) or clear (``applies``)
+        if e.kind == "hold":
+            return e.approach is not ctx.approach
         if e.kind == "go_on":
             return s.health < e.hits_at_start or any(x.id not in self.threat_ids for x in threats)
         return True
@@ -223,15 +229,24 @@ class Combat:
         pick, odds_text = roll(scored, ctx.levers.risk, random.Random(seed))
         why = pick.target.code if pick.target is not None else ", ".join(sorted({e.code for e in threats}))
         ctx.memory.note(f"engaged: {pick.name} ({odds_text})", news=False)
+        if pick.kind == "hold":
+            return self.hold(ctx, why)
         return self.make(ctx, pick.kind, pick.target, why)
 
     def make(self, ctx: Ctx, kind: str, target: Entity | None, why: str) -> Engagement:
         s = ctx.state
-        return Engagement(kind, target, bar(ctx, target), s.tick, s.tick, s.health, why)
+        return Engagement(kind, target, bar(ctx, target), s.tick, s.tick, s.health, why, ctx.approach)
+
+    def hold(self, ctx: Ctx, why: str) -> Engagement:
+        """Stay on safe ground; the approach is held up by ``why``."""
+        s = ctx.state
+        ctx.memory.held_up_by(f"{why} near {s.pos[0]},{s.pos[1]}; holding on safe ground")
+        self.now = self.make(ctx, "hold", None, why)
+        return self.now
 
     def options(self, ctx: Ctx, ahead: tuple[Pos, ...], threats: list[Entity]) -> list[Option]:
         s = ctx.state
-        out = [Option("go on", "go_on", harm.Course(ahead)), Option("stand", "stand", harm.Course())]
+        out = [Option("go on", "go_on", harm.Course(ahead))]
         avoid = set(ctx.tactics.get("avoid") or [])
         for e in threats:
             if e.code in avoid:
@@ -241,9 +256,12 @@ class Combat:
             worth = ctx.memory.gems_per_kill(e.code, KILL_DROP) * ctx.levers.greed_weight
             out.append(Option(f"fight {e.code}", "fight", harm.Course(approach, target=e.id, then=ahead),
                               kill_worth=worth, target=e))
-        away = travel.to_safe(ctx)
-        path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
-        out.append(Option("back off", "back_off", harm.Course(path)))
+        if s.on_safe_ground:
+            out.append(Option("hold", "hold", harm.Course()))
+        else:
+            away = travel.to_safe(ctx)
+            path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
+            out.append(Option("back off", "back_off", harm.Course(path)))
         drink = best_potion(ctx)
         if drink is not None:
             out.append(Option(str(drink), "drink", harm.Course(heal=supplies.heal_of(drink.code), path=ahead),

@@ -111,7 +111,7 @@ Every tick, in fixed priority, the first that applies acts. None calls a model; 
 
 1. **Combat**, when a hostile can reach Lou. It weighs fight, back off to safe ground or behind a wall, and drink, as reward against risk (below), and once it picks, it **commits** by an **engagement plan**:
    - **Fight:** fight to the end, unless health falls to the **bar**: the tactics' bar for that hostile type, else the `heal_below` lever. At the bar she drinks if she carries a potion and fights on; with none she breaks off to safe ground, forages, and reports.
-   - **Back off:** go until clear (no hostile can reach her), then report what held the ground, so the approach treats it as a failure condition and plan B or the strategist moves her elsewhere.
+   - **Back off:** go to safe ground and **hold** there (on safe ground, holding is the option instead of backing off). Holding means the approach is **held up**: it is reported, which fails the approach, so plan B or the strategist moves her elsewhere. A hold lasts until the approach changes or the hostiles are gone; it is never a wait for them to leave.
    - It is decided again only when the engagement ends or the bar is reached, never tick by tick.
 2. **Boss**, in a boss room: fight while it pays, drink at the bar, and leave by the exit door before the clock runs out or when losing.
 3. **Opportunities**, nothing threatening and something in view worth its detour, by the approach's detour tactics: gems, food when hurt (berries from a bush when no food is near), a sign not read, a helper not heard, an odd block a weapon may break, a heart, the death chest. Each is priced in gems against its extra steps and the danger on the way.

@@ -22,6 +22,7 @@ class Ctx:
     town: tuple[int, Pos] | None  # the town's map and one block in it (GetWorld)
     levers: Levers = field(default_factory=Levers)  # the agent's temperament, from its profile
     tactics: dict[str, Any] = field(default_factory=dict)  # the running approach's, for the reactions
+    approach: Any = None  # the running approach
 
     @property
     def s(self) -> State:

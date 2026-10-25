@@ -57,7 +57,7 @@ class Lou:
 
     def running(self, ctx: Ctx, approach: Any) -> None:
         self.tactics = dict(getattr(approach, "tactics", None) or {})
-        ctx.tactics = self.tactics
+        ctx.tactics, ctx.approach = self.tactics, approach
 
     def milestones(self, ctx: Ctx) -> list[tuple[str, str]]:
         return milestones.shown(ctx)

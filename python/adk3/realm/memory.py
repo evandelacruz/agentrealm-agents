@@ -148,6 +148,7 @@ class Memory:
     revision: int = 0
     happened: list[str] = field(default_factory=list)  # this run: what the reactions did and why, newest last
     news: list[str] = field(default_factory=list)  # this run: what happened that the strategist has not heard yet
+    held_up: tuple[float, str] | None = None  # this run: when the running approach was last held up, and by what
 
     # Learning.
 
@@ -159,6 +160,11 @@ class Memory:
         self.happened = (self.happened + [text])[-HAPPENED_KEPT:]
         if news:
             self.news.append(text)
+
+    def held_up_by(self, text: str) -> None:
+        """Hostiles stopped the running approach; it has failed (``held_up``) and the strategist hears why."""
+        self.held_up = (time.time(), text)
+        self.note(f"held up: {text}")
 
     def take_news(self) -> list[str]:
         out, self.news = self.news, []
@@ -287,7 +293,7 @@ class Memory:
     def save(self) -> None:
         if self.path is None:
             return
-        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news")}
+        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news", "held_up")}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(raw, indent=1, sort_keys=True))
 

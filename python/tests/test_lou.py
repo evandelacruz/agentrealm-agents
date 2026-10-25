@@ -183,6 +183,23 @@ class CombatTest(unittest.TestCase):
         combat.applies(ctx_of(w), None)
         self.assertIs(combat.now, first)
 
+    def test_held_up_on_safe_ground_she_holds_and_the_approach_fails_to_plan_b(self):
+        w = world(OPEN, health=3, safe={(5, 5), (4, 5), (4, 4), (5, 4)})
+        self.snotlings(w, [(7, 6), (7, 5), (7, 4)])
+        answer = {**GEMS_15, "approach": {"method": "earn_gems", "x": 9, "y": 5}, "plan_b": {"method": "forage"}}
+        ex, combat = Executive(fallback), engines.Combat()
+        ctx = ctx_of(w)
+        ex.adopt(publish.publication(answer, ctx), ctx, 0.0)
+        ctx.approach = ex.approach
+        self.assertTrue(combat.applies(ctx, Work(((9, 5),), "cut")))
+        self.assertEqual(combat.now.kind, "hold")
+        ex.step(ctx, 10.0)
+        self.assertEqual(ex.plan, "B")
+        self.assertTrue(ex.reports[-1].why.startswith("held up: snotling"))
+        ctx.approach = ex.approach
+        combat.applies(ctx, None)
+        self.assertIs(combat.now.approach, ex.approach)
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

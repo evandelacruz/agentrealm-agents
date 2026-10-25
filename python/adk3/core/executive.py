@@ -92,14 +92,14 @@ class Executive:
             else:
                 self.publication = None
                 self._fall_back(ctx, now, "the goal is met and nothing comes next")
-        else:
+        elif self.plan != "fallback":  # the fallback runs until something is published
             why = self.approach.failed(ctx, self.skill, now - self._started, self._stalled(ctx, now))
             if why is not None:
                 self._report("failed", why, now)
                 plan_b = self.publication.plan_b if self.publication else None
                 if self.plan == "A" and plan_b is not None:
                     self._start(self.goal, plan_b, "B", ctx, now)
-                elif self.plan != "fallback":
+                else:
                     self._fall_back(ctx, now, "plan B failed too" if self.plan == "B" else "no plan B")
         return self.skill
 

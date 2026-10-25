@@ -9,6 +9,7 @@ strategist is told.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -121,6 +122,9 @@ class Approach:
         patience = float(f.get("no_progress_seconds", ctx.levers.patience or DEFAULT_PATIENCE))
         if stalled >= patience:
             return f"no progress for {patience:.0f}s"
+        held = ctx.memory.held_up
+        if held is not None and time.time() - held[0] <= seconds:
+            return f"held up: {held[1]}"
         if "no_gem_minutes" in f and isinstance(skill, skills.EarnGems) and skill.minutes_since_gem(ctx) >= float(f["no_gem_minutes"]):
             return f"no gem in {f['no_gem_minutes']} minutes"
         return skill.failed(ctx)

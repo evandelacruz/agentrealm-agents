@@ -251,8 +251,10 @@ class Combat:
         for e in threats:
             if e.code in avoid:
                 continue
-            reach = s.world.attack_range or 1
-            approach = tuple(travel.to_beside(ctx, e.pos, reach) or ()) if chebyshev(e.pos, s.pos) > reach else ()
+            stand = travel.to_strike(ctx, e.pos, s.world.attack_range or 1)
+            if stand is None:
+                continue
+            approach = tuple(stand)
             worth = ctx.memory.gems_per_kill(e.code, KILL_DROP) * ctx.levers.greed_weight
             out.append(Option(f"fight {e.code}", "fight", harm.Course(approach, target=e.id, then=ahead),
                               kill_worth=worth, target=e))
@@ -270,11 +272,11 @@ class Combat:
 
     def swing_at(self, ctx: Ctx, e: Entity) -> Action | None:
         s = ctx.state
-        reach = s.world.attack_range or 1
-        if chebyshev(e.pos, s.pos) > reach:
-            return walk_or_break(ctx, travel.to_beside(ctx, e.pos, reach) or (), f"close on {e.code}")
-        if s.on_safe_ground:
-            return actions.Stop("no swing lands from safe ground")  # Manual §11 Combat
+        stand = travel.to_strike(ctx, e.pos, s.world.attack_range or 1)
+        if stand:
+            return walk_or_break(ctx, stand, f"close on {e.code}")
+        if stand is None:
+            return actions.Stop(f"no cell off safe ground reaches {e.code}")  # Manual §11 Combat
         return actions.Swing(e.id, f"{e.code} {e.id}") if s.attack_ready else actions.Stop("between swings")
 
     def report(self, ctx: Ctx, text: str) -> None:

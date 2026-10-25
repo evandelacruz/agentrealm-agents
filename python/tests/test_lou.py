@@ -200,6 +200,13 @@ class CombatTest(unittest.TestCase):
         combat.applies(ctx, None)
         self.assertIs(combat.now.approach, ex.approach)
 
+    def test_a_fight_from_safe_ground_steps_off_it_to_swing(self):
+        w = world(OPEN, safe={(5, 5), (4, 5), (4, 4), (5, 4)})
+        self.snotlings(w, [(6, 5)])
+        action = engines.Combat().swing_at(ctx_of(w), w.entities[0])
+        self.assertIsInstance(action, actions.Walk)
+        self.assertNotIn(action.path[-1], w.maps[MAP].safe)
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]

@@ -103,6 +103,19 @@ def to_beside(ctx: Ctx, cell: Pos, reach: int = 1) -> list[Pos] | None:
     return to_nearest(ctx, standable)
 
 
+def to_strike(ctx: Ctx, cell: Pos, reach: int = 1) -> list[Pos] | None:
+    """The path to the nearest cell within ``reach`` of ``cell`` that is off safe ground: no swing lands from
+    safe ground (Manual §11 Combat). [] when we stand on one; None when there is none."""
+    s = ctx.state
+    safe = s.world.view.safe
+    if chebyshev(s.pos, cell) <= reach and s.pos not in safe:
+        return []
+    x, y = cell
+    around = {(x + dx, y + dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1)}
+    standable = {p for p in around if p != cell and p not in safe and (p not in s.world.view.tiles or s.world.walkable(p))}
+    return to_nearest(ctx, standable)
+
+
 def to_unseen(ctx: Ctx, toward: Pos | None = None, take: int = 40) -> list[Pos] | None:
     """The path to the edge of unseen ground, the part nearest ``toward`` when given."""
     s = ctx.state

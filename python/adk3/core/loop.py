@@ -45,6 +45,9 @@ class Agent(Protocol):
 
     def milestones(self, ctx: Any) -> list[tuple[str, str]]: ...
 
+    def park(self, ctx: Any) -> Any:
+        """Asked to stop: the action toward somewhere safe to leave the character, or None once it is there."""
+
     def surprises(self, ctx: Any) -> list[str]:
         """What happened since the last decision that the strategist should hear: a death, a new clue, a reaction's outcome."""
 
@@ -82,6 +85,7 @@ class Settings:
     min_ask_seconds: float = 8.0
     max_answer_age_seconds: float = 180.0
     status_seconds: float = 1.0
+    park_seconds: float = 90.0  # asked to stop, how long to spend getting somewhere safe first
 
 
 @dataclass
@@ -113,10 +117,25 @@ class Run:
                     break
             else:
                 self.stopped_why = "stopped"
+            self.park()
         finally:
             self.ledger.save()
             self.out(self.report())
         return self.stopped_why
+
+    def park(self) -> None:
+        """Leave the character somewhere safe: a stopped character stays in the world, defenceless."""
+        until = time.time() + self.settings.park_seconds
+        while time.time() < until:
+            ctx = self.agent.sense()
+            if ctx is None:
+                continue
+            action = self.agent.park(ctx)
+            if action is None:
+                self.out("parked somewhere safe")
+                return
+            self.agent.act(action)
+        self.out(f"could not reach somewhere safe in {self.settings.park_seconds:.0f}s")
 
     def decide(self, ctx: Any, now: float) -> None:
         agent, ex = self.agent, self.executive

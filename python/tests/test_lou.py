@@ -460,6 +460,15 @@ class HealthWorthTest(unittest.TestCase):
         self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Walk)
 
 
+class ParkTest(unittest.TestCase):
+    def test_asked_to_stop_off_safe_ground_she_walks_to_it_first(self):
+        from lou.agent import Lou
+        w = world(OPEN, at=(5, 5), safe={(1, 1)})
+        self.assertIsInstance(Lou.park(None, ctx_of(w)), actions.Walk)
+        w.pos = (1, 1)
+        self.assertIsNone(Lou.park(None, ctx_of(w)))
+
+
 class MemoryTest(unittest.TestCase):
     def test_it_keeps_everything_across_runs(self):
         path = Path(tempfile.mkdtemp()) / "m.json"

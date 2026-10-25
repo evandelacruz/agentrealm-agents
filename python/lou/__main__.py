@@ -111,7 +111,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
         signal.signal(signal.SIGINT, signal.SIG_IGN)  # shutting down: a second Ctrl-C must not cut the save short
         print("stopping")
         stop.set()
-        thread.join(10)
+        thread.join(loop.settings.park_seconds + 30)  # she walks to safe ground before stopping
     finally:
         lou.close()
         save_knowledge(kb)

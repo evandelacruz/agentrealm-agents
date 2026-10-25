@@ -10,7 +10,7 @@ from typing import Any
 
 from adk3.core.executive import Publication
 from adk3.core.loop import Briefing
-from adk3.realm import milestones
+from adk3.realm import actions, milestones, travel
 from adk3.realm.body import Body
 from adk3.realm.context import Ctx
 from adk3.realm.value import Levers
@@ -58,6 +58,14 @@ class Lou:
     def running(self, ctx: Ctx, approach: Any) -> None:
         self.tactics = dict(getattr(approach, "tactics", None) or {})
         ctx.tactics, ctx.approach = self.tactics, approach
+
+    def park(self, ctx: Ctx):
+        """Walk to the nearest safe ground (Manual §11 Combat: no damage lands there); None once on it."""
+        s = ctx.state
+        if s.on_safe_ground:
+            return None
+        path = travel.to_safe(ctx)
+        return actions.Walk(tuple(path), "to safe ground before stopping") if path else actions.Stop("no safe ground known")
 
     def milestones(self, ctx: Ctx) -> list[tuple[str, str]]:
         return milestones.shown(ctx)

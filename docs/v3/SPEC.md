@@ -120,7 +120,7 @@ Every tick, in fixed priority, the first that applies acts. None calls a model; 
 **Risk against reward** (Manual §11 Hostiles, Combat, §16). Every option is priced in gems:
 
 - **Reward:** the progress it keeps on the approach (a fight credited with the progress after the kill), and what a kill drops (learned per type, the Manual's rate before any kills).
-- **Cost:** health it is expected to lose, at what potions cost per health; the chance it kills her, times what a death costs (a life and everything carried); the time it takes.
+- **Cost:** health it is expected to lose, at what potions cost per health; the chance it kills her, times what a death costs (a life and everything carried); the time it takes. Backing off or holding fails the approach, so it costs the time until she is at work again (a minute, at `time_worth`).
 - **The odds** come from playing the option out many times with the Manual's dice: hostiles chase at her pace, stop at walls and at the edge of the ground their type keeps to, swing on their cooldown, and deal nothing on safe ground. One set of dice per engagement, so options are compared fairly.
 - **Close calls are rolled.** When two options are close, the choice is a roll weighted toward the better one, and leaning bolder as `risk` rises, rather than always the strict best: no exact tie can loop, and Lou is less predictable. Each roll is logged with its odds.
 

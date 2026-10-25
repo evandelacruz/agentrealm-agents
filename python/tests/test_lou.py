@@ -174,6 +174,11 @@ class CombatTest(unittest.TestCase):
         self.snotlings(w, [(6, 5)])
         self.assertEqual(self.plan(ctx_of(w)).kind, "fight")
 
+    def test_a_lone_snotling_is_fought_not_backed_off_from_in_bronze(self):
+        w = world(OPEN, armed="bronze_sword", safe={(0, 0), (1, 0), (0, 1)})
+        self.snotlings(w, [(7, 5)])
+        self.assertNotEqual(self.plan(ctx_of(w), Work(((8, 5),), "cut")).kind, "back_off")
+
     def test_a_pack_against_a_hurt_lou_is_not_fought(self):
         w = world(OPEN, health=2, safe={(0, 0), (1, 0), (0, 1)})
         self.snotlings(w, [(6, 5), (6, 6), (5, 6)])

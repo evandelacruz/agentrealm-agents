@@ -33,6 +33,7 @@ KILL_DROP = 0.3  # gems a kill drops before we have our own kills of a type: the
 CLOSE_CALL = 1.0  # gems: options this close to the best are rolled for, not taken by strict order
 BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Bosses and levels); the real one is not served
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
+HELD_UP_MINUTES = 1.0  # what a held-up approach costs: plan B or the strategist moving her on and the walk to new work
 DETOUR_DICE = 0  # one fixed set of dice for pricing detours, so the same detour is priced the same each tick
 
 
@@ -254,6 +255,7 @@ class Combat:
         away = travel.to_safe(ctx)
         away_path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
         potion = best_potion(ctx) is not None
+        held_up = held_up_cost(ctx)  # backing off or holding fails the approach
         for e in threats:
             stop = 0.0 if potion else bar(ctx, e)  # with a potion she drinks at the bar and fights on
             if e.code in avoid or s.health <= stop:  # a fight broken off at once is no fight
@@ -266,9 +268,9 @@ class Combat:
             out.append(Option(f"fight {e.code}", "fight", harm.Course(approach, target=e.id, then=ahead, bar=stop, away=away_path),
                               kill_worth=worth, target=e))
         if s.on_safe_ground:
-            out.append(Option("hold", "hold", harm.Course()))
+            out.append(Option("hold", "hold", harm.Course(), reward=-held_up))
         else:
-            out.append(Option("back off", "back_off", harm.Course(away_path)))
+            out.append(Option("back off", "back_off", harm.Course(away_path), reward=-held_up))
         drink = best_potion(ctx)
         if drink is not None:
             out.append(Option(str(drink), "drink", harm.Course(heal=supplies.heal_of(drink.code), path=ahead),
@@ -324,6 +326,12 @@ class Price:
 
     def risk(self, odds: harm.Odds) -> float:
         return odds.health_lost * self.per_health + odds.death * self.death
+
+
+def held_up_cost(ctx: Ctx) -> float:
+    """What failing the approach costs: the time until she is at work again, at what time is worth."""
+    s = ctx.state
+    return value.per_tick(ctx.levers, s.tick_hz) * s.tick_hz * 60 * HELD_UP_MINUTES
 
 
 def step_worth(ctx: Ctx) -> float:

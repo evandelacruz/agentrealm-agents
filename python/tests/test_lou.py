@@ -350,6 +350,19 @@ class CombatTest(unittest.TestCase):
         self.assertLess(to_the_bar.health_lost, to_the_end.health_lost)
         self.assertLessEqual(to_the_bar.kill, to_the_end.kill)
 
+    def test_a_chaser_that_keeps_pace_is_not_left_behind(self):
+        w = world(["g" * 41] * 11, at=(5, 5), armed="bronze_sword")
+        self.snotlings(w, [(6, 5)])
+        s = ctx_of(w).state
+        walk = tuple((x, 5) for x in range(6, 30))
+        on = harm.odds(s, harm.Course(walk), seed=1)
+        self.assertGreater(on.hits_taken, 4)  # more than the ten seconds' worth: it follows
+
+    def test_one_snotling_on_her_while_she_works_is_fought(self):
+        w = world(["g" * 41] * 11, at=(5, 5), armed="bronze_sword", safe={(0, 0)})
+        self.snotlings(w, [(6, 5)])
+        self.assertEqual(self.plan(ctx_of(w), Work(((30, 5),), "cut")).kind, "fight")
+
     def test_the_odds_count_deaths(self):
         w = world(OPEN, health=1)
         self.snotlings(w, [(6, 5), (6, 6), (5, 6), (4, 6)])

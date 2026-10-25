@@ -51,6 +51,7 @@ from .state import State
 
 SCALE_HZ = 10  # the tick scale the combat estimates are in (agentrealm_adk.survival)
 HORIZON_TICKS = 100  # ten seconds: long enough for a fight with a starting weapon to end
+CHASE_TICKS = 600  # past the horizon, a hostile still on us keeps swinging: up to a minute more is counted
 RUNS = 120  # enough that two options' odds differ by more than their noise
 HOSTILE_REACH = 1
 
@@ -130,7 +131,10 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
     safe = s.world.view.safe
     landed = walked = 0
     target = course.target
-    for t in range(1, HORIZON_TICKS + 1):
+    for t in range(1, HORIZON_TICKS + CHASE_TICKS + 1):
+        if t > HORIZON_TICKS and (here in safe or not any(
+                alive[f.entity.id] > 0 and chebyshev(where[f.entity.id], here) <= HOSTILE_REACH + 1 for f in foes)):
+            break  # past the horizon only while a hostile is still on us: a chaser that keeps pace is not left behind
         if target is not None and alive.get(target, 0) > 0 and health <= course.bar:
             target, path, then = None, list(course.away), []  # the bar: break off
         if t % period == 0:

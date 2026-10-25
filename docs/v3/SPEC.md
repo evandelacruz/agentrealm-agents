@@ -1,6 +1,6 @@
 # v3 agent: plan
 
-Status: revision 2, for Evan's review; Lou is rebuilt to it once read. Revision 1 is built (`python/adk3/`, `python/lou/`) and was run live five times; what those runs taught is below, and this revision is what changes because of it.
+Status: revision 2; Lou is built to it. Revision 1 is built (`python/adk3/`, `python/lou/`) and was run live five times; what those runs taught is below, and this revision is what changes because of it.
 
 Sources read in full before writing this: the Manual (all sixteen sections), the API rules, Create a Character Agent, the State machine guide, the Changelog, and `docs/GAME_NOTES.md`.
 
@@ -66,7 +66,7 @@ Everything Lou has learned, kept per world across runs, and handed to the strate
 
 ### 2. The strategist: goal, approach, plan B, next
 
-The strategist's standing context, sent once and cached, is the Manual's world, game rules and play guide (§3, §11, §16) and `docs/GAME_NOTES.md`. Each time it is asked it reads Lou's state, the memory summary, the chain of needs from the overall goal down (what is met, what is not), and every outcome since it last spoke. It answers with one published goal:
+The strategist's standing context, sent once and cached, is the Manual's world, game rules and play guide (§3, §11, §16) and `docs/GAME_NOTES.md`. Each time it is asked it reads Lou's state, the memory summary, what is running, every outcome since it last spoke, and the chain of needs it stated last time. It answers with the chain from the overall goal down (beat the game ← … ← the first unmet dependency) and one published goal:
 
 ```
 goal:     hold 15 gems                          done when: gems ≥ 15
@@ -161,7 +161,7 @@ An agent's temperament: a few numbers in its profile (`[levers]` in `characters/
 
 ## What changes from revision 1
 
-- **Out:** the needs graph as the chooser of goals (its chain of needs stays, as part of what the strategist reads); judgments as separate fields (`order`, `needs`, `where`, `doors`); the skill choosing where to work on its own.
+- **Out:** the needs graph in code (the strategist states the chain of needs in each answer, and it is read back to it next time); judgments as separate fields (`order`, `needs`, `where`, `doors`); the skill choosing where to work on its own.
 - **In:** the published goal, approach, plan B and next; failure conditions set by the strategist; the engagement plan with its bar; reactions reporting outcomes to memory; weighted rolls on close calls.
 - **Kept:** memory, perception and acting, the danger model, travel (with breaking bushes and trees), the reactions' fixed priority, opportunities, foraging, territory learning, levers, the ledger, the strategist's standing context.
 

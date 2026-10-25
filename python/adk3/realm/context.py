@@ -1,4 +1,4 @@
-"""The context every need, skill, engine and opportunity receives: the moment and what is known."""
+"""The context every skill, reaction and opportunity receives: the moment and what is known."""
 
 from __future__ import annotations
 
@@ -21,8 +21,7 @@ class Ctx:
     nav: Any  # the ADK's navigation memory: what rejections taught the map
     town: tuple[int, Pos] | None  # the town's map and one block in it (GetWorld)
     levers: Levers = field(default_factory=Levers)  # the agent's temperament, from its profile
-    judgments: dict[str, Any] = field(default_factory=dict)  # the strategist's, by need key
-    tactics: dict[str, Any] = field(default_factory=dict)  # the strategist's, by engine name
+    tactics: dict[str, Any] = field(default_factory=dict)  # the running approach's, for the reactions
 
     @property
     def s(self) -> State:

@@ -100,7 +100,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
     lou = Lou(body, levers, strategist, state_dir / f"{cfg.profile}.{cid}.lou.jsonl")
     strategist.record = lou.record
     ledger = Ledger.load(state_dir / f"{cfg.profile}.{cid}.ledger.json")
-    loop = Run(lou, ledger, Settings(stall_minutes=stall_minutes, skill_stall_seconds=levers.patience), out=print)
+    loop = Run(lou, ledger, Settings(stall_minutes=stall_minutes), out=print)
     stop = threading.Event()
     thread = threading.Thread(target=lambda: loop.run(stop.is_set), daemon=True)
     thread.start()

@@ -2,12 +2,12 @@
 
 Each decision the game binding says is due::
 
-    ctx = agent.sense()                 # the moment, and what is known
+    ctx = agent.sense()                    # the moment, and what is known
     ledger keeps the milestones it shows
-    take the strategist's answer if one landed; ask again when due
-    path = graph.focus(ctx)             # what to work on now
-    skill = executive.step(path)        # how
-    engine = first engine whose situation holds
+    adopt the strategist's publication if one landed; ask again when due
+    skill = executive.step(ctx)            # the published approach, plan B, next, or the fallback
+    agent.running(ctx, approach)           # the reactions play its tactics
+    engine = first reaction whose situation holds (fixed priority)
     agent.act(engine.act(ctx, skill.order(ctx)))
 
 The run stops itself after ``stall_minutes`` with no milestone and prints
@@ -23,15 +23,13 @@ from typing import Any, Protocol
 
 from .asker import Asker
 from .engines import Engine, pick
+from .executive import Executive, Publication, Report
 from .ledger import Ledger
-from .needs import Graph, Row
-from .skills import Executive, Outcome
 
 
 class Agent(Protocol):
     """What the game binding and the agent fill in."""
 
-    graph: Graph
     engines: list[Engine]
 
     def sense(self) -> Any:
@@ -39,19 +37,22 @@ class Agent(Protocol):
 
     def act(self, action: Any) -> None: ...
 
-    def revision(self, ctx: Any) -> int:
-        """A number that rises whenever what the agent knows changes; it lifts blocks."""
+    def fallback(self, ctx: Any) -> tuple[Any, Any]:
+        """The goal and approach to run when nothing published can be: safe, useful work."""
+
+    def running(self, ctx: Any, approach: Any) -> None:
+        """The approach under way this decision, so the reactions play its tactics."""
 
     def milestones(self, ctx: Any) -> list[tuple[str, str]]: ...
 
     def surprises(self, ctx: Any) -> list[str]:
-        """What happened since the last decision that may change the strategist's mind."""
+        """What happened since the last decision that the strategist should hear: a death, a new clue, a reaction's outcome."""
 
     def strategize(self, briefing: Briefing) -> Any:
         """The strategist call (run off the decision thread)."""
 
-    def adopt(self, answer: Any) -> None:
-        """Take the strategist's answer: its judgments, choices and tactics."""
+    def publication(self, answer: Any, ctx: Any) -> Publication | None:
+        """The strategist's answer, as a publication; raises ValueError when it cannot be carried out."""
 
     def status(self, ctx: Any) -> str: ...
 
@@ -65,8 +66,8 @@ class Briefing:
 
     ctx: Any
     reason: str
-    rows: list[Row]
-    outcomes: list[Outcome]
+    running: str  # the goal and approach under way
+    reports: list[Report]
     milestones: list[str]
     minutes_since_milestone: float
     note: str = ""  # the last answer's problem, if it was refused
@@ -75,7 +76,6 @@ class Briefing:
 @dataclass
 class Settings:
     stall_minutes: float = 15.0
-    skill_stall_seconds: float = 60.0
     min_ask_seconds: float = 8.0
     max_answer_age_seconds: float = 180.0
     status_seconds: float = 1.0
@@ -89,15 +89,14 @@ class Run:
     out: Callable[[str], None] = print
 
     def __post_init__(self) -> None:
-        self.executive = Executive(self.agent.graph, self.settings.skill_stall_seconds)
+        self.executive = Executive(self.agent.fallback)
         self.asker = Asker(self.agent.strategize)
         self.pending: list[str] = ["starting"]  # why the strategist should be asked, kept until it is
         self.asked_at = float("-inf")
-        self.answered = False
         self.note = ""
         self.stopped_why = ""
         self._status_at = 0.0
-        self._outcomes_seen = 0
+        self._reports_seen = 0
 
     def run(self, stop: Callable[[], bool]) -> str:
         """Play until ``stop`` or a stall; returns why it stopped."""
@@ -117,58 +116,65 @@ class Run:
         return self.stopped_why
 
     def decide(self, ctx: Any, now: float) -> None:
-        agent = self.agent
+        agent, ex = self.agent, self.executive
         for key, label in agent.milestones(ctx):
             if self.ledger.record(key, label, now):
                 self.out(f"milestone: {label}")
-                self.pending.append(label)
         self.pending += agent.surprises(ctx)
-        self.take_answer()
+        self.take_answer(ctx, now)
 
-        revision = agent.revision(ctx)
-        path = agent.graph.focus(ctx, revision)
-        skill = self.executive.step(ctx, path, revision, now)
-        for o in self.executive.outcomes[self._outcomes_seen:]:
-            self.pending.append(f"{o.skill} for {o.need} {o.result}" + (f": {o.why}" if o.why else ""))
-        self._outcomes_seen = len(self.executive.outcomes)
-        if not path:
-            self.pending.append("nothing in the needs graph can be worked now")
-        self.maybe_ask(ctx, path, now)
+        skill = ex.step(ctx, now)
+        for r in ex.reports[self._reports_seen:]:
+            self.out(f"executive: {r}")
+            if r.result != "done" or ex.plan == "fallback":
+                self.pending.append(str(r))
+        self._reports_seen = len(ex.reports)
+        self.maybe_ask(now, ctx)
+        agent.running(ctx, ex.approach)
 
         order = skill.order(ctx) if skill is not None else None
         engine = pick(agent.engines, ctx, order)
         action = engine.act(ctx, order) if engine is not None else None
         agent.act(action)
-        agent.record({"t": now, "focus": path[-1].key if path else None, "skill": skill.name if skill else None,
-                      "engine": engine.name if engine else None, "action": str(action) if action else None})
+        agent.record({"t": now, "goal": ex.goal.text if ex.goal else None, "plan": ex.plan,
+                      "approach": ex.approach.text if ex.approach else None, "engine": engine.name if engine else None,
+                      "action": str(action) if action else None})
         if now - self._status_at >= self.settings.status_seconds:
             self._status_at = now
-            focus = path[-1].title if path else "(nothing to work)"
-            self.out(f"{focus} | {skill.name if skill else '-'} | {engine.name if engine else '-'}: "
-                     f"{action or 'nothing'} | {agent.status(ctx)} | "
+            goal = ex.goal.text if ex.goal else "-"
+            self.out(f"{goal} | {ex.plan}: {ex.approach.text if ex.approach else '-'} | "
+                     f"{engine.name if engine else '-'}: {action or 'nothing'} | {agent.status(ctx)} | "
                      f"last milestone {self.ledger.minutes_since_last(now):.1f}m ago")
 
-    def take_answer(self) -> None:
+    def take_answer(self, ctx: Any, now: float) -> None:
         answer, error = self.asker.take()
         if error:
             self.note = error
             self.out(f"strategist: {error}")
             self.pending.append("the last answer failed")
-        if answer is not None:
-            self.agent.adopt(answer)
-            self.answered = True
+        if answer is None:
+            return
+        try:
+            publication = self.agent.publication(answer, ctx)
+        except ValueError as e:
+            self.note = f"your answer could not be carried out: {e}"
+            self.out(f"strategist: {self.note}")
+            self.pending.append("the last answer could not be carried out")
+            return
+        if publication is not None:
+            self.executive.adopt(publication, ctx, now)
 
-    def maybe_ask(self, ctx: Any, path: list, now: float) -> None:
+    def maybe_ask(self, now: float, ctx: Any) -> None:
         if self.asker.busy() or now - self.asked_at < self.settings.min_ask_seconds:
             return
         if now - self.asked_at >= self.settings.max_answer_age_seconds:
-            self.pending.append("the last answer is old")
+            self.pending.append("time to look again")
         if not self.pending:
             return
-        reason = "; ".join(dict.fromkeys(self.pending))
-        rows = self.agent.graph.rows(ctx, path)
-        briefing = Briefing(ctx, reason, rows, list(self.executive.outcomes), self.ledger.recent(),
-                            self.ledger.minutes_since_last(now), self.note)
+        ex = self.executive
+        running = f"{ex.goal.text} by {ex.approach.text} (plan {ex.plan})" if ex.goal else "nothing"
+        briefing = Briefing(ctx, "; ".join(dict.fromkeys(self.pending)), running, list(ex.reports),
+                            self.ledger.recent(), self.ledger.minutes_since_last(now), self.note)
         if self.asker.ask(briefing):
             self.asked_at, self.pending, self.note = now, [], ""
 
@@ -176,6 +182,5 @@ class Run:
         lines = [f"run over: {self.stopped_why or 'stopped'}",
                  f"milestones this run: {len(self.ledger.run)} ({self.ledger.per_hour():.1f}/h): "
                  f"{', '.join(self.ledger.recent(30)) or 'none'}"]
-        lines += [f"  {o.result}: {o.skill} for {o.need} {o.why}".rstrip() for o in self.executive.outcomes]
-        lines += [f"  blocked: {k}: {b.why}" for k, b in self.agent.graph.blocks.items()]
+        lines += [f"  {r}" for r in self.executive.reports]
         return "\n".join(lines)

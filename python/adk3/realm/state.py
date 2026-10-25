@@ -117,6 +117,19 @@ class State:
     def threats(self) -> list[Entity]:
         return [e for e in self.npcs() if self.is_threat(e)]
 
+    def known_threats(self) -> list[Entity]:
+        """Threats on this map in view, or seen and still remembered where they were (``WorldModel.sightings``)."""
+        seen = [sg.entity for sg in self.world.sightings.values()
+                if sg.map_id == self.map_id and sg.entity.kind == "npc" and self.is_threat(sg.entity)]
+        in_view = {e.id for e in self.threats()}
+        return self.threats() + [e for e in seen if e.id not in in_view]
+
+    def ground_held(self, cell: Pos) -> bool:
+        """A known threat would get to ``cell`` before we do: it holds that ground (Manual §11 Hostiles:
+        it goes for the nearest character, at about our pace)."""
+        ours = chebyshev(self.pos, cell)
+        return any(chebyshev(e.pos, cell) <= ours for e in self.known_threats())
+
     def boss(self) -> Entity | None:
         return next((e for e in self.npcs() if e.is_boss), None)
 

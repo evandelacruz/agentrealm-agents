@@ -6,8 +6,8 @@ scroll and helper line, every level entrance and what happened at it,
 where things are sold, what hostiles hit for, where gems drop, every death.
 Tiles and door warps live in the ADK's world knowledge base beside it.
 
-``revision`` rises with every new fact. The needs graph lifts a block when
-it rises, so a failure is retried only once something is known that was not.
+``revision`` rises with every new fact. ``happened`` and ``news`` hold this
+run's reaction outcomes for the strategist; they are not kept.
 
 Clues are world secrets: this file lives under ``python/.state/``, which is
 never committed (docs/GAME_NOTES.md **No spoilers in this repo**).
@@ -23,6 +23,8 @@ from pathlib import Path
 Pos = tuple[int, int]
 
 REGION = 16  # blocks per side of a region, the unit gem yields are kept in
+
+HAPPENED_KEPT = 15  # reaction outcomes kept for the strategist
 
 
 def place_key(map_id: int, pos: Pos) -> str:
@@ -144,11 +146,23 @@ class Memory:
     territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
     deaths: list[Death] = field(default_factory=list)
     revision: int = 0
+    happened: list[str] = field(default_factory=list)  # this run: what the reactions did and why, newest last
+    news: list[str] = field(default_factory=list)  # this run: what happened that the strategist has not heard yet
 
     # Learning.
 
     def learned(self) -> None:
         self.revision += 1
+
+    def note(self, text: str, news: bool = True) -> None:
+        """What just happened (a reaction's outcome), for the strategist to read; ``news`` when it should hear at once."""
+        self.happened = (self.happened + [text])[-HAPPENED_KEPT:]
+        if news:
+            self.news.append(text)
+
+    def take_news(self) -> list[str]:
+        out, self.news = self.news, []
+        return out
 
     def add_clue(self, clue: Clue) -> bool:
         if any(c.text == clue.text and c.speaker == clue.speaker for c in self.clues):
@@ -273,7 +287,7 @@ class Memory:
     def save(self) -> None:
         if self.path is None:
             return
-        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision")}
+        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news")}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(raw, indent=1, sort_keys=True))
 

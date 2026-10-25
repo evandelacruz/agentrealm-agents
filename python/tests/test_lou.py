@@ -1,4 +1,4 @@
-"""Layered Lou (docs/v3/SPEC.md) on made-up worlds: the needs graph, the engines, memory and the strategist's brief.
+"""Layered Lou (docs/v3/SPEC.md) on made-up worlds: the publication and the executive, the reactions, memory and the strategist's brief.
 
 Each test builds a small invented map, puts Lou on it and checks what she
 decides. No test reaches the network or ``python/.state``.
@@ -6,24 +6,26 @@ decides. No test reaches the network or ``python/.state``.
 
 from __future__ import annotations
 
+import random
 import tempfile
 import unittest
 from pathlib import Path
 
+from agentrealm_adk.item_table import InventorySupply
 from agentrealm_adk.memory import Memory as NavMemory
 from agentrealm_adk.world import Entity, MapView, WorldModel
 
+from adk3.core.executive import Executive
 from adk3.core.loop import Briefing
-from adk3.core.needs import Graph, Status
 from adk3.realm import actions, harm
 from adk3.realm.context import Ctx
 from adk3.realm.memory import Clue, Death, Memory
 from adk3.realm.state import State
 from adk3.realm.value import Levers
-from lou import engines, needs, opportunities
+from lou import engines, opportunities, publish, skills
+from lou.agent import Standing
 from lou.orders import GoTo, Work
-from lou.registry import ROOT
-from lou.strategist import adopt, describe
+from lou.strategist import describe
 
 MAP = 1
 
@@ -47,61 +49,78 @@ def world(rows: list[str], at=(5, 5), health=10, gems=0, armed="pocket_knife", s
     return w
 
 
-def ctx_of(w: WorldModel, memory: Memory | None = None, levers: Levers | None = None, **judgments) -> Ctx:
+def ctx_of(w: WorldModel, memory: Memory | None = None, levers: Levers | None = None, **tactics) -> Ctx:
     s = State.of(w, 10, None, 8, None, 4)
-    return Ctx(s, memory or Memory(), None, NavMemory(), (MAP, (1, 1)), levers or Levers(), dict(judgments), {})
+    return Ctx(s, memory or Memory(), None, NavMemory(), (MAP, (1, 1)), levers or Levers(), dict(tactics))
 
 
 OPEN = ["g" * 11] * 11
 
 
-class NeedsGraphTest(unittest.TestCase):
-    def test_no_entrances_known_looks_for_them(self):
+def fallback(ctx):
+    return Standing("safe work"), publish.Approach("cut grass nearby", "earn_gems", {}, {}, {})
+
+
+GEMS_15 = {"goal": {"test": "gems", "n": 15}, "approach": {"method": "earn_gems", "x": 5, "y": 5}}
+
+
+class PublicationTest(unittest.TestCase):
+    def test_an_answer_becomes_goal_approach_plan_b_and_next(self):
+        mem = Memory()
+        mem.saw_for_sale("bronze_sword", 15, MAP, (2, 2))
+        answer = {**GEMS_15, "plan_b": {"method": "earn_gems", "x": 1, "y": 1},
+                  "next": {"goal": {"test": "carry", "item": "bronze_sword"}, "approach": {"method": "buy", "item": "bronze_sword"}}}
+        p = publish.publication(answer, ctx_of(world(OPEN), mem))
+        self.assertEqual((p.goal.test, p.approach.method, p.plan_b.method, p.next.approach.method),
+                         ("gems", "earn_gems", "earn_gems", "buy"))
+
+    def test_an_unknown_method_is_refused_with_the_menu(self):
+        with self.assertRaisesRegex(ValueError, "earn_gems"):
+            publish.publication({"goal": {"test": "gems", "n": 1}, "approach": {"method": "farm"}}, ctx_of(world(OPEN)))
+
+    def test_plan_a_that_cannot_start_is_refused_with_why(self):
+        answer = {"goal": {"test": "carry", "item": "bronze_sword"}, "approach": {"method": "buy", "item": "bronze_sword"}}
+        with self.assertRaisesRegex(ValueError, "no shelf selling bronze_sword"):
+            publish.publication(answer, ctx_of(world(OPEN)))
+
+
+class ExecutiveTest(unittest.TestCase):
+    def test_nothing_published_runs_the_fallback(self):
+        ex = Executive(fallback)
+        self.assertIsInstance(ex.step(ctx_of(world(OPEN)), 0.0), skills.EarnGems)
+        self.assertEqual(ex.plan, "fallback")
+
+    def test_the_goal_met_starts_next_at_once(self):
+        mem = Memory()
+        mem.saw_for_sale("bronze_sword", 15, MAP, (2, 2))
+        answer = {**GEMS_15, "next": {"goal": {"test": "carry", "item": "bronze_sword"},
+                                      "approach": {"method": "buy", "item": "bronze_sword"}}}
+        ex = Executive(fallback)
+        ctx = ctx_of(world(OPEN, gems=3), mem)
+        ex.adopt(publish.publication(answer, ctx), ctx, 0.0)
+        ex.step(ctx, 1.0)
+        rich = ctx_of(world(OPEN, gems=20), mem)
+        self.assertIsInstance(ex.step(rich, 2.0), skills.Buy)
+        self.assertEqual(ex.reports[-1].result, "done")
+
+    def test_a_failed_approach_switches_to_plan_b_then_falls_back(self):
+        answer = {**GEMS_15, "approach": {**GEMS_15["approach"], "fails_if": {"minutes": 1}},
+                  "plan_b": {"method": "forage", "fails_if": {"minutes": 1}}}
+        ex = Executive(fallback)
         ctx = ctx_of(world(OPEN))
-        path = Graph(ROOT).focus(ctx, 0)
-        self.assertEqual(path[-1].key, "know:entrances")
+        ex.adopt(publish.publication(answer, ctx), ctx, 0.0)
+        self.assertIsInstance(ex.step(ctx, 61.0), skills.Forage)
+        self.assertEqual((ex.plan, ex.reports[-1].why), ("B", "its 1 minutes ran out"))
+        ex.step(ctx, 200.0)
+        self.assertEqual(ex.plan, "fallback")
 
-    def test_a_level_with_no_judgment_waits_on_the_strategist_and_lou_keeps_learning(self):
-        mem = Memory()
-        mem.entrance(MAP, (9, 9))
-        ctx = ctx_of(world(OPEN), mem)
-        path = Graph(ROOT).focus(ctx, 0)
-        self.assertEqual(path[-1].key, "know:world")
-        self.assertIs(needs.ReadyFor("1:9,9").check(ctx).status, Status.UNKNOWN)
-
-    def test_gear_judged_and_seen_for_sale_but_too_dear_means_earning_gems(self):
-        mem = Memory()
-        mem.entrance(MAP, (9, 9))
-        mem.saw_for_sale("bronze_sword", 15, MAP, (2, 2))
-        ctx = ctx_of(world(OPEN, gems=3), mem, needs={"1:9,9": {"items": ["bronze_sword"]}})
-        path = Graph(ROOT).focus(ctx, 0)
-        self.assertEqual([n.key for n in path][-3:], ["ready:1:9,9", "have:bronze_sword", "gems:15"])
-
-    def test_with_the_gems_she_buys_it(self):
-        mem = Memory()
-        mem.entrance(MAP, (9, 9))
-        mem.saw_for_sale("bronze_sword", 15, MAP, (2, 2))
-        ctx = ctx_of(world(OPEN, gems=20), mem, needs={"1:9,9": {"items": ["bronze_sword"]}})
-        path = Graph(ROOT).focus(ctx, 0)
-        self.assertEqual(path[-1].key, "have:bronze_sword")
-        self.assertEqual(path[-1].skill(ctx).name, "buy")
-
-    def test_never_seen_for_sale_means_finding_the_seller(self):
-        mem = Memory()
-        mem.entrance(MAP, (9, 9))
-        ctx = ctx_of(world(OPEN), mem, needs={"1:9,9": {"items": ["iron_sword"]}})
-        self.assertEqual(Graph(ROOT).focus(ctx, 0)[-1].key, "know:seller:iron_sword")
-
-    def test_a_blocked_need_lifts_when_something_new_is_known(self):
-        mem = Memory()
-        mem.entrance(MAP, (9, 9))
-        ctx = ctx_of(world(OPEN), mem, needs={"1:9,9": {"items": []}})
-        graph = Graph(ROOT)
-        reach = graph.focus(ctx, 5)[-1]
-        self.assertEqual(reach.key, "reach:1:9,9")
-        graph.block(reach, "no known way", 5)
-        self.assertNotEqual(graph.focus(ctx, 5)[-1].key, "reach:1:9,9")
-        self.assertEqual(graph.focus(ctx, 6)[-1].key, "reach:1:9,9")
+    def test_no_progress_for_the_patience_fails_the_approach(self):
+        ex = Executive(fallback)
+        ctx = ctx_of(world(OPEN), levers=Levers(patience=30))
+        ex.adopt(publish.publication({"goal": {"test": "health", "n": 99}, "approach": {"method": "forage"}}, ctx), ctx, 0.0)
+        ex.step(ctx, 0.0)
+        ex.step(ctx, 31.0)
+        self.assertEqual([r.why for r in ex.reports[-2:]], ["no progress for 30s", "no plan B"])
 
 
 class StayAliveTest(unittest.TestCase):
@@ -109,17 +128,30 @@ class StayAliveTest(unittest.TestCase):
         w = world(OPEN, health=3)
         w.entities = [Entity("supply", 5, (8, 8), "apple")]
         ctx = ctx_of(w)
-        path = Graph(ROOT).focus(ctx, 0)
-        self.assertEqual(path[-1].key, "alive")
-        order = path[-1].skill(ctx).order(ctx)
-        self.assertIsInstance(order.action, actions.Take)
+        self.assertIsInstance(skills.Forage().order(ctx).action, actions.Take)
 
     def test_hurt_with_no_food_she_cuts_bushes_for_berries_not_stands_in_town(self):
         rows = ["ggggggggggg"] * 5 + ["gggbggggggg"] + ["ggggggggggg"] * 5
         ctx = ctx_of(world(rows, health=3))
-        order = Graph(ROOT).focus(ctx, 0)[-1].skill(ctx).order(ctx)
+        order = skills.Forage().order(ctx)
         self.assertIsInstance(order, Work)
         self.assertIn((3, 5), order.cells)
+
+
+class FieldTest(unittest.TestCase):
+    def test_grass_a_snotling_would_reach_first_is_not_worked(self):
+        w = world(["g" * 21] * 11, at=(10, 5))
+        w.entities = [Entity("npc", 101, (2, 5), "snotling")]
+        w.hostile_types.add(("npc", "snotling"))
+        cells = skills.EarnGems().cells(ctx_of(w))
+        self.assertTrue(cells)
+        self.assertTrue(all(c[0] > 6 for c in cells), cells)
+
+    def test_the_strategists_field_is_where_she_works(self):
+        w = world(["g" * 41] * 11, at=(5, 5))
+        order = skills.EarnGems((35, 5)).order(ctx_of(w))
+        self.assertIsInstance(order, Work)
+        self.assertTrue(all(abs(x - 35) <= skills.FIELD_SEARCH for x, _ in order.cells), order.cells)
 
 
 class CombatTest(unittest.TestCase):
@@ -127,24 +159,60 @@ class CombatTest(unittest.TestCase):
         w.entities = [Entity("npc", 100 + i, p, "snotling") for i, p in enumerate(cells)]
         w.hostile_types.add(("npc", "snotling"))
 
+    def plan(self, ctx, order=None):
+        return engines.Combat().plan(ctx, order, harm.threats_near(ctx.state))
+
     def test_one_snotling_beside_a_healthy_lou_is_fought(self):
         w = world(OPEN)
         self.snotlings(w, [(6, 5)])
-        ctx = ctx_of(w)
-        choice = engines.Combat().choose(ctx, None)
-        self.assertTrue(choice.name.startswith("fight"), choice.name)
+        self.assertEqual(self.plan(ctx_of(w)).kind, "fight")
 
     def test_a_pack_against_a_hurt_lou_is_not_fought(self):
         w = world(OPEN, health=2, safe={(0, 0), (1, 0), (0, 1)})
         self.snotlings(w, [(6, 5), (6, 6), (5, 6)])
-        choice = engines.Combat().choose(ctx_of(w), None)
-        self.assertFalse(choice.name.startswith("fight"), choice.name)
+        self.assertNotEqual(self.plan(ctx_of(w)).kind, "fight")
 
-    def test_on_safe_ground_beside_a_pack_she_does_not_step_back_out_to_work(self):
-        w = world(OPEN, health=6, safe={(5, 5), (4, 5), (4, 4), (5, 4)})
-        self.snotlings(w, [(6, 6), (7, 5)])
-        choice = engines.Combat().choose(ctx_of(w), Work(((7, 6),), "cut"))
-        self.assertNotEqual(choice.name, "go on")
+    def test_an_engagement_is_kept_until_it_ends(self):
+        w = world(OPEN)
+        self.snotlings(w, [(6, 5)])
+        combat = engines.Combat()
+        combat.applies(ctx_of(w), None)
+        first = combat.now
+        w.tick += 1
+        w.health = 6
+        combat.applies(ctx_of(w), None)
+        self.assertIs(combat.now, first)
+
+    def test_at_the_bar_she_drinks_a_potion_she_carries(self):
+        w = world(OPEN)
+        w.held_supplies = [InventorySupply(9, "small_potion")]
+        self.snotlings(w, [(6, 5)])
+        combat = engines.Combat()
+        ctx = ctx_of(w, bar=5)
+        combat.now = combat.make(ctx, "fight", w.entities[0], "snotling")
+        w.health = 4
+        self.assertIsInstance(combat.act(ctx_of(w, bar=5), None), actions.Drink)
+
+    def test_at_the_bar_with_no_potion_she_breaks_off_and_says_so(self):
+        w = world(OPEN, safe={(0, 0), (1, 0), (0, 1)})
+        self.snotlings(w, [(6, 5)])
+        combat = engines.Combat()
+        ctx = ctx_of(w, bars={"snotling": 5})
+        combat.now = combat.make(ctx, "fight", w.entities[0], "snotling")
+        w.health = 4
+        ctx = ctx_of(w, bars={"snotling": 5})
+        combat.act(ctx, None)
+        self.assertEqual(combat.now.kind, "back_off")
+        self.assertTrue(any("broke off" in n for n in ctx.memory.take_news()))
+
+    def test_a_close_call_is_rolled_and_a_bold_agent_leans_to_fight(self):
+        fight = engines.Option("fight", "fight", harm.Course())
+        back = engines.Option("back off", "back_off", harm.Course())
+        scored = [(0.0, fight), (0.0, back)]
+        bold = sum(engines.roll(scored, 10, random.Random(i))[0] is fight for i in range(400))
+        timid = sum(engines.roll(scored, 0, random.Random(i))[0] is fight for i in range(400))
+        self.assertGreater(bold, timid)
+        self.assertIs(engines.roll([(5.0, fight), (0.0, back)], 0, random.Random(1))[0], fight)
 
     def test_the_odds_count_deaths(self):
         w = world(OPEN, health=1)
@@ -249,23 +317,23 @@ class MemoryTest(unittest.TestCase):
 
 
 class StrategistBriefTest(unittest.TestCase):
-    def test_the_brief_carries_clues_entrances_and_the_graph(self):
+    def test_the_brief_carries_clues_entrances_its_chain_and_what_just_happened(self):
         mem = Memory()
         mem.entrance(MAP, (9, 9))
         mem.add_clue(Clue("seek the door by the old oak", "helper", "town_helper", MAP, 3, 3))
+        mem.note("backed off from snotling; clear now near 4,4")
         ctx = ctx_of(world(OPEN), mem)
-        graph = Graph(ROOT)
-        path = graph.focus(ctx, 0)
-        text = describe(Briefing(ctx, "starting", graph.rows(ctx, path), [], [], 0.0))
-        self.assertIn("seek the door by the old oak", text)
-        self.assertIn("1:9,9", text)
-        self.assertIn("beat the world", text)
+        text = describe(Briefing(ctx, "starting", "nothing", [], [], 0.0), {"chain": ["beat the world", "hold 15 gems"]})
+        for part in ("seek the door by the old oak", "1:9,9", "hold 15 gems", "backed off from snotling"):
+            self.assertIn(part, text)
 
-    def test_an_answer_sets_judgments_and_tactics(self):
-        ctx = ctx_of(world(OPEN))
-        adopt(ctx, {"order": ["1:9,9"], "needs": {"1:9,9": {"items": ["bronze_sword"]}}, "tactics": {"avoid": ["chugbug"]}})
-        self.assertEqual(ctx.judgments["order"], ["1:9,9"])
-        self.assertEqual(ctx.tactics["avoid"], ["chugbug"])
+    def test_a_reaction_note_is_news_once(self):
+        mem = Memory()
+        mem.note("engaged: fight snotling", news=False)
+        mem.note("broke off")
+        self.assertEqual(mem.take_news(), ["broke off"])
+        self.assertEqual(mem.take_news(), [])
+        self.assertEqual(len(mem.happened), 2)
 
 
 class LeversTest(unittest.TestCase):

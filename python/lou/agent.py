@@ -1,34 +1,41 @@
-"""Lou on the adk3 loop: the body, her memory, the needs graph, her engines and her strategist, wired together."""
+"""Lou on the adk3 loop: the body, her memory, her reactions and her strategist, wired together."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from adk3.core.executive import Publication
 from adk3.core.loop import Briefing
-from adk3.core.needs import Graph
 from adk3.realm import milestones
 from adk3.realm.body import Body
 from adk3.realm.context import Ctx
 from adk3.realm.value import Levers
 
-from . import registry
-from .strategist import Strategist, adopt
+from . import publish, registry
+from .strategist import Strategist
+
+
+@dataclass(frozen=True)
+class Standing:
+    """The fallback's goal: never met, it runs until the strategist answers."""
+
+    text: str
+
+    def met(self, ctx: Ctx) -> bool:
+        return False
 
 
 class Lou:
     def __init__(self, body: Body, levers: Levers, strategist: Strategist | None, trace: Path,
                  out: Callable[[str], None] = print):
         self.body, self.levers, self.strategist, self.out = body, levers, strategist, out
-        self.graph = Graph(registry.ROOT)
         self.engines = registry.ENGINES
-        self.judgments: dict[str, Any] = {}
         self.tactics: dict[str, Any] = {}
         self.trace = open(trace, "a", buffering=1)
-        self._revision = 0
-        self._seen: tuple | None = None
 
     # What the loop asks of an agent.
 
@@ -36,38 +43,44 @@ class Lou:
         state = self.body.sense()
         if state is None:
             return None
-        return Ctx(state, self.body.memory, self.body.kb, self.body.nav, self.body.town, self.levers,
-                   self.judgments, self.tactics)
+        return Ctx(state, self.body.memory, self.body.kb, self.body.nav, self.body.town, self.levers, self.tactics)
 
     def act(self, action) -> None:
         self.body.act(action)
 
-    def revision(self, ctx: Ctx) -> int:
-        """Rises whenever what Lou knows or holds changes: a new fact, a new map, a new item, a level."""
+    def fallback(self, ctx: Ctx) -> tuple[Standing, publish.Approach]:
+        """Safe, useful work until the strategist answers: eat when hurt, else cut grass near where she stands."""
         s = ctx.state
-        now = (ctx.memory.revision, s.map_id, tuple(sorted(c.code for c in s.carried)), s.levels_cleared, s.lives)
-        if now != self._seen:
-            self._seen, self._revision = now, self._revision + 1
-        return self._revision
+        if s.health < self.levers.heal_below * s.max_health:
+            return Standing("heal until the strategist answers"), publish.Approach("forage", "forage", {}, {}, {})
+        return Standing("earn gems until the strategist answers"), publish.Approach("cut grass nearby", "earn_gems", {}, {}, {})
+
+    def running(self, ctx: Ctx, approach: Any) -> None:
+        self.tactics = dict(getattr(approach, "tactics", None) or {})
+        ctx.tactics = self.tactics
 
     def milestones(self, ctx: Ctx) -> list[tuple[str, str]]:
         return milestones.shown(ctx)
 
     def surprises(self, ctx: Ctx) -> list[str]:
-        return self.body.take_surprises()
+        return self.body.take_surprises() + ctx.memory.take_news()
 
     def strategize(self, briefing: Briefing) -> Any:
         if self.strategist is None:
             return None
         return self.strategist(briefing)
 
-    def adopt(self, answer: Any) -> None:
+    def publication(self, answer: Any, ctx: Ctx) -> Publication | None:
         if not isinstance(answer, dict):
-            return
-        ctx = Ctx(self.body.state(), self.body.memory, self.body.kb, self.body.nav, self.body.town, self.levers,
-                  self.judgments, self.tactics)
-        changed = adopt(ctx, answer)
-        self.out(f"strategist: {answer.get('why', '')}".rstrip() + (f" [{', '.join(changed)}]" if changed else ""))
+            return None
+        p = publish.publication(answer, ctx)
+        lines = [f"strategist: {p.goal.text} by {p.approach.text}" + (f" — {p.why}" if p.why else "")]
+        if p.plan_b is not None:
+            lines.append(f"  plan B: {p.plan_b.text}")
+        if p.next is not None:
+            lines.append(f"  next: {p.next.goal.text} by {p.next.approach.text}")
+        self.out("\n".join(lines))
+        return p
 
     def status(self, ctx: Ctx) -> str:
         s = ctx.state
@@ -81,4 +94,3 @@ class Lou:
     def close(self) -> None:
         self.body.save()
         self.trace.close()
-

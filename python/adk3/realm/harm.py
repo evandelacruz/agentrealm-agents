@@ -42,6 +42,7 @@ from agentrealm_adk.survival import (
     fighting_weapon,
     health_left,
     hit_chance,
+    our_hit_chance,
     worn_defense,
 )
 from agentrealm_adk.threat import type_key_for_entity
@@ -126,7 +127,7 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
     weapon = best.code if best is not None else fighting_weapon(s.armed)
     our_every = attack_interval_ticks(weapon)
     our_top = max(1, BASE_ATTACK_POWER + (weapon_damage(weapon) or 0))
-    our_hit = hit_chance()
+    our_hit = our_hit_chance()
     our_reach = s.world.attack_range or 1
     safe = s.world.view.safe
     landed = walked = 0

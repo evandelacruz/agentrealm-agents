@@ -38,6 +38,10 @@ UNKILLED_HOSTILE_HEALTH = 10
 # (PLAN.md Server gaps), so ours is the world's base: every Olympuff
 # character has 2 (A81), a hit on 8 or better, 65% of swings.
 BASE_ATTACK_POWER = 2
+# Characters add 2 to every roll to hit (CL: characters hit hostiles 75% of the
+# time, not 65%); hostiles, bosses and traps roll as before. Hit only: damage
+# stays 1 up to attack power plus weapon damage.
+CHARACTER_HIT_BONUS = 2
 COMBAT_DIE = 20
 COMBAT_HIT_TARGET = 10
 # A hostile's swing at us rolls the same way against our defense, 0, plus
@@ -408,6 +412,11 @@ def expected_damage(group: list[Entity], threat: ThreatTable, ticks: float, armo
     """The damage ``group`` is expected to deal us through ``armor`` in
     ``ticks``, at the rate ``ticks_to_kill_us`` prices it."""
     return ticks * sum(_hostile_damage(threat, type_key_for_entity(e), armor) for e in group) / HOSTILE_ATTACK_INTERVAL_TICKS
+
+
+def our_hit_chance(defense: int = 0) -> float:
+    """A character's swing: the published roll with the characters' hit bonus (0.75 against a hostile)."""
+    return hit_chance(attack_power=BASE_ATTACK_POWER + CHARACTER_HIT_BONUS, defense=defense)
 
 
 def hit_chance(attack_power: int = BASE_ATTACK_POWER, defense: int = 0) -> float:

@@ -1,6 +1,6 @@
 # v3 agent: plan
 
-Status: plan for Evan's review. Nothing is built to it yet. The draft code under `python/adk3/` and `python/lou/` came before this plan and is reworked to it, not kept as is.
+Status: plan, agreed with Evan. Being built. The draft code under `python/adk3/` and `python/lou/` came before this plan and is reworked to it, not kept as is.
 
 Sources read in full before writing this: the Manual (all sixteen sections), the API rules, Create a Character Agent, the State machine guide, the Changelog, and `docs/GAME_NOTES.md`.
 
@@ -26,6 +26,11 @@ The agent works backwards from the objective, the way a person would:
 - What is needed to get gear? Usually gems and a seller who has it; sometimes a find or a boss drop.
 - What is needed to get gems? Field work, kills, gem piles and caches.
 - Anything not known yet (where the entrance is, what the boss hits for, which shop sells what) is a need too: knowledge, got by exploring, talking, reading or scouting.
+
+**The world tells you how to progress through text** (Manual §16): rumor helpers give rough directions toward level doors, waystation helpers say what locked doors need, a helper near a secret hints at it, signs and statues carry text, and an odd block out of place is often breakable. So clues are the first source of knowledge, not a side task:
+
+- Lou reads every sign and talks to every helper she has not heard yet, whenever one is in reach and nothing more urgent is on: a `Read` costs no cooldown, a `Say` reaches 25 blocks, and the line comes back the same tick.
+- Every line is kept in memory with who said it and where, and handed to the strategist, whose first job is to turn clues into judgments on the needs graph ("this rumor points at the north-east entrance"; "the locked door needs a key from the level 2 boss").
 
 The agent holds this as a **needs graph**: what the objective requires, down to what can be done now. Each need is evaluated against what the agent knows: **met**, **unmet**, or **unknown**. The first unmet or unknown need on the cheapest path to the objective is what to work on.
 
@@ -61,7 +66,7 @@ Everything the character has learned, kept per world across runs. This is the wo
 - **Shops:** where each priced supply was seen, at what price, when.
 - **Income:** gem yield per region from our own cuts, gem piles and when they return, oddities and caches.
 - **Hostiles:** per type, the hits measured, health from our swings until a kill, where seen, how they moved.
-- **Clues:** every sign, scroll and helper line, with where and who.
+- **Clues:** every sign, scroll and helper line, with where and who; which helpers and signs are heard or read, and which are not yet.
 - **Deaths:** where, what killed us, and where the chest landed.
 
 The ADK's knowledge base and world model already hold much of this; v3 reuses their storage and adds what is missing.
@@ -123,17 +128,11 @@ A live view, readable at a glance:
 - **The needs graph** on demand: each need with met, unmet or unknown, its evidence or estimate, and the path chosen.
 - **Trace:** one JSON line per decision; the strategist's input and answer kept beside it.
 
-## Phases
+## Delivery
 
-Each phase ends with a live run on a fresh or reset character and is not done until that run meets its done-when.
+One delivery, not discovery runs. Every layer is built end to end (memory, the needs graph, the strategist, the skills, the controller, the live view) and tested offline against recorded and fake game states. The first live run is the acceptance of the whole product: a fresh character, unattended, works toward clearing levels, every step explained in the view. Iteration after that is fixes, and each fix names its home: a need kind, a skill, an estimate, or the strategist's input.
 
-| # | Builds | Done when |
-|---|---|---|
-| 1 | Memory, perception, the live view; the controller with the danger model; the travel and explore skills | From town, walks to a named minimap entrance on the overworld and back without dying, routing around fences and water |
-| 2 | Earn gems (yield learned per region), buy, equip, recover the death chest | A fresh character holds a bronze sword and bronze mail, bought, within about 15 minutes, with no deaths |
-| 3 | The needs graph and the strategist | From a fresh character, the strategist picks a level and the agent readies for it and reaches its entrance, every step explained in the view |
-| 4 | Level skills: scout, fight the boss on its clock, leave before the limit, retry with what was learned | Level 1 cleared |
-| 5 | Run it | Levels cleared in order across sessions; milestones per hour beat Lorraine's on the same world |
+Build order inside the delivery: memory and perception; the controller and its danger model; travel and explore; clues (read, talk); earn gems, buy, equip, recover the death chest; the needs graph; the strategist; level skills (scout, boss fight on its clock, leave before the limit); the live view and the run report.
 
 ## Code
 
@@ -143,8 +142,7 @@ Each phase ends with a live run on a fresh or reset character and is not done un
 - Reuse the ADK's plumbing (client, pacer, world model, knowledge base storage, pathing, queue building, combat math from the Manual); import nothing of Gary's or Lorraine's decisions.
 - No branch for a situation a run hit: it is a need kind, a skill, an estimate, or the strategist's call.
 
-## Open questions for Evan
+## Decided
 
-1. What in the draft code put you off? The plan above assumes the grab-bag `Action.data`, the dense one-liners and the scattered game details; say if it was something else.
-2. Phase 1 reuses the ADK's world model and pathing. Keep that, or does v3 start its own?
-3. Name: Layered Lou, or another.
+- Name: Layered Lou (`lou`).
+- Reuse the ADK's world model and pathing where they serve; replace what does not.

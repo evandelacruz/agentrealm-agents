@@ -82,6 +82,12 @@ class State:
         weapons = [c for c in self.carried if supplies.is_weapon(c.code)]
         return max(weapons, key=lambda c: (weapon_rank(c.code, self.world, None), c.where == "armed"), default=None)
 
+    def unworn(self) -> Carried | None:
+        """Armor or an accessory carried for a slot nothing is worn in: wearing it costs one tick and only helps."""
+        filled = set(self.world.worn_codes)
+        return next((c for c in self.carried if c.where == "held" and supplies.worn_slot(c.code)
+                     and supplies.worn_slot(c.code) not in filled), None)
+
     def has(self, code: str) -> bool:
         return any(c.code == code for c in self.carried)
 

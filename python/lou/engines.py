@@ -290,6 +290,9 @@ class Combat:
         best = s.best_weapon()
         if best is not None and best.where != "armed":
             return actions.Equip(best.id, "Arm", best.code)  # a drink or a tool may have taken the weapon's place
+        armor = s.unworn()
+        if armor is not None:
+            return actions.Equip(armor.id, "Wear", armor.code)  # never fight with armor in the pack
         stand = travel.to_strike(ctx, e.pos, s.world.attack_range or 1)
         if stand:
             return walk_or_break(ctx, stand, f"close on {e.code}")
@@ -414,6 +417,8 @@ class Opportunities:
         self.committed: tuple | None = None  # the chance under way: where, and why
 
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
+        if isinstance(order, Do) and order.reach == 0 and order.at == ctx.state.pos:
+            return False  # the method's own action here and now (arm, wear, drink) costs no detour: it goes first
         return self.pick(ctx) is not None
 
     def act(self, ctx: Ctx, order: Order | None) -> Action | None:

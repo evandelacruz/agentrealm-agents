@@ -24,7 +24,7 @@ from adk3.realm.state import State
 from adk3.realm.value import Levers
 from lou import engines, opportunities, publish, skills
 from lou.agent import Standing
-from lou.orders import GoTo, Work
+from lou.orders import Do, GoTo, Work
 from lou.strategist import describe
 
 MAP = 1
@@ -264,6 +264,13 @@ class CombatTest(unittest.TestCase):
         self.assertEqual(combat.now.kind, "back_off")
         self.assertIsInstance(combat.act(ctx, None), actions.Walk)
 
+    def test_before_a_swing_she_wears_armor_she_carries(self):
+        w = world(OPEN, armed="bronze_sword")
+        w.held_supplies = [InventorySupply(5, "bronze_mail")]
+        self.snotlings(w, [(6, 5)])
+        action = engines.Combat().swing_at(ctx_of(w), w.entities[0])
+        self.assertEqual((action.verb, action.code), ("Wear", "bronze_mail"))
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]
@@ -416,6 +423,12 @@ class OpportunitiesTest(unittest.TestCase):
         w.pos = (5, 5)
         action = opp.pick(ctx_of(w))
         self.assertEqual(action.path[-1][0] > 5, True)
+
+    def test_an_instant_self_action_goes_before_an_opportunity(self):
+        w = world(OPEN)
+        w.entities = [Entity("supply", 7, (7, 5), "gem")]
+        order = Do(actions.Equip(5, "Wear", "bronze_mail"), (5, 5), reach=0)
+        self.assertFalse(engines.Opportunities().applies(ctx_of(w), order))
 
     def test_an_unread_sign_is_read_and_a_read_one_is_not(self):
         w = world(OPEN)

@@ -109,7 +109,7 @@ When the goal's test passes the executive reports done; when a failure condition
 
 Every tick, in fixed priority, the first that applies acts. None calls a model; each plays the approach's tactics and the levers.
 
-1. **Combat**, when a hostile can reach Lou. It weighs fight, back off to safe ground or behind a wall, and drink, as reward against risk (below), and once it picks, it **commits** by an **engagement plan**:
+1. **Combat**, when a hostile can reach Lou, or a hit lands with no hostile in view to explain it (an attacker out of sight: she backs off). It weighs fight, back off to safe ground or behind a wall, and drink, as reward against risk (below), and once it picks, it **commits** by an **engagement plan**:
    - **Fight:** fight to the end, unless health falls to the **bar**: the tactics' bar for that hostile type, else the `heal_below` lever. At the bar she drinks if she carries a potion and fights on; with none she breaks off to safe ground, forages, and reports.
    - **Back off:** go to safe ground and **hold** there (on safe ground, holding is the option instead of backing off). Holding means the approach is **held up**: it is reported, which fails the approach, so plan B or the strategist moves her elsewhere. A hold lasts until the approach changes or the hostiles are gone; it is never a wait for them to leave.
    - It is decided again only when the engagement ends or the bar is reached, never tick by tick.
@@ -120,7 +120,7 @@ Every tick, in fixed priority, the first that applies acts. None calls a model; 
 **Risk against reward** (Manual §11 Hostiles, Combat, §16). Every option is priced in gems:
 
 - **Reward:** the progress it keeps on the approach (a fight credited with the progress after the kill), and what a kill drops (learned per type, the Manual's rate before any kills).
-- **Cost:** health it is expected to lose, at what potions cost per health; the chance it kills her, times what a death costs (a life and everything carried); the time it takes. Backing off or holding fails the approach, so it costs the time until she is at work again (a minute, at `time_worth`).
+- **Cost:** health it is expected to lose, at what potions cost per health, more the lower it leaves her (the last points stand between her and a death; food is priced the same way, so a berry at 2/10 is worth a detour it is not at 9/10); the chance it kills her, times what a death costs (a life and everything carried); the time it takes. Backing off or holding fails the approach, so it costs the time until she is at work again (a minute, at `time_worth`).
 - **The odds** come from playing the option out many times with the Manual's dice: hostiles chase at her pace, stop at walls and at the edge of the ground their type keeps to, swing on their cooldown, and deal nothing on safe ground. One set of dice per engagement, so options are compared fairly.
 - **Close calls are rolled.** When two options are close, the choice is a roll weighted toward the better one, and leaning bolder as `risk` rises, rather than always the strict best: no exact tie can loop, and Lou is less predictable. Each roll is logged with its odds.
 

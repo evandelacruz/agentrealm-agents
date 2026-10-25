@@ -93,7 +93,7 @@ Every evaluation that needs a number nobody serves (how much power level 3 needs
 
 ### 3. Strategist (LLM)
 
-The strategist reads the needs graph with its status and evidence, the memory summary (map regions, entrances, shops seen, income, hostiles, clues, deaths) and the game reference, and answers:
+The strategist reads the needs graph with its status and evidence, and the memory summary (map regions, entrances, shops seen, income, hostiles, every clue, deaths). Its standing context, sent once and cached, is the game's own documentation: the Manual's game rules (§11) and Playing the world (§16), and `docs/GAME_NOTES.md`. So it knows what breaks what, where gems come from and at what rate, the gear tiers and where each is sold, how hostiles and bosses behave, and how the world hints at its secrets, without any of it written into code. It answers:
 
 - **Tactics:** the rules each engine plays by (whom to fight, when to drink, when to leave), revised when evidence says they were wrong.
 - **Judgments:** what each unknown is likely to be ("level 2's boss likely needs iron-tier damage"; "this rumor points at the north-east entrance"), each with its reason and confidence.

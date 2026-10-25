@@ -20,6 +20,7 @@ from agentrealm_adk import supplies
 from agentrealm_adk.break_memory import BLOCK_OPENERS, capabilities_for_code
 from agentrealm_adk.navigation import CostGridParams, nearest_target
 from agentrealm_adk.navigation.door_graph import route_first_leg, way_off_map
+from agentrealm_adk.navigation.planner import HAZARDS
 from agentrealm_adk.navigation.rejection import navigation_avoid_costly
 from agentrealm_adk.world import Pos, chebyshev
 
@@ -72,6 +73,14 @@ def weapon_for(s: State, block: str) -> int | None:
     ranked = sorted((c for c in s.carried if supplies.is_weapon(c.code)),
                     key=lambda c: (c.where != "armed", c != s.best_weapon()))
     return next((c.id for c in ranked if capabilities_for_code(c.code) & openers), None)
+
+
+def hazards(s: State) -> set[Pos]:
+    """Known fire and lava off safe ground: stepping on them hurts (Manual §11 Damaging blocks), so a run away
+    never goes over them. The path planner prices them on its own (``navigation.planner.HAZARDS``)."""
+    safe = s.world.view.safe
+    return {p for p, block in s.world.view.tiles.items()
+            if block in HAZARDS and p not in safe and (s.world.view.occupy_damage(p) is None or s.world.view.occupy_damage(p) > 0)}
 
 
 def to_place(ctx: Ctx, map_id: int, cell: Pos, *, door: bool = False) -> list[Pos] | None:

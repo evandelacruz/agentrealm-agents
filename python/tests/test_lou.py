@@ -336,6 +336,15 @@ class CombatTest(unittest.TestCase):
         self.assertEqual(harm.odds(ctx_of(w).state, harm.Course()).hits_taken, 0)
 
 
+class HazardTest(unittest.TestCase):
+    def test_lava_is_a_hazard_and_safe_lava_is_not(self):
+        from adk3.realm import travel
+        w = world(OPEN, safe={(2, 2)})
+        w.maps[MAP].tiles[(3, 3)] = "lava"
+        w.maps[MAP].tiles[(2, 2)] = "lava"
+        self.assertEqual(travel.hazards(ctx_of(w).state), {(3, 3)})
+
+
 class TownsfolkTest(unittest.TestCase):
     def moving(self, code: str) -> WorldModel:
         w = world(OPEN)

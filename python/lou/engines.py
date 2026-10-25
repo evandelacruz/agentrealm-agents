@@ -207,7 +207,7 @@ class Combat:
             if not threats:  # hit by something unseen, no safe ground known: head for town, where it is
                 home = travel.to_place(ctx, ctx.town[0], ctx.town[1]) if ctx.town is not None else None
                 return walk_or_break(ctx, home or (), "toward town") or actions.Stop("nowhere known to go")
-            run = flee_run(s.world, threats, set(), _first_away(ctx))
+            run = flee_run(s.world, threats, travel.hazards(s), _first_away(ctx))
             return actions.Walk(tuple(run), "away") if run else actions.Stop("cornered")
         if e.kind == "drink":
             self.now = None
@@ -266,7 +266,7 @@ class Combat:
         out = [Option("go on", "go_on", harm.Course(ahead))]
         avoid = set(ctx.tactics.get("avoid") or [])
         away = travel.to_safe(ctx)
-        away_path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
+        away_path = tuple(away) if away else tuple(flee_run(s.world, threats, travel.hazards(s), _first_away(ctx)) or ())
         potion = best_potion(ctx) is not None
         held_up = held_up_cost(ctx)  # backing off or holding fails the approach
         for e in threats:

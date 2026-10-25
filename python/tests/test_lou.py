@@ -430,6 +430,18 @@ class OpportunitiesTest(unittest.TestCase):
         order = Do(actions.Equip(5, "Wear", "bronze_mail"), (5, 5), reach=0)
         self.assertFalse(engines.Opportunities().applies(ctx_of(w), order))
 
+    def test_a_chance_given_up_on_the_way_is_not_picked_again_at_once(self):
+        w = world(OPEN, at=(5, 5))
+        w.entities = [Entity("supply", 7, (8, 5), "gem")]
+        opp = engines.Opportunities()
+        self.assertIsNotNone(opp.pick(ctx_of(w)))
+        w.tick += 1
+        w.entities = []  # gone (or not worth it now)
+        self.assertIsNone(opp.pick(ctx_of(w)))
+        w.tick += 1
+        w.entities = [Entity("supply", 7, (8, 5), "gem")]
+        self.assertIsNone(opp.pick(ctx_of(w)))
+
     def test_an_unread_sign_is_read_and_a_read_one_is_not(self):
         w = world(OPEN)
         w.view.readable[(7, 5)] = True

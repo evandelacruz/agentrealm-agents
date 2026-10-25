@@ -35,6 +35,7 @@ BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Boss
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
 HELD_UP_MINUTES = 1.0  # what a held-up approach costs: plan B or the strategist moving her on and the walk to new work
 UNSEEN_HIT_TICKS = 30  # a hit this recent, with no hostile in view to explain it, is an unseen attacker
+DECLINE_SECONDS = 120  # a chance given up on the way is left alone this long, so the walk to it does not see-saw
 DETOUR_DICE = 0  # one fixed set of dice for pricing detours, so the same detour is priced the same each tick
 
 
@@ -415,6 +416,7 @@ class Opportunities:
         self._tick = -1
         self._pick: Action | None = None
         self.committed: tuple | None = None  # the chance under way: where, and why
+        self.declined: dict[tuple, float] = {}  # chances given up on the way, and when: left alone a while
 
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
         if isinstance(order, Do) and order.reach == 0 and order.at == ctx.state.pos:
@@ -437,7 +439,10 @@ class Opportunities:
         per_step = step_worth(ctx)
         price = Price(ctx) if harm.threats_near(s) else None
         best, best_net, best_key = None, 0.0, None
-        for c in near_first(ctx, chances(ctx)):
+        now = time.time()
+        self.declined = {k: t for k, t in self.declined.items() if now - t < DECLINE_SECONDS}
+        kept = False
+        for c in near_first(ctx, [c for c in chances(ctx) if (c.at, c.why) not in self.declined]):
             if reach is not None and chebyshev(s.pos, c.at) - c.reach > float(reach):
                 continue
             if chebyshev(s.pos, c.at) <= c.reach:
@@ -453,9 +458,11 @@ class Opportunities:
                 net -= price.risk(harm.odds(s, harm.Course(tuple(path)), seed=DETOUR_DICE, territory=ctx.memory.territory))
             key = (c.at, c.why)
             if net > 0 and key == self.committed:
-                best, best_net, best_key = action, float("inf"), key  # the one under way, while still worth it
+                best, best_net, best_key, kept = action, float("inf"), key, True  # the one under way, while still worth it
             elif net > best_net:
                 best, best_net, best_key = action, net, key
+        if self.committed is not None and not kept:
+            self.declined[self.committed] = now  # given up on the way (too dangerous now, or gone): not picked again soon
         self.committed = best_key
         self._pick = best
         return best

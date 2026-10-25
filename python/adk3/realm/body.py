@@ -64,7 +64,7 @@ class Body:
         self.last_attack_tick: int | None = None
         self.last_speech_tick: int | None = None
         self.events: list[dict] = []  # this round trip's events
-        self.last_hit_tick: int | None = None  # the last hit an NPC landed on us
+        self.last_hit_tick: int | None = None  # the last hit landed on us by an NPC not in view
         self.carried_alive: list[str] = []  # what we carried at the last decision alive
         self.where_alive: tuple[int, Pos] = (0, (0, 0))
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
@@ -483,11 +483,11 @@ class Body:
                 mem.killed(code)
                 self.last_kill = (code, w.tick)
             elif kind == "Damaged":
-                if ev.get("source_kind") == "npc":
-                    self.last_hit_tick = w.tick
                 where = ""
                 if ev.get("source_kind") == "npc" and w.pos is not None:
                     src = next((e for e in w.entities if e.kind == "npc" and str(e.id) == str(ev.get("source_id"))), None)
+                    if src is None:
+                        self.last_hit_tick = w.tick  # hit by an NPC we cannot see: what an unseen attacker is
                     safe = "on safe ground" if w.pos in w.view.safe else "off safe ground"
                     where = (f" ({src.code} in view, {chebyshev(src.pos, w.pos)} away; we are {safe})" if src is not None
                              else f" (not in view; we are {safe})")

@@ -44,7 +44,7 @@ class State:
     move_ready_in: int  # ticks until the next step may land
     speech_ready: bool = True  # one Say or Broadcast a second (Manual §11 Speech)
     townsfolk: frozenset[str] = frozenset()  # NPC types seen standing on safe ground (``Memory.townsfolk``)
-    hit_ticks_ago: int | None = None  # since an NPC last hit us
+    hit_ticks_ago: int | None = None  # since an NPC not in view last hit us
 
     @classmethod
     def of(cls, w: WorldModel, tick_hz: int, last_attack_tick: int | None, attack_ticks: int,
@@ -143,10 +143,9 @@ class State:
         return self.threats() + [e for e in seen if e.id not in in_view]
 
     def hit_unseen(self, within: int) -> bool:
-        """An NPC hit us within ``within`` ticks and no threat in view could have: an attacker we cannot see
-        (out of sight in the dark, Manual §3 Perception). Being hit is a threat whether or not we see who."""
-        return (self.hit_ticks_ago is not None and self.hit_ticks_ago <= within and not self.on_safe_ground
-                and not any(chebyshev(e.pos, self.pos) <= 2 for e in self.threats()))
+        """An NPC not in view hit us within ``within`` ticks: an attacker we cannot see (out of sight, Manual §3
+        Perception). Being hit is a threat whether or not we see who; one in view is combat's as usual."""
+        return self.hit_ticks_ago is not None and self.hit_ticks_ago <= within and not self.on_safe_ground
 
     def boss(self) -> Entity | None:
         return next((e for e in self.npcs() if e.is_boss), None)

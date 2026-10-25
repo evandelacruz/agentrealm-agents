@@ -361,6 +361,8 @@ class Body:
         for e in w.entities:
             if e.kind == "npc" and e.pos in w.view.safe and not e.is_boss and not known_hostile(w, e):
                 mem.saw_in_town(e.code)
+            if e.kind == "chest" and e.id in w.chest_contents:
+                mem.looked_in_chest(w.map_id, e.pos)
             if e.kind == "supply" and e.gem_price and not w.is_our_drop(e.id):
                 mem.saw_for_sale(e.code, e.gem_price, w.map_id, e.pos)
             if e.kind == "npc" and e.is_boss and w.map_level:
@@ -426,6 +428,10 @@ class Body:
             npc = next((e for e in w.entities if e.id == intent.get("npc_id") and e.kind == "npc"), None)
             if npc is not None:
                 mem.greeted(npc.code, w.map_id, npc.pos, answered=False)
+        elif verb == "WithdrawFromChest" and outcome == "rejected":
+            chest = next((e for e in w.entities if e.id == intent.get("chest_id")), None)
+            if chest is not None:
+                mem.changed_nothing(w.map_id, chest.pos)  # full, or not ours to take: not tried again
         elif verb == "Use" and target.get("kind") == "block":
             cell = (int(target["x"]), int(target["y"]))
             if outcome == "applied_no_effect":

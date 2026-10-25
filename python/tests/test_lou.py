@@ -388,6 +388,22 @@ class OpportunitiesTest(unittest.TestCase):
         ctx.memory.read_sign(MAP, (7, 5))
         self.assertIsNone(engines.Opportunities().pick(ctx))
 
+    def test_a_chest_not_looked_into_is_worth_a_look_and_a_looked_into_empty_one_is_not(self):
+        w = world(OPEN)
+        w.entities = [Entity("chest", 70, (8, 5), "chest")]
+        ctx = ctx_of(w)
+        self.assertEqual([c.why for c in opportunities.Chests().find(ctx)], ["look in a chest"])
+        ctx.memory.looked_in_chest(MAP, (8, 5))
+        self.assertEqual(opportunities.Chests().find(ctx), [])
+
+    def test_a_chest_in_reach_is_priced_by_what_it_holds(self):
+        w = world(OPEN)
+        w.entities = [Entity("chest", 70, (6, 5), "chest")]
+        w.chest_contents[70] = [InventorySupply(71, "bronze_sword")]
+        found = opportunities.Chests().find(ctx_of(w))
+        self.assertEqual(found[0].why, "take what the chest holds")
+        self.assertGreater(found[0].worth, 0)
+
     def test_food_waits_until_she_is_hurt_by_its_worth(self):
         w = world(OPEN, health=10)
         w.entities = [Entity("supply", 8, (6, 5), "apple")]

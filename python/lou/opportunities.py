@@ -23,6 +23,7 @@ SAY_REACH = 20  # blocks: a Say to an NPC reaches 25 (Manual §11 Speech); a lit
 READ_REACH = 5  # blocks: near enough that the sign is in sight in any light
 CLUE_WORTH = 15  # gems a new clue is worth at curiosity 5: about two and a half minutes of field work
 ODD_BLOCK_WORTH = 5  # gems: the smallest gem cache an oddity drops (Manual §16)
+CHEST_LOOK_WORTH = 5  # gems a look into an unknown ground chest is worth at curiosity 5: its contents show only in reach
 
 
 @dataclass(frozen=True)
@@ -128,7 +129,32 @@ class DeathChest:
         return [Chance(actions.Withdraw(death.chest_id), (death.chest_x, death.chest_y), 1, worth, "take back our death chest")]
 
 
-ALL = [Gems(), Hearts(), Food(), Signs(), Helpers(), OddBlocks(), DeathChest()]
+class Chests:
+    """A ground chest that is not ours (Manual §6, §16): from afar, a look inside, by curiosity; in reach, what it
+    holds, at the gems each item costs, taken by a withdrawal of everything that fits. Looked into once, it is
+    left unless it shows something worth taking."""
+
+    def find(self, ctx: Ctx) -> list[Chance]:
+        s, mem = ctx.state, ctx.memory
+        death = mem.last_death()
+        ours = death.chest_id if death is not None else None
+        out = []
+        for e in s.chests():
+            if e.id == ours or place_key(s.map_id, e.pos) in mem.no_effect:
+                continue  # DeathChest prices ours; a withdrawal refused here is not tried again
+            held = s.world.chest_contents.get(e.id)
+            if held is not None:
+                worth = sum(value.item(x.code) for x in held) * ctx.levers.greed_weight
+                why = "take what the chest holds"
+            elif place_key(s.map_id, e.pos) in mem.chests_seen:
+                continue
+            else:
+                worth, why = CHEST_LOOK_WORTH * ctx.levers.curiosity_weight, "look in a chest"
+            out.append(Chance(actions.Withdraw(e.id), e.pos, 1, worth, why))
+        return out
+
+
+ALL = [Gems(), Hearts(), Food(), Signs(), Helpers(), OddBlocks(), DeathChest(), Chests()]
 
 
 def chances(ctx: Ctx) -> list[Chance]:

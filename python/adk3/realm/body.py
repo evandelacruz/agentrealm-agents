@@ -372,6 +372,11 @@ class Body:
                     level.boss, level.boss_max_health = e.code, e.max_health
                     mem.learned()
                     self.surprises.append(f"found level {w.map_level}'s boss: {e.code}, health {e.health}/{e.max_health}")
+        death = mem.last_death()
+        if (death is not None and death.chest_id is not None and death.chest_map == w.map_id
+                and chebyshev((death.chest_x, death.chest_y), w.pos) <= 2
+                and not any(e.kind == "chest" and e.id == death.chest_id for e in w.entities)):
+            mem.chest_done(death.chest_id)  # stood beside where it lay, and it is not there: emptied or gone
         self.learn_gems()
         self.cuts = {p: t for p, t in self.cuts.items() if w.tick - t <= CUT_DROP_TICKS}
         self.learn_territory()

@@ -411,6 +411,7 @@ class Opportunities:
     def __init__(self):
         self._tick = -1
         self._pick: Action | None = None
+        self.committed: tuple | None = None  # the chance under way: where, and why
 
     def applies(self, ctx: Ctx, order: Order | None) -> bool:
         return self.pick(ctx) is not None
@@ -421,7 +422,8 @@ class Opportunities:
     def pick(self, ctx: Ctx) -> Action | None:
         """The chance worth most net of its detour: its extra steps at what time is worth, and, with hostiles
         near, the danger on the way, priced like a combat option on fixed dice (so the pick does not flip as
-        she steps on and off safe ground)."""
+        she steps on and off safe ground). Once picked it is kept while it stays worth going for, so the walk
+        to it is not given up for another chance a step later."""
         s = ctx.state
         if self._tick == s.tick:
             return self._pick
@@ -429,7 +431,7 @@ class Opportunities:
         reach = ctx.tactics.get("detour")  # the approach's limit on how far to stray, in blocks
         per_step = step_worth(ctx)
         price = Price(ctx) if harm.threats_near(s) else None
-        best, best_net = None, 0.0
+        best, best_net, best_key = None, 0.0, None
         for c in near_first(ctx, chances(ctx)):
             if reach is not None and chebyshev(s.pos, c.at) - c.reach > float(reach):
                 continue
@@ -440,12 +442,16 @@ class Opportunities:
                 if path is None:
                     continue
                 net, action = c.worth - len(path) * per_step, walk_or_break(ctx, path, c.why)
-            if net <= best_net or action is None:
+            if action is None or net <= 0:
                 continue
             if price is not None:
                 net -= price.risk(harm.odds(s, harm.Course(tuple(path)), seed=DETOUR_DICE, territory=ctx.memory.territory))
-            if net > best_net:
-                best, best_net = action, net
+            key = (c.at, c.why)
+            if net > 0 and key == self.committed:
+                best, best_net, best_key = action, float("inf"), key  # the one under way, while still worth it
+            elif net > best_net:
+                best, best_net, best_key = action, net, key
+        self.committed = best_key
         self._pick = best
         return best
 

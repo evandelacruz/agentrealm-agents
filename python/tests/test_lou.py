@@ -406,6 +406,17 @@ class OpportunitiesTest(unittest.TestCase):
         w.hostile_types.add(("npc", "chugbug"))
         self.assertIsNone(engines.Opportunities().pick(ctx_of(w)))
 
+    def test_the_chance_under_way_is_kept_over_a_slightly_better_one(self):
+        w = world(OPEN, at=(5, 5))
+        w.entities = [Entity("supply", 7, (8, 5), "gem")]
+        opp = engines.Opportunities()
+        opp.pick(ctx_of(w))
+        w.tick += 1
+        w.entities.append(Entity("supply", 8, (2, 5), "gem"))
+        w.pos = (5, 5)
+        action = opp.pick(ctx_of(w))
+        self.assertEqual(action.path[-1][0] > 5, True)
+
     def test_an_unread_sign_is_read_and_a_read_one_is_not(self):
         w = world(OPEN)
         w.view.readable[(7, 5)] = True

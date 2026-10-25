@@ -135,7 +135,14 @@ The situation picks the engine each tick: a threat outranks everything, then the
 
 A new reactive rule is one row in that list, priced like the rest, never a branch elsewhere. The strategist never acts in the moment; it revises tactics between moments, when evidence says they were wrong (a death, a fight lost, a hostile stronger than estimated).
 
-**The danger model** (Manual §11 Hostiles, Combat): hostiles chase at our pace, step to the neighbouring block nearest us and stop at walls, swing on their cooldown when in reach, and deal nothing on safe ground; a fight ends when one side dies. Every option the combat engine weighs (fight on, walk on, back off, drink) is played forward and scored by our expected health after it, on one scale.
+**Risk against reward** (Manual §11 Hostiles, Combat, §16). The combat engine weighs every option it has (fight on, walk on, back off to safe ground or behind a wall, drink) as reward less risk, all priced in gems, the unit the opportunities use:
+
+- **Reward:** the skill's progress the option keeps (getting where it is going is worth the time it saves), and what a kill is worth: its drop (the Manual's kill-drop rates), the hits a dead chaser no longer lands, and for a boss, the level.
+- **Cost:** the health it is expected to lose, at what potions cost per health; the chance it kills us, times what a death costs (a life, everything carried, since the chest drops, and the time to get back); and the time it takes, at our earning rate.
+- **The chance of dying** comes from playing each option out many times with the dice rolled (the Manual's hit and damage rolls), hostiles chasing at our pace and stopping at walls, swinging on their cooldown, and dealing nothing on safe ground.
+- **How much risk to take** is the strategist's tactic: what a death costs us now (fewer lives or more gear carried makes it dearer) and what each goal is worth.
+
+So a fight with good odds and a small reward is taken, one with a real chance of death is not, and walking past a slow hostile is taken when the place ahead is worth the hit.
 
 Navigation replans every decision from what is known, with unseen ground priced as probably open, and sends only a few steps at a time, so an obstacle that comes into view is routed around on the next decision.
 

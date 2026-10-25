@@ -36,7 +36,9 @@ class Travel:
         return GoTo(self.map_id, self.cell, self.why, self.door)
 
     def failed(self, ctx: Ctx) -> str | None:
-        if not self._there(ctx) and travel.to_place(ctx, self.map_id, self.cell, door=self.door) is None:
+        if self._there(ctx):
+            return f"arrived at {self.cell[0]},{self.cell[1]}, and the goal is still not met: travel does nothing more"
+        if travel.to_place(ctx, self.map_id, self.cell, door=self.door) is None:
             return f"no known way to {self.map_id}:{self.cell[0]},{self.cell[1]}"
         return None
 

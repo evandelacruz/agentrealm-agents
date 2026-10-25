@@ -496,6 +496,11 @@ class HealthWorthTest(unittest.TestCase):
         self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Walk)
 
 
+class TravelSkillTest(unittest.TestCase):
+    def test_arrived_with_the_goal_unmet_fails_at_once(self):
+        self.assertIn("arrived", skills.Travel(MAP, (5, 5), "x").failed(ctx_of(world(OPEN))))
+
+
 class ParkTest(unittest.TestCase):
     def test_asked_to_stop_off_safe_ground_she_walks_to_it_first(self):
         from lou.agent import Lou

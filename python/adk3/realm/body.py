@@ -433,6 +433,8 @@ class Body:
             item = next((e for e in w.entities if e.id == intent.get("supply_id")), None)
             if item is not None:
                 mem.changed_nothing(w.map_id, item.pos)  # full, or not ours to take: not tried again
+        elif verb == "WithdrawFromChest" and (outcome == "applied" or (res.get("rejection") or {}).get("code") == "chest_gone"):
+            mem.chest_done(int(intent.get("chest_id", -1)))  # emptied, or gone: a death chest is not gone back for
         elif verb == "WithdrawFromChest" and outcome == "rejected":
             chest = next((e for e in w.entities if e.id == intent.get("chest_id")), None)
             if chest is not None:

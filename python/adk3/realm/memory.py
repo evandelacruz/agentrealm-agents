@@ -267,6 +267,13 @@ class Memory:
             self.townsfolk.append(code)
             self.learned()
 
+    def chest_done(self, chest_id: int) -> None:
+        """Our death chest was emptied or is gone: nothing is left to go back for."""
+        for d in self.deaths:
+            if d.chest_id == chest_id:
+                d.chest_id, d.items = None, []
+                self.learned()
+
     def died(self, death: Death) -> None:
         self.deaths = (self.deaths + [death])[-20:]
         self.learned()

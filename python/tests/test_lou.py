@@ -495,6 +495,13 @@ class MemoryTest(unittest.TestCase):
                                                "at": 0.0, "dropped_field": 1}]}))
         self.assertEqual(Memory.load(path).clues[0].text, "x")
 
+    def test_an_emptied_death_chest_is_not_gone_back_for(self):
+        mem = Memory()
+        mem.died(Death(1.0, MAP, 4, 4, "snotling", 77, MAP, 4, 5, ["bronze_sword"]))
+        mem.chest_done(77)
+        w = world(OPEN)
+        self.assertEqual(opportunities.DeathChest().find(ctx_of(w, mem)), [])
+
     def test_a_clue_is_kept_once(self):
         mem = Memory()
         self.assertTrue(mem.add_clue(Clue("x", "sign", "", MAP, 1, 1)))

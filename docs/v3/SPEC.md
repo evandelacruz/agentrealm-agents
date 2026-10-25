@@ -1,190 +1,150 @@
-# v3 agent: spec (draft)
+# v3 agent: plan
 
-Status: draft for Evan's review. Nothing here is in the PLAN.md backlog yet.
+Status: plan for Evan's review. Nothing is built to it yet. The draft code under `python/adk3/` and `python/lou/` came before this plan and is reworked to it, not kept as is.
 
-## Why v3
+Sources read in full before writing this: the Manual (all sixteen sections), the API rules, Create a Character Agent, the State machine guide, the Changelog, and `docs/GAME_NOTES.md`.
 
-Gary and Lorraine work, but they are slow to improve and hard to read. Each live-run failure added a rule ("one rule for X"), and the rules now live in hundreds of lines of prose and code across layers that call into each other. Strategy, task execution and twitch reactions are mixed. A newcomer cannot find where a decision is made, and neither can we.
+## What went wrong so far
 
-Gary is v1: rules grown case by case. Lorraine is v2 and was meant to be a system. She drifted back into cases for four reasons:
+Gary (v1) is rules grown case by case. Lorraine (v2) was meant to be a system and drifted back into cases. The first v3 draft wandered for a few minutes and died. One cause runs under all three: **the agent does not reason about what it needs.** Gary acts on rules, Lorraine walks a fixed tree of hand-written readiness formulas, and the v3 draft handed a blind LLM a list of primitive tasks. None of them can answer "why am I doing this, and what would make it unnecessary?"
 
-1. **The LLM was demoted.** Her goal tree is a hand-written strategy. The model only answers "which op for this node", so every gap in the tree became a rule.
-2. **She inherited Gary's opinions.** The ADK she plays on carries his rules (value tables, give-up memory, stuck ladders, the engagement estimate), and her reflexes are his priority list.
-3. **The process stayed the same.** Each live-run failure became a backlog item, and each item added a clause (A168 to A172: blocks, waits, stall guards, give-ups). Her "how it thinks" is one paragraph of about 2,000 words over 3,400 lines.
-4. **Nothing measured her.** With no progress number, added complexity was never weighed against what it bought.
+The other causes:
 
-v3 starts over on structure, keeps only plumbing with no opinions, and guards against each of those four: the strategist owns the plan, the ADK carries no strategy, every change lands in a named extension point, and the measure below gates every change.
+- **The planner is blind.** It saw what was in view, not what the character knows: no map, no memory of shops, gem fields, hostiles, entrances, deaths, clues.
+- **No middle layer.** Nothing broke "beat level 1" into steps, so the LLM had to plan in coordinates.
+- **Danger was a threshold.** The controller walked into a snotling and died with every option scoring zero.
+- **Built wide before deep.** Ten task kinds before one goal worked end to end.
 
-## The measure
+## The idea
 
-**How annoyed Evan is, and how many cycles go by with no useful progress.** Made concrete:
+The agent works backwards from the objective, the way a person would:
 
-- **In a run:** `minutes since last milestone` and `milestones per hour`. A milestone is a discrete, real step toward beating the game (list below). This is the headline number on every status line, trace and run report.
-- **In development:** every phase of the build order ends with a live run whose milestones per hour beat the previous one. A slice that moves no number in a live run is not done, however clean the code.
-- **No silent stalls:** a run with no milestone for `STALL_MINUTES` (default 10) stops itself and writes a one-page report: the goal, the plans tried, why each failed. Evan never watches a character do nothing.
+- What is needed to beat the game? Clear every level.
+- What is needed to clear a level? Reach its boss, and beat the boss in time.
+- What is needed to reach it? Know where the entrance is, get through the door (a key, a bomb for a hidden door, a raft for water), and survive the level's hostiles and traps.
+- What is needed to beat the boss? Enough damage, defense and healing for that boss: gear and potions.
+- What is needed to get gear? Usually gems and a seller who has it; sometimes a find or a boss drop.
+- What is needed to get gems? Field work, kills, gem piles and caches.
+- Anything not known yet (where the entrance is, what the boss hits for, which shop sells what) is a need too: knowledge, got by exploring, talking, reading or scouting.
 
-Milestones (each counted once per character, kept across runs):
+The agent holds this as a **needs graph**: what the objective requires, down to what can be done now. Each need is evaluated against what the agent knows: **met**, **unmet**, or **unknown**. The first unmet or unknown need on the cheapest path to the objective is what to work on.
 
-| Milestone | Example |
-|---|---|
-| Level cleared | `levels_cleared` grew |
-| New map entered | first step onto a map id |
-| Gear upgrade | a weapon or armor better than any held before |
-| Capability gained | first item that opens, cuts, fords or breaks something new |
-| New ground | each 16x16 chunk first seen |
-| Gem high-water mark | gems held passed the next 25 |
-
-## Decisions
-
-| Question | Decision |
-|---|---|
-| ADK | Unopinionated: the loop, the interfaces, tracing and the Agent Realm plumbing. No strategy, no thresholds, no "one rule for X". |
-| Plumbing | Reused from `agentrealm_adk` by an allowlist (below), not copied. Gary and Lorraine keep running unchanged. |
-| Language | Python 3.11+, standard library only; `anthropic` only for the strategist. The plumbing is already Python, and people copying the agent expect Python. |
-| Metric | The measure above. |
+**Nothing in it names a specific item or place.** The kinds of need come from the game's rules (the Manual): levels have entrances and bosses, doors can be locked or hidden, fights are decided by damage against health, gear is bought with gems. Which gear is right for a level, which level to take first, what a clue means, and how much readiness is enough are judgments. **That is where the strategist comes in.**
 
 ## Architecture
 
-Three layers over one shared state. Each layer has one job and its own clock.
-
 ```
-              ┌──────────────────────────────────────────────┐
-  perceive ──►│ State: one snapshot per tick (the blackboard)│
-              └──────────────────────────────────────────────┘
-                    │                 │                 │
-                    ▼                 ▼                 ▼
-             1. Strategist      2. Executive      3. Controller
-             LLM, on events     every tick        every tick
-             goal + plan        current task      scores actions,
-             (list of tasks)    done/failed?      sends the best
-                    │                 │                 │
-                    └──── plan ──────►└──── task ──────►└──► intent(s)
-                    ◄──── report (done, failed + why, surprise) ───┘
-```
-
-**1. Strategist (slow, LLM).** Owns *what* and *why*. Given the state summary, the milestone ledger, the failures so far and the objective "beat every level", it returns a goal and a short plan: an ordered list of tasks from a fixed vocabulary, each with parameters and the reason it is there. It runs only on a trigger (below) and off the tick thread. Until its reply lands, the old plan keeps running.
-
-**2. Executive (fast, deterministic).** Owns *which task now*. It holds the plan, checks the head task's `done` and `failed` against State each tick, and tracks the task's progress measure. It never improvises: a task that fails or stops progressing is reported to the strategist with why, and the next task runs meanwhile.
-
-**3. Controller (fast, deterministic).** Owns *which action this tick*. Every tick it lists candidate actions (step toward the task's target, attack, flee, drink, pick up, open a block, wait), scores each one, and sends the best. Scores come from small considerations multiplied together: danger, health, battle odds, value, and how much the action advances the current task. Survival wins because its score spikes when it matters, not because an `if` comes first.
-
-This is the standard three-layer pattern (deliberator, sequencer, controller), with an HTN-style plan in the middle and utility scoring at the bottom.
-
-### State
-
-One immutable snapshot built each tick from the world model: where we are, what's around (terrain, hostiles, supplies, NPCs), health, lives, gear, gems, known maps, levels cleared, the milestone ledger. Every derived fact (`threat_here`, `odds_vs(npc)`, `path_cost(to)`) is a pure function of State. Layers read State; only perception writes it.
-
-### Replan triggers
-
-The strategist runs when one of these fires, at most once per `MIN_REPLAN_SECONDS` (default 10):
-
-- the plan is finished or empty
-- a task failed or stalled (no progress for `TASK_STALL_SECONDS`)
-- a surprise: death, new map, level cleared, new capability, a new kind of hostile, health lost faster than predicted
-- `MAX_PLAN_AGE_SECONDS` (default 120) since the last plan
-
-### Tasks (the strategist's vocabulary)
-
-Each task kind is one small class: `target(state)`, `done(state)`, `failed(state)`, `progress(state)` (a number that should go up), and `wants(action, state)` (how much an action advances it, 0 to 1).
-
-First vocabulary: `explore(area?)`, `goto(map, x, y)`, `gather(gems)`, `buy(item)`, `equip(item)`, `fight(npc)`, `heal`, `break(x, y)`, `use(x, y, item)`, `enter_level(n)`, `clear_level(n)`, `talk(npc)`, `read(x, y)`.
-
-A new behavior is a new task kind or a new consideration. Never a branch inside the loop.
-
-### Plan format
-
-```json
-{
-  "goal": "clear level 2",
-  "why": "level 1 cleared; level 2 entrance needs a key the east shop sells",
-  "plan": [
-    {"task": "gather", "gems": 30, "why": "key costs 30"},
-    {"task": "buy", "item": "key", "why": "entrance is locked"},
-    {"task": "enter_level", "level": 2},
-    {"task": "clear_level", "level": 2}
-  ],
-  "risk": 0.5
-}
+  perception ─► Memory (world knowledge, kept across runs)
+                  │
+                  ▼
+            Needs graph ◄──── Strategist (LLM): judgments and choices
+            met / unmet / unknown, with evidence
+                  │  the need to work on now
+                  ▼
+             Executive: picks and runs a Skill for that need
+                  │  the skill's current target
+                  ▼
+             Controller (every tick): the best action now,
+             with survival, fights, healing and pickups scored on one scale
+                  │
+                  ▼
+               intents
 ```
 
-`risk` (0 to 1) is the one knob the strategist sets on the controller: how much danger it may accept for task progress.
+### 1. Memory
 
-## Interfaces (ADK)
+Everything the character has learned, kept per world across runs. This is the world model the strategist reasons over. The game serves only what is in view, so memory is the agent's job (Manual §12: "keep your own world model").
 
-```python
-class Perception(Protocol):
-    def sense(self) -> State: ...                    # reads within the call budget
+- **Map:** every tile seen, per map; doors and where they lead; safe ground; regions.
+- **Entrances:** every minimap mark; for each, reached or not, locked, hidden, across water, which level it opened.
+- **Levels:** maps inside, boss type and health seen, the time limit learned, how far each attempt got and how it ended.
+- **Shops:** where each priced supply was seen, at what price, when.
+- **Income:** gem yield per region from our own cuts, gem piles and when they return, oddities and caches.
+- **Hostiles:** per type, the hits measured, health from our swings until a kill, where seen, how they moved.
+- **Clues:** every sign, scroll and helper line, with where and who.
+- **Deaths:** where, what killed us, and where the chest landed.
 
-class Strategist(Protocol):
-    def plan(self, state: State, report: Report) -> Plan | None: ...   # async, may return None
+The ADK's knowledge base and world model already hold much of this; v3 reuses their storage and adds what is missing.
 
-class Task(Protocol):
-    def done(self, s: State) -> bool: ...
-    def failed(self, s: State) -> str | None: ...    # reason, or None
-    def progress(self, s: State) -> float: ...
-    def wants(self, a: Action, s: State) -> float: ...
+### 2. The needs graph
 
-class Consideration(Protocol):
-    def score(self, a: Action, s: State, task: Task, risk: float) -> float: ...   # 0..1
+A small set of need kinds, each with how it is evaluated from memory and what can satisfy it. The kinds are the game's rules, so they are code; their instances and the judgments in them are data.
 
-class Actuator(Protocol):
-    def act(self, a: Action) -> None: ...            # intents, within the call budget
-
-def run(perception, strategist, tasks, considerations, actuator, trace): ...
-```
-
-The loop, in full:
-
-```python
-while alive:
-    s = perception.sense()
-    ledger.update(s)                                 # milestones
-    if triggers.fire(s, executive, ledger):
-        strategist.request(s, executive.report())    # off-thread
-    executive.adopt(strategist.latest())             # a new plan, if one landed
-    task = executive.step(s)                         # done/failed/stall checks
-    action = controller.best(candidates(s), s, task, plan.risk)
-    actuator.act(action)
-    trace.write(s, plan, task, top_scores, action, ledger)
-```
-
-## Plumbing reused from `agentrealm_adk`
-
-Allowlist: `client`, `pacer`, `world`, `pathing`, `navigation`, `executor` (queue building, pacing), `knowledge_base`, `reference`, `llm`, `supplies`, `cli`. Anything else stays out until a v3 task needs it, and then it comes in only if it has no thresholds or strategy of its own. An architecture test holds the line.
-
-## Packages
-
-| Package | Holds | Imports |
+| Need | Met when | Satisfied by |
 |---|---|---|
-| `python/adk3/core/` | loop, protocols, triggers, ledger, trace | standard library |
-| `python/adk3/realm/` | Agent Realm `Perception`, `Actuator`, `State`, candidate actions | `core`, the allowlist |
-| `python/lou/` | strategist prompt, task kinds, considerations | `adk3` only |
+| Objective | every level cleared | one Clear(L) per level |
+| Clear(L) | L in `levels_cleared` | Reach(L) and Beat(L) |
+| Reach(L) | we can stand at L's boss door | Know(entrance of L), Pass(door), Survive(L's maps) |
+| Pass(door) | the door warps us | a key held, the hidden block broken (a capability), water fordable (a capability) |
+| Beat(L) | our expected fight against L's boss is a win inside its time limit | Power ≥ need, Heals ≥ need |
+| Power, Heals | our gear and potions meet the level a judgment set | Have(item) for the items chosen |
+| Have(item) | carried, armed or worn | Buy (Gems ≥ price and a known seller), Find, Recover (our death chest) |
+| Gems(n) | gems ≥ n | income skills |
+| Know(fact) | memory holds it | explore, talk, read, scout |
+| Alive | health and lives allow the next step | heal, retreat |
 
-Every change lands in one of four extension points: a task kind, a consideration, a weight, or the strategist's prompt. A change that fits none of them is a change to the architecture and gets decided here first.
+Every evaluation that needs a number nobody serves (how much power level 3 needs, what a boss hits for) starts as the **strategist's estimate**, marked as such, and is replaced by **evidence** as it arrives: a boss's health seen at the door, the hits a hostile landed, an attempt that failed at 40% of the boss's health. A failed attempt is information, not a stall.
 
-A change that adds behavior ships with a live run showing what it bought: more milestones per hour or fewer stall stops. A change that buys nothing measurable does not go in. The spec describes structure and extension points; what each task or consideration does lives in its docstring.
+### 3. Strategist (LLM)
 
-## Seeing it work
+The strategist reads the needs graph with its status and evidence, the memory summary (map regions, entrances, shops seen, income, hostiles, clues, deaths) and the game reference, and answers:
 
-- **Status line every second:** `goal | task (progress) | action (score) | hp | gems | last milestone 3m ago | 4.2/h`.
-- **Trace:** one JSON line per tick with State digest, plan, task, the top 3 scored actions with their factors, and the action sent. Replayable.
-- **Run report:** milestones gained, time per milestone, plans tried, failures with why. Written at exit and on a stall stop.
+- **Judgments:** what each unknown is likely to be ("level 2's boss likely needs iron-tier damage"; "this rumor points at the north-east entrance"), each with its reason and confidence.
+- **Choice:** which path through the graph to take now ("level 1 first: its entrance is nearest and the rumor says it is the easiest"), and which item satisfies a need ("bronze sword and bronze mail: within reach of 8 minutes of field work").
+- **Focus:** the need to work on.
 
-## Build order
+It is asked when the focus need is met or fails, on a surprise (death, new map, level cleared, a clue), when evidence contradicts one of its judgments, and on a slow timer. Between answers the agent keeps working the last focus. It never picks steps or targets cells.
 
-Built in days, not months. No stand-ins or throwaway test scaffolding: the LLM strategist is in from the first live run, and the live game is the test bed. Unit tests cover only pure logic (scoring, triggers, the ledger, plan parsing).
+### 4. Executive and skills
 
-1. **Loop and binding.** Core loop, State, ledger, triggers, trace and status line; Agent Realm perception and actuator; the LLM strategist; tasks `explore` and `goto`; considerations danger and task. Live run: new-ground milestones tick up.
-2. **The full task vocabulary.** The rest of the tasks and the combat considerations (odds, health, flee). Live run: a fresh character clears level 1.
-3. **Tune from runs.** Only through the four extension points, each change carrying its measured gain. Live runs until milestones per hour beat Lorraine's on the same world.
+A **skill** is a reusable procedure that satisfies one kind of need: travel to a place (across maps and doors), explore toward something, earn gems, buy, equip, talk, read, scout a level, fight a boss (with its clock), recover the death chest. Each has preconditions, a target, a done test, a progress measure and failure reasons. The executive runs the skill for the focus need. A skill that fails reports why, as evidence on that need.
 
-## Will not
+Skills are the only place game procedures live, and each is small. A new behavior is a new skill or a new need kind, never a branch inside another.
 
-- Add a branch for a situation a run hit. It is a task, a consideration, a weight, or the strategist's call.
-- Let a lower layer pick a goal, or the strategist pick a step.
-- Run silently with no progress.
-- Import Gary or Lorraine.
+### 5. Controller
 
-## Name
+Every tick it scores the actions open now (continue the skill's walk, step to safety, swing, drink, pick up) and sends the best. Danger is one model, from the Manual's rules: hostiles chase at our pace and stop at walls, swing on their cooldown when in reach, and deal nothing on safe ground; a fight ends when one side dies. Each action is scored by our expected health after it plays out, so walking on under attack, fleeing, fighting and drinking compare on one scale. The strategist sets one knob, risk, from the need's value.
 
-Layered Lou (`lou`, `python/lou/`).
+Navigation replans every decision from what is known, with unseen ground priced as probably open, and sends only a few steps at a time, so an obstacle that comes into view is routed around on the next decision.
+
+## The measure
+
+**How annoyed Evan is, and how many cycles go by with no useful progress.**
+
+- **In a run:** a progress ledger of real milestones: a level cleared, a new map entered, gear better than any held before, a capability gained (opens, cuts, fords, breaks), an entrance reached, a gem threshold. Not new ground walked. The headline numbers are minutes since the last milestone and milestones per hour.
+- **No silent stalls:** a run with no milestone for a set time stops itself and writes a one-page report: the focus, the needs graph's state, what was tried, and why each failed.
+- **In development:** each phase below ends with a live run whose result is checked against its done-when. A change that adds behavior shows what it bought.
+
+## Seeing it think
+
+A live view, readable at a glance:
+
+- **Status line, every second:** focus need | skill (progress) | action and its score | health, gems, gear | minutes since the last milestone.
+- **The needs graph** on demand: each need with met, unmet or unknown, its evidence or estimate, and the path chosen.
+- **Trace:** one JSON line per decision; the strategist's input and answer kept beside it.
+
+## Phases
+
+Each phase ends with a live run on a fresh or reset character and is not done until that run meets its done-when.
+
+| # | Builds | Done when |
+|---|---|---|
+| 1 | Memory, perception, the live view; the controller with the danger model; the travel and explore skills | From town, walks to a named minimap entrance on the overworld and back without dying, routing around fences and water |
+| 2 | Earn gems (yield learned per region), buy, equip, recover the death chest | A fresh character holds a bronze sword and bronze mail, bought, within about 15 minutes, with no deaths |
+| 3 | The needs graph and the strategist | From a fresh character, the strategist picks a level and the agent readies for it and reaches its entrance, every step explained in the view |
+| 4 | Level skills: scout, fight the boss on its clock, leave before the limit, retry with what was learned | Level 1 cleared |
+| 5 | Run it | Levels cleared in order across sessions; milestones per hour beat Lorraine's on the same world |
+
+## Code
+
+- Plain, explicit types: one dataclass per concept, named fields, no grab-bag `data` dicts.
+- One concept per module, small modules, names a newcomer reads without the spec.
+- Comments say the rule in game terms and cite the Manual where it comes from.
+- Reuse the ADK's plumbing (client, pacer, world model, knowledge base storage, pathing, queue building, combat math from the Manual); import nothing of Gary's or Lorraine's decisions.
+- No branch for a situation a run hit: it is a need kind, a skill, an estimate, or the strategist's call.
+
+## Open questions for Evan
+
+1. What in the draft code put you off? The plan above assumes the grab-bag `Action.data`, the dense one-liners and the scattered game details; say if it was something else.
+2. Phase 1 reuses the ADK's world model and pathing. Keep that, or does v3 start its own?
+3. Name: Layered Lou, or another.

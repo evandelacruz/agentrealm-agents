@@ -63,6 +63,8 @@ class Course:
     target: int | None = None  # the NPC we swing at whenever it is in reach
     heal: int = 0  # health a drink gives back at once
     then: tuple[Pos, ...] = ()  # once the target is dead, the way on
+    bar: float = 0.0  # health at which the fight is broken off: the target is left and ``away`` walked
+    away: tuple[Pos, ...] = ()  # the way off when the fight is broken off
 
 
 @dataclass(frozen=True)
@@ -126,9 +128,12 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
     our_reach = s.world.attack_range or 1
     safe = s.world.view.safe
     landed = walked = 0
+    target = course.target
     for t in range(1, HORIZON_TICKS + 1):
+        if target is not None and alive.get(target, 0) > 0 and health <= course.bar:
+            target, path, then = None, list(course.away), []  # the bar: break off
         if t % period == 0:
-            if course.target is not None and alive.get(course.target, 0) <= 0 and then:
+            if target is not None and alive.get(target, 0) <= 0 and then:
                 path, then = then, []  # the fight is won: go on
             if path:
                 here = path.pop(0)
@@ -149,9 +154,10 @@ def _run(s: State, course: Course, foes: list[_Foe], armor: int, health: float, 
                     landed += 1
                     if health <= 0:
                         return health, False, landed, walked
-            if fid == course.target and near <= our_reach and t % our_every == 0 and rng.random() < our_hit:
+            if fid == target and near <= our_reach and t % our_every == 0 and rng.random() < our_hit:
                 alive[fid] -= rng.randint(1, our_top)
     killed = course.target is not None and alive.get(course.target, 1) <= 0
+    walked = walked if target is None or killed else 0  # steps on count only once the fight is over
     return health, killed, landed, walked
 
 

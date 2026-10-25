@@ -248,22 +248,24 @@ class Combat:
         s = ctx.state
         out = [Option("go on", "go_on", harm.Course(ahead))]
         avoid = set(ctx.tactics.get("avoid") or [])
+        away = travel.to_safe(ctx)
+        away_path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
+        potion = best_potion(ctx) is not None
         for e in threats:
-            if e.code in avoid:
+            stop = 0.0 if potion else bar(ctx, e)  # with a potion she drinks at the bar and fights on
+            if e.code in avoid or s.health <= stop:  # a fight broken off at once is no fight
                 continue
             stand = travel.to_strike(ctx, e.pos, s.world.attack_range or 1)
             if stand is None:
                 continue
             approach = tuple(stand)
             worth = ctx.memory.gems_per_kill(e.code, KILL_DROP) * ctx.levers.greed_weight
-            out.append(Option(f"fight {e.code}", "fight", harm.Course(approach, target=e.id, then=ahead),
+            out.append(Option(f"fight {e.code}", "fight", harm.Course(approach, target=e.id, then=ahead, bar=stop, away=away_path),
                               kill_worth=worth, target=e))
         if s.on_safe_ground:
             out.append(Option("hold", "hold", harm.Course()))
         else:
-            away = travel.to_safe(ctx)
-            path = tuple(away) if away else tuple(flee_run(s.world, threats, set(), _first_away(ctx)) or ())
-            out.append(Option("back off", "back_off", harm.Course(path)))
+            out.append(Option("back off", "back_off", harm.Course(away_path)))
         drink = best_potion(ctx)
         if drink is not None:
             out.append(Option(str(drink), "drink", harm.Course(heal=supplies.heal_of(drink.code), path=ahead),

@@ -238,6 +238,20 @@ class CombatTest(unittest.TestCase):
         self.assertGreater(bold, timid)
         self.assertIs(engines.roll([(5.0, fight), (0.0, back)], 0, random.Random(1))[0], fight)
 
+    def test_at_the_bar_with_no_potion_she_does_not_start_a_fight(self):
+        w = world(OPEN, health=4)
+        self.snotlings(w, [(6, 5)])
+        self.assertNotEqual(self.plan(ctx_of(w)).kind, "fight")
+
+    def test_the_odds_break_a_fight_off_at_the_bar(self):
+        w = world(OPEN, health=6, safe={(2, 2)})
+        self.snotlings(w, [(6, 5), (6, 6)])
+        s = ctx_of(w).state
+        to_the_end = harm.odds(s, harm.Course(target=100), seed=1)
+        to_the_bar = harm.odds(s, harm.Course(target=100, bar=4, away=((4, 4), (3, 3), (2, 2))), seed=1)
+        self.assertLess(to_the_bar.health_lost, to_the_end.health_lost)
+        self.assertLessEqual(to_the_bar.kill, to_the_end.kill)
+
     def test_the_odds_count_deaths(self):
         w = world(OPEN, health=1)
         self.snotlings(w, [(6, 5), (6, 6), (5, 6), (4, 6)])

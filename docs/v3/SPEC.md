@@ -20,7 +20,7 @@ v3 starts over on structure, keeps only plumbing with no opinions, and guards ag
 **How annoyed Evan is, and how many cycles go by with no useful progress.** Made concrete:
 
 - **In a run:** `minutes since last milestone` and `milestones per hour`. A milestone is a discrete, real step toward beating the game (list below). This is the headline number on every status line, trace and run report.
-- **In development:** every v3 milestone ends with a live run whose milestones per hour beat the previous one. A slice that moves no number in a live run is not done, however clean the code.
+- **In development:** every phase of the build order ends with a live run whose milestones per hour beat the previous one. A slice that moves no number in a live run is not done, however clean the code.
 - **No silent stalls:** a run with no milestone for `STALL_MINUTES` (default 10) stops itself and writes a one-page report: the goal, the plans tried, why each failed. Evan never watches a character do nothing.
 
 Milestones (each counted once per character, kept across runs):
@@ -158,7 +158,7 @@ Allowlist: `client`, `pacer`, `world`, `pathing`, `navigation`, `executor` (queu
 |---|---|---|
 | `python/adk3/core/` | loop, protocols, triggers, ledger, trace | standard library |
 | `python/adk3/realm/` | Agent Realm `Perception`, `Actuator`, `State`, candidate actions | `core`, the allowlist |
-| `python/<agent>/` | strategist prompt, task kinds, considerations | `adk3` only |
+| `python/lou/` | strategist prompt, task kinds, considerations | `adk3` only |
 
 Every change lands in one of four extension points: a task kind, a consideration, a weight, or the strategist's prompt. A change that fits none of them is a change to the architecture and gets decided here first.
 
@@ -170,17 +170,13 @@ A change that adds behavior ships with a live run showing what it bought: more m
 - **Trace:** one JSON line per tick with State digest, plan, task, the top 3 scored actions with their factors, and the action sent. Replayable.
 - **Run report:** milestones gained, time per milestone, plans tried, failures with why. Written at exit and on a stall stop.
 
-## Milestones
+## Build order
 
-Each ends with a live run and its numbers in `docs/observations/`.
+Built in days, not months. No stand-ins or throwaway test scaffolding: the LLM strategist is in from the first live run, and the live game is the test bed. Unit tests cover only pure logic (scoring, triggers, the ledger, plan parsing).
 
-| # | Done when |
-|---|---|
-| V0 | Loop, State, trace, ledger and status line run live with a trivial strategist (fixed plan `explore`) and two considerations (danger, task). New-ground milestones tick up; no deaths from standing still. |
-| V1 | LLM strategist with replan triggers and the stall stop. Plans and failures show in the trace. |
-| V2 | Full task vocabulary for one level: gather, buy, equip, enter, clear. Clears level 1 from a fresh character. |
-| V3 | Combat considerations (odds, health, flee). Milestones per hour beat Lorraine's on the same world. |
-| V4 | Clears levels in order across sessions, with the run report as the only thing Evan needs to read. |
+1. **Loop and binding.** Core loop, State, ledger, triggers, trace and status line; Agent Realm perception and actuator; the LLM strategist; tasks `explore` and `goto`; considerations danger and task. Live run: new-ground milestones tick up.
+2. **The full task vocabulary.** The rest of the tasks and the combat considerations (odds, health, flee). Live run: a fresh character clears level 1.
+3. **Tune from runs.** Only through the four extension points, each change carrying its measured gain. Live runs until milestones per hour beat Lorraine's on the same world.
 
 ## Will not
 
@@ -189,7 +185,6 @@ Each ends with a live run and its numbers in `docs/observations/`.
 - Run silently with no progress.
 - Import Gary or Lorraine.
 
-## Open
+## Name
 
-- The agent's name (convention: alliterative, e.g. Layered Lou).
-- Whether V0's trivial strategist should be Lorraine's goal tree instead, for a stronger baseline.
+Layered Lou (`lou`, `python/lou/`).

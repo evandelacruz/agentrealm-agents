@@ -469,7 +469,9 @@ class Body:
                         self.surprises.append(f"a {code} told us something new")
             elif kind == "Died":
                 map_id, at = self.where_alive
-                carried = self.carried_alive
+                dropped = w.death_chests.get(int(ev["chest_id"])) if ev.get("chest_id") else None
+                # what the event says dropped (dropped_supply_ids, read by the world model), else what we last carried
+                carried = list(dropped.contents) if dropped is not None and dropped.contents else self.carried_alive
                 mem.died(Death(time.time(), map_id, *at, killer=self.last_hitter(),
                                chest_id=ev.get("chest_id"), chest_map=ev.get("map_id"), chest_x=ev.get("x"),
                                chest_y=ev.get("y"), items=[c for c in carried if c != "pocket_knife"]))

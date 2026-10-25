@@ -156,6 +156,10 @@ class FieldTest(unittest.TestCase):
         self.assertIsInstance(order, Work)
         self.assertTrue(all(abs(x - 35) <= skills.FIELD_SEARCH for x, _ in order.cells), order.cells)
 
+    def test_a_seen_field_with_no_grass_fails_from_afar(self):
+        w = world(["d" * 41] * 31, at=(5, 5))
+        self.assertIn("out of cuttable grass", skills.EarnGems((35, 15)).failed(ctx_of(w)))
+
 
 class CombatTest(unittest.TestCase):
     def snotlings(self, w: WorldModel, cells) -> None:

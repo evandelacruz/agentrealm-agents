@@ -150,17 +150,22 @@ class EarnGems:
         cells = self.cells(ctx)
         if cells:
             return Work(tuple(cells), "cut grass for gems")
-        if self.field is not None:
-            return GoTo(ctx.state.map_id, self.field, "to the field")
-        return Explore("look for grass")
+        return Explore("look for the field" if self.field is not None else "look for grass", self.field)
 
     def failed(self, ctx: Ctx) -> str | None:
         s = ctx.state
         if "cut" not in travel.weapon_breaks(s):
             return "nothing we carry cuts grass"
-        if self.field is not None and chebyshev(s.pos, self.field) <= FIELD_SEARCH and not self.cells(ctx):
+        if self.field is not None and not self.cells(ctx) and self.field_seen(ctx):
             return f"the field around {self.field[0]},{self.field[1]} is out of cuttable grass"
         return nowhere_to_look(ctx, self.order(ctx), "no cuttable grass in view and no unseen ground left to look in")
+
+    def field_seen(self, ctx: Ctx) -> bool:
+        """Most of the field has been seen: what it holds is known from here."""
+        x, y = self.field
+        area = [(x + dx, y + dy) for dx in range(-FIELD_SEARCH, FIELD_SEARCH + 1) for dy in range(-FIELD_SEARCH, FIELD_SEARCH + 1)]
+        tiles = ctx.state.world.view.tiles
+        return sum(p in tiles for p in area) >= len(area) // 2
 
     def minutes_since_gem(self, ctx: Ctx) -> float:
         now, gems = time.time(), ctx.state.gems

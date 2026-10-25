@@ -255,6 +255,15 @@ class CombatTest(unittest.TestCase):
         self.assertIsInstance(action, actions.Equip)
         self.assertEqual(action.code, "bronze_sword")
 
+    def test_hit_by_an_attacker_out_of_sight_she_backs_off(self):
+        w = world(OPEN, health=5, safe={(0, 0), (1, 0), (0, 1)})
+        s = State.of(w, 10, None, 8, None, 4, last_hit_tick=w.tick - 5)
+        ctx = Ctx(s, Memory(), None, NavMemory(), (MAP, (1, 1)), Levers(), {})
+        combat = engines.Combat()
+        self.assertTrue(combat.applies(ctx, Work(((7, 7),), "cut")))
+        self.assertEqual(combat.now.kind, "back_off")
+        self.assertIsInstance(combat.act(ctx, None), actions.Walk)
+
     def test_at_the_bar_she_drinks_a_potion_she_carries(self):
         w = world(OPEN)
         w.held_supplies = [InventorySupply(9, "small_potion")]
@@ -438,6 +447,17 @@ class OpportunitiesTest(unittest.TestCase):
         w.entities = [Entity("npc", 9, (9, 9), "town_helper")]
         w.npc_still[9] = ((9, 9), w.tick - 200)
         self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Say)
+
+
+class HealthWorthTest(unittest.TestCase):
+    def test_a_berry_is_worth_more_the_lower_her_health(self):
+        from adk3.realm import value
+        self.assertGreater(value.health_change(1, 2, 10), 3 * value.health_change(1, 9, 10))
+
+    def test_low_on_health_a_berry_a_few_steps_off_is_taken(self):
+        w = world(OPEN, health=2)
+        w.entities = [Entity("supply", 8, (9, 5), "berry")]
+        self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Walk)
 
 
 class MemoryTest(unittest.TestCase):

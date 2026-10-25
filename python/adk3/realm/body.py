@@ -64,6 +64,7 @@ class Body:
         self.last_attack_tick: int | None = None
         self.last_speech_tick: int | None = None
         self.events: list[dict] = []  # this round trip's events
+        self.last_hit_tick: int | None = None  # the last hit an NPC landed on us
         self.carried_alive: list[str] = []  # what we carried at the last decision alive
         self.where_alive: tuple[int, Pos] = (0, (0, 0))
         self.surprises: list[str] = []  # what changed enough to tell the strategist, since the loop last took them
@@ -129,7 +130,7 @@ class Body:
                 self.where_alive = (self.world.map_id, self.world.pos)  # where a death happens: unplaced by then
         return State.of(self.world, self.tick_hz, self.last_attack_tick, attack_cooldown_ticks(armed, self.tick_hz),
                         self.nav.last_step_tick, self.step_ticks(), self.last_speech_tick,
-                        frozenset(self.memory.townsfolk))
+                        frozenset(self.memory.townsfolk), self.last_hit_tick)
 
     def step_ticks(self) -> int:
         return ticks_per_step(tick_rate_hz=self.tick_hz, movement_speed_milli=max(1, self.world.movement_speed))
@@ -473,6 +474,8 @@ class Body:
                 mem.killed(code)
                 self.last_kill = (code, w.tick)
             elif kind == "Damaged":
+                if ev.get("source_kind") == "npc":
+                    self.last_hit_tick = w.tick
                 self.out(f"hit for {ev.get('amount')} by {ev.get('source_kind')} {ev.get('source_id', '')}")
         if ceremony:
             number = int(ceremony.get("level_number", 0))

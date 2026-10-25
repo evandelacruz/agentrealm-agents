@@ -44,11 +44,12 @@ class State:
     move_ready_in: int  # ticks until the next step may land
     speech_ready: bool = True  # one Say or Broadcast a second (Manual §11 Speech)
     townsfolk: frozenset[str] = frozenset()  # NPC types seen standing on safe ground (``Memory.townsfolk``)
+    hit_ticks_ago: int | None = None  # since an NPC last hit us
 
     @classmethod
     def of(cls, w: WorldModel, tick_hz: int, last_attack_tick: int | None, attack_ticks: int,
            last_step_tick: int | None, step_ticks: int, last_speech_tick: int | None = None,
-           townsfolk: frozenset[str] = frozenset()) -> State:
+           townsfolk: frozenset[str] = frozenset(), last_hit_tick: int | None = None) -> State:
         carried = [Carried(s.id, s.code, "held") for s in w.held_supplies]
         if w.armed_code and w.armed_id is not None:
             carried = [c for c in carried if c.id != w.armed_id] + [Carried(w.armed_id, w.armed_code, "armed")]
@@ -63,6 +64,7 @@ class State:
             levels_cleared=tuple(sorted(w.levels_cleared)), level_count=w.level_count,
             attack_ready=attack_ready, move_ready_in=move_in,
             speech_ready=last_speech_tick is None or w.tick - last_speech_tick > tick_hz, townsfolk=townsfolk,
+            hit_ticks_ago=None if last_hit_tick is None else w.tick - last_hit_tick,
         )
 
     # Self.
@@ -133,6 +135,12 @@ class State:
                 if sg.map_id == self.map_id and sg.entity.kind == "npc" and self.is_threat(sg.entity)]
         in_view = {e.id for e in self.threats()}
         return self.threats() + [e for e in seen if e.id not in in_view]
+
+    def hit_unseen(self, within: int) -> bool:
+        """An NPC hit us within ``within`` ticks and no threat in view could have: an attacker we cannot see
+        (out of sight in the dark, Manual §3 Perception). Being hit is a threat whether or not we see who."""
+        return (self.hit_ticks_ago is not None and self.hit_ticks_ago <= within and not self.on_safe_ground
+                and not any(chebyshev(e.pos, self.pos) <= 2 for e in self.threats()))
 
     def boss(self) -> Entity | None:
         return next((e for e in self.npcs() if e.is_boss), None)

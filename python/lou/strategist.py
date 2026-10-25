@@ -67,6 +67,7 @@ fails_if (any of): minutes (how long it may run), no_progress_seconds (default: 
 
 tactics (what the reactions play while the approach runs; all optional): bars {<hostile type>: health} or bar (health) at which a fight stops being pushed: drink, else break off; avoid [<hostile type>]: never pick a fight with them; detour (blocks): how far an opportunity may lead her off; boss_seconds and leave_with_seconds for a boss fight.
 
+- Food heals for free: berries (from bushes, which any weapon cuts), apples, mushrooms. Lou eats food in view by herself when hurt, valuing it more the lower her health; a forage approach seeks it. Prefer food to buying potions for healing; keep potions for fights and bosses.
 - Only the goal, the approaches and next are carried out; nothing in why or notes is acted on. A step that must come first (arm the weapon just bought, eat before a fight) is the goal now, and what it was for goes in next.
 - Plan A must be able to start now: a buy needs a seen shelf, a recover needs a death chest still out. Otherwise you are told why and asked again.
 - Name places only by the keys and x, y listed below, items by their code.

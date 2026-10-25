@@ -34,6 +34,7 @@ CLOSE_CALL = 1.0  # gems: options this close to the best are rolled for, not tak
 BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Bosses and levels); the real one is not served
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
 HELD_UP_MINUTES = 1.0  # what a held-up approach costs: plan B or the strategist moving her on and the walk to new work
+UNSEEN_HIT_TICKS = 30  # a hit this recent, with no hostile in view to explain it, is an unseen attacker
 DETOUR_DICE = 0  # one fixed set of dice for pricing detours, so the same detour is priced the same each tick
 
 
@@ -166,6 +167,13 @@ class Combat:
             return False
         s = ctx.state
         threats = harm.threats_near(s)
+        if s.hit_unseen(UNSEEN_HIT_TICKS) and (self.now is None or self.now.kind != "back_off"):
+            ctx.memory.note(f"hit by an attacker out of sight near {s.pos[0]},{s.pos[1]}; backing off")
+            self.now = self.make(ctx, "back_off", None, "an attacker out of sight")
+            return True
+        if not threats and self.now is not None and self.now.kind == "back_off" and self.now.target is None \
+                and self.now.why == "an attacker out of sight" and not s.on_safe_ground:
+            return True  # keep going to safe ground: what hit us is still unseen
         if not threats:
             if self.now is not None and self.now.kind == "back_off":  # the way was held: the approach is held up
                 ctx.memory.held_up_by(f"backed off from {self.now.why} near {s.pos[0]},{s.pos[1]}")
@@ -324,11 +332,13 @@ class Price:
     """What a course's odds cost, in gems: health lost, and the chance of dying at what a death costs now."""
 
     def __init__(self, ctx: Ctx):
-        self.per_health = value.health()
-        self.death = value.death(ctx.levers, [c.code for c in ctx.state.carried])
+        s = ctx.state
+        self.health, self.max_health = s.health, s.max_health
+        self.death = value.death(ctx.levers, [c.code for c in s.carried])
 
     def risk(self, odds: harm.Odds) -> float:
-        return odds.health_lost * self.per_health + odds.death * self.death
+        lost = min(odds.health_lost, self.health)  # health lost costs more the lower it leaves us
+        return value.health_change(-lost, self.health, self.max_health) + odds.death * self.death
 
 
 def held_up_cost(ctx: Ctx) -> float:

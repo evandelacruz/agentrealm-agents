@@ -80,7 +80,8 @@ class Food:
             heal = supplies.heal_of(e.code)
             if e.gem_price or not supplies.eaten_on_pickup(e.code) or heal <= 0 or missing < heal:
                 continue
-            out.append(Chance(actions.Take(e.id, e.code), e.pos, 1, heal * value.health(), f"eat {e.code}"))
+            out.append(Chance(actions.Take(e.id, e.code), e.pos, 1, value.health_change(heal, s.health, s.max_health),
+                              f"eat {e.code}"))
         return out
 
 

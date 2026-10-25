@@ -57,6 +57,14 @@ def health() -> float:
     return min(rates) if rates else 1.0
 
 
+def health_change(amount: float, now: float, max_health: float) -> float:
+    """What ``amount`` health gained (or, below 0, lost) is worth at ``now`` health: the potion price per health,
+    scaled by how near death it leaves us. A point is worth its potion price at full health and more as health
+    runs out, since the last points are what stands between us and a death (Manual §11 Food and potions)."""
+    middle = max(0.5, now + amount / 2)  # the health the change passes through, on average
+    return abs(amount) * health() * max(1.0, max_health / middle)
+
+
 def per_tick(levers: Levers, tick_hz: int) -> float:
     """What one tick of time is worth."""
     return levers.time_worth / 60 / tick_hz

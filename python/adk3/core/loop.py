@@ -48,6 +48,9 @@ class Agent(Protocol):
     def surprises(self, ctx: Any) -> list[str]:
         """What happened since the last decision that the strategist should hear: a death, a new clue, a reaction's outcome."""
 
+    def known(self, ctx: Any) -> bool:
+        """What the strategist is briefed on has been read in full (the first reads can lag a decision or two)."""
+
     def strategize(self, briefing: Briefing) -> Any:
         """The strategist call (run off the decision thread)."""
 
@@ -165,7 +168,7 @@ class Run:
             self.executive.adopt(publication, ctx, now)
 
     def maybe_ask(self, now: float, ctx: Any) -> None:
-        if self.asker.busy() or now - self.asked_at < self.settings.min_ask_seconds:
+        if self.asker.busy() or now - self.asked_at < self.settings.min_ask_seconds or not self.agent.known(ctx):
             return
         if now - self.asked_at >= self.settings.max_answer_age_seconds:
             self.pending.append("time to look again")

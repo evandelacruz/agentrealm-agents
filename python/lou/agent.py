@@ -65,6 +65,9 @@ class Lou:
     def surprises(self, ctx: Ctx) -> list[str]:
         return self.body.take_surprises() + ctx.memory.take_news()
 
+    def known(self, ctx: Ctx) -> bool:
+        return ctx.state.world.inventory_read  # until then gems and gear read as none
+
     def strategize(self, briefing: Briefing) -> Any:
         if self.strategist is None:
             return None

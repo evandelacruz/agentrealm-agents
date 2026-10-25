@@ -16,7 +16,6 @@ from agentrealm_adk.world import DOORS, Entity, Pos, WorldModel, chebyshev
 # An NPC is a threat by how it behaves (Manual §11 Hostiles): a boss or one
 # that has hit us is; one that moves may be a chaser or a patroller; one
 # that stands still is most likely a helper (they stay put, §11 Speech).
-STILL_TICKS = 50  # standing this long on one block reads as staying put
 
 
 @dataclass(frozen=True)
@@ -105,10 +104,11 @@ class State:
         return [e for e in self.world.entities if e.kind == "chest"]
 
     def is_threat(self, e: Entity) -> bool:
-        """A boss, a type that has fought us, or an NPC that moves: it may chase (Manual §11 Hostiles)."""
+        """A boss, or of a type that has swung at us, hit us or died in view, in any run: the ADK's one hostility
+        test (``survival.known_hostile``). Moving is no sign: townsfolk walk about town (Manual §11 Hostiles)."""
         if e.kind != "npc":
             return False
-        return known_hostile(self.world, e) or self.world.npc_still_ticks(e) < STILL_TICKS
+        return known_hostile(self.world, e)
 
     def fights(self, e: Entity) -> bool:
         """Of a type seen to fight: it has swung at us, hit us or died in view (``agentrealm_adk.survival``)."""

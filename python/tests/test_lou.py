@@ -250,6 +250,14 @@ class CombatTest(unittest.TestCase):
         self.assertEqual(harm.odds(ctx_of(w).state, harm.Course()).hits_taken, 0)
 
 
+class TownsfolkTest(unittest.TestCase):
+    def test_a_townsperson_walking_about_is_no_threat(self):
+        w = world(OPEN)
+        w.entities = [Entity("npc", 5, (6, 5), "pond_fisher")]
+        w.npc_still[5] = ((6, 5), w.tick)
+        self.assertEqual(harm.threats_near(ctx_of(w).state), [])
+
+
 class TerritoryTest(unittest.TestCase):
     def test_a_snotling_that_keeps_to_grass_does_not_follow_onto_the_road(self):
         rows = ["ggggggdddddd"] * 12

@@ -382,7 +382,7 @@ class StayAlive:
 
     def check(self, ctx: Ctx) -> Check:
         s = ctx.state
-        if s.health > self.floor(ctx) or s.on_safe_ground and not s.threats():
+        if s.health > self.floor(ctx):
             return Check.met(f"health {s.health}/{s.max_health}")
         return Check.unmet(f"health {s.health}/{s.max_health}")
 
@@ -390,16 +390,8 @@ class StayAlive:
         return []
 
     def skill(self, ctx: Ctx):
-        s = ctx.state
-        if any(c.code in _POTIONS for c in s.carried):
-            return None  # the combat engine and the drink opportunity spend potions
-        if ctx.town is not None:
-            map_id, cell = ctx.town
-            return skills.Travel(map_id, cell, "back to town to be safe while hurt")
-        return None
-
-
-_POTIONS = ("small_potion", "potion", "large_potion")
+        """Safe ground stops damage but heals nothing, so the remedy is food (a potion is the combat engine's to drink)."""
+        return skills.Forage(self.floor(ctx))
 
 
 def _distance(ctx: Ctx, e: Entrance) -> int:

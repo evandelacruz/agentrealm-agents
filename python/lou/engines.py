@@ -21,7 +21,7 @@ from adk3.realm.context import Ctx
 from .opportunities import chances, near_first
 from .orders import Do, Explore, Fight, GoTo, Order, Work
 
-KILL_DROP = 0.3  # gems a kill is expected to drop: the Manual's rate for a snotling in the ring-1 fields (§16)
+KILL_DROP = 0.3  # gems a kill drops before we have our own kills of a type: the Manual's ring-1 snotling rate (§16)
 SWITCH_MARGIN = 1.0  # gems: another option must beat the one under way by this much to replace it
 BOSS_LIMIT_SECONDS = 90  # the shortest boss clock in Olympuff (Manual §11 Bosses and levels); the real one is not served
 LEAVE_MARGIN_SECONDS = 15  # leave the boss room this long before the limit
@@ -136,7 +136,8 @@ class Combat:
             reach = s.world.attack_range or 1
             approach = tuple(travel.to_beside(ctx, e.pos, reach) or ()) if chebyshev(e.pos, s.pos) > reach else ()
             out.append(Option(f"fight {e.code}", harm.Course(approach, target=e.id, then=ahead),
-                              self.fight(ctx, e, approach), kill_worth=KILL_DROP * ctx.levers.greed_weight))
+                              self.fight(ctx, e, approach),
+                              kill_worth=ctx.memory.gems_per_kill(e.code, KILL_DROP) * ctx.levers.greed_weight))
         away = travel.to_safe(ctx)
         if away:
             out.append(Option("back off to safe ground", harm.Course(tuple(away)), walk_or_break(ctx, away, "to safe ground")))

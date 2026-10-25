@@ -21,7 +21,7 @@ from adk3.realm.memory import Clue, Death, Memory
 from adk3.realm.state import State
 from adk3.realm.value import Levers
 from lou import engines, needs, opportunities
-from lou.orders import GoTo
+from lou.orders import GoTo, Work
 from lou.registry import ROOT
 from lou.strategist import adopt, describe
 
@@ -102,6 +102,24 @@ class NeedsGraphTest(unittest.TestCase):
         graph.block(reach, "no known way", 5)
         self.assertNotEqual(graph.focus(ctx, 5)[-1].key, "reach:1:9,9")
         self.assertEqual(graph.focus(ctx, 6)[-1].key, "reach:1:9,9")
+
+
+class StayAliveTest(unittest.TestCase):
+    def test_hurt_with_food_in_view_she_eats(self):
+        w = world(OPEN, health=3)
+        w.entities = [Entity("supply", 5, (8, 8), "apple")]
+        ctx = ctx_of(w)
+        path = Graph(ROOT).focus(ctx, 0)
+        self.assertEqual(path[-1].key, "alive")
+        order = path[-1].skill(ctx).order(ctx)
+        self.assertIsInstance(order.action, actions.Take)
+
+    def test_hurt_with_no_food_she_cuts_bushes_for_berries_not_stands_in_town(self):
+        rows = ["ggggggggggg"] * 5 + ["gggbggggggg"] + ["ggggggggggg"] * 5
+        ctx = ctx_of(world(rows, health=3))
+        order = Graph(ROOT).focus(ctx, 0)[-1].skill(ctx).order(ctx)
+        self.assertIsInstance(order, Work)
+        self.assertIn((3, 5), order.cells)
 
 
 class CombatTest(unittest.TestCase):

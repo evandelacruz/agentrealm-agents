@@ -38,12 +38,11 @@ from agentrealm_adk.world import DOORS, Pos, WorldModel, chebyshev
 from .actions import Action, Stop, Walk
 from .memory import Attempt, Clue, Death, Memory
 from .state import State
-from .value import gems_of
 
 SELF_EVERY = 60  # windows between self reads
 ENTITIES_EVERY = 5  # ticks between entity reads
 QUEUE_SLACK = 5  # ticks past a queue's length before it is taken as run out unseen
-CUT_DROP_TICKS = 5  # a gem showing on a block we broke this soon after is the break's drop
+CUT_DROP_TICKS = 40  # gems that come in this soon after a cut are its drop: it lands on the block, and we walk on
 HELD_TICKS = 20  # a hostile standing this long without closing on us, with open ground toward us, is held
 HELD_WITHIN = 8  # blocks: near enough that a chaser would be closing on us
 
@@ -68,6 +67,8 @@ class Body:
         self.cuts: dict[Pos, int] = {}  # blocks we broke on this map -> the tick, waiting to see a drop
         self.boss_fight: tuple[int, float] | None = None  # (level, when the fight began)
         self.stood_on: dict[str, set[str]] = {}  # hostile type -> block types seen under it this run
+        self.gems_seen: int | None = None  # the gem counter at the last round trip
+        self.last_kill: tuple[str, int] | None = None  # (type, tick) of the latest hostile we killed
         if kb is not None:
             load_hostiles(kb, self.world)
 
@@ -351,21 +352,37 @@ class Body:
         for e in w.entities:
             if e.kind == "supply" and e.gem_price and not w.is_our_drop(e.id):
                 mem.saw_for_sale(e.code, e.gem_price, w.map_id, e.pos)
-            if e.kind == "supply" and e.pos in self.cuts and w.tick - self.cuts[e.pos] <= CUT_DROP_TICKS:
-                mem.dropped_gems(w.map_id, e.pos, gems_of(e.code))
-                del self.cuts[e.pos]
             if e.kind == "npc" and e.is_boss and w.map_level:
                 level = mem.level(w.map_level)
                 if level.boss != e.code or level.boss_max_health != e.max_health:
                     level.boss, level.boss_max_health = e.code, e.max_health
                     mem.learned()
                     self.surprises.append(f"found level {w.map_level}'s boss: {e.code}, health {e.health}/{e.max_health}")
+        self.learn_gems()
         self.cuts = {p: t for p, t in self.cuts.items() if w.tick - t <= CUT_DROP_TICKS}
         self.learn_territory()
         for e in mem.entrances.values():
             if e.map_id == w.map_id and not e.reached and chebyshev((e.x, e.y), w.pos) <= 1:
                 e.reached = True
                 mem.learned()
+
+    def learn_gems(self) -> None:
+        """Gems that came in soon after a cut or a kill came from it (a drop lands on the block, and we pick it up):
+        credit the latest, the cut's region or the kill's type, which field work and fights are priced by."""
+        w = self.world
+        if w.gems is None or w.map_id is None:
+            return
+        gained = w.gems - self.gems_seen if self.gems_seen is not None else 0
+        self.gems_seen = w.gems
+        if gained <= 0:
+            return
+        cut = max(self.cuts.items(), key=lambda kv: kv[1]) if self.cuts else None
+        kill = self.last_kill if self.last_kill and w.tick - self.last_kill[1] <= CUT_DROP_TICKS else None
+        if kill is not None and (cut is None or kill[1] >= cut[1]):
+            self.memory.kill_dropped(kill[0], gained)
+            self.last_kill = None
+        elif cut is not None:
+            self.memory.dropped_gems(w.map_id, cut[0], gained)
 
     def learn_territory(self) -> None:
         """A hostile that stands still, not beside us, though open ground would bring it closer, stops at
@@ -427,6 +444,10 @@ class Body:
                 self.out(f"died, killed by {self.last_hitter() or 'something'}")
                 self.surprises.append("we died")
                 self.end_boss_fight("died")
+            elif kind == "NPCDied" and self.last_attack_tick is not None and w.tick - self.last_attack_tick <= 20:
+                code = ev.get("npc_type") or ""
+                mem.killed(code)
+                self.last_kill = (code, w.tick)
             elif kind == "Damaged":
                 self.out(f"hit for {ev.get('amount')} by {ev.get('source_kind')} {ev.get('source_id', '')}")
         if ceremony:

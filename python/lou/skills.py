@@ -176,6 +176,40 @@ class EarnGems:
         return ctx.state.gems + breaks / 10.0
 
 
+class Forage:
+    """Health back from food (Manual §11 Food and potions: health never comes back on its own): eat what lies
+    in view, else cut bushes, which drop berries (§16), else look toward town, where food lies about."""
+
+    name = "forage"
+
+    def __init__(self, floor: float):
+        self.floor = floor
+
+    def order(self, ctx: Ctx) -> Order:
+        s, mem = ctx.state, ctx.memory
+        food = [e for e in s.supplies() if not e.gem_price and supplies.eaten_on_pickup(e.code) and supplies.heal_of(e.code) > 0]
+        if food:
+            e = min(food, key=lambda e: chebyshev(e.pos, s.pos))
+            return Do(actions.Take(e.id, e.code), e.pos)
+        if travel.weapon_for(s, "bush") is not None:
+            bushes = sorted((p for p, b in s.world.view.tiles.items() if b == "bush"
+                             and place_key(s.map_id, p) not in mem.no_effect and chebyshev(p, s.pos) <= FIELD_SEARCH),
+                            key=lambda p: chebyshev(p, s.pos))
+            if bushes:
+                return Work(tuple(bushes[:20]), "cut a bush for berries")
+        toward = ctx.town[1] if ctx.town is not None and ctx.town[0] == s.map_id else None
+        return Explore("look for food", toward)
+
+    def done(self, ctx: Ctx) -> bool:
+        return ctx.state.health > self.floor
+
+    def failed(self, ctx: Ctx) -> str | None:
+        return None
+
+    def progress(self, ctx: Ctx) -> float:
+        return ctx.state.health + sum(y.breaks for y in ctx.memory.yields.values()) / 10.0
+
+
 class Recover:
     """Go back for our death chest and take everything from it (Manual §11 Death)."""
 

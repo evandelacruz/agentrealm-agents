@@ -10,6 +10,7 @@ the world knowledge base (tiles and door warps), ``<profile>.<id>.ledger.json``
 
 from __future__ import annotations
 
+import signal
 import sys
 import threading
 import tomllib
@@ -107,6 +108,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
         while thread.is_alive():
             thread.join(0.5)
     except KeyboardInterrupt:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)  # shutting down: a second Ctrl-C must not cut the save short
         print("stopping")
         stop.set()
         thread.join(10)

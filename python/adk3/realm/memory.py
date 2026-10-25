@@ -139,6 +139,7 @@ class Memory:
     levels: dict[int, Level] = field(default_factory=dict)
     shops: dict[str, Sighting] = field(default_factory=dict)  # place key -> what was for sale there
     yields: dict[str, Yield] = field(default_factory=dict)  # region key -> our breaks there
+    kills: dict[str, Yield] = field(default_factory=dict)  # hostile type -> our kills of it and the gems they dropped
     no_effect: list[str] = field(default_factory=list)  # place keys a Use on changed nothing
     territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
     deaths: list[Death] = field(default_factory=list)
@@ -197,6 +198,19 @@ class Memory:
     def dropped_gems(self, map_id: int, pos: Pos, gems: int) -> None:
         self.yields.setdefault(region_key(map_id, pos), Yield()).gems += gems
 
+    def killed(self, code: str, gems: int = 0) -> None:
+        k = self.kills.setdefault(code, Yield())
+        k.breaks += 1
+        k.gems += gems
+
+    def kill_dropped(self, code: str, gems: int) -> None:
+        self.kills.setdefault(code, Yield()).gems += gems
+
+    def gems_per_kill(self, code: str, prior: float, weight: int = 5) -> float:
+        """What a kill of ``code`` drops on average: our kills, with ``prior`` counted as ``weight`` kills."""
+        k = self.kills.get(code, Yield())
+        return (k.gems + prior * weight) / (k.breaks + weight)
+
     def changed_nothing(self, map_id: int, pos: Pos) -> None:
         key = place_key(map_id, pos)
         if key not in self.no_effect:
@@ -250,6 +264,7 @@ class Memory:
         m.levels = {int(k): _level(v) for k, v in raw.get("levels", {}).items()}
         m.shops = {k: Sighting(**v) for k, v in raw.get("shops", {}).items()}
         m.yields = {k: Yield(**v) for k, v in raw.get("yields", {}).items()}
+        m.kills = {k: Yield(**v) for k, v in raw.get("kills", {}).items()}
         m.no_effect = list(raw.get("no_effect", []))
         m.territory = {k: list(v) for k, v in raw.get("territory", {}).items()}
         m.deaths = [Death(**d) for d in raw.get("deaths", [])]

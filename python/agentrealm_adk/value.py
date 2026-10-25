@@ -26,6 +26,11 @@ Every place a walk may go for something has one value, in gems:
   base, ``learn_opened_chests``, from ``CHEST_PRIOR_GEMS``): a dropped chest
   is never empty, since the game removes it once emptied.
 
+A block to break or cut (grass, a bush) is worth nothing while break memory
+notes it as not yielding (``struck_value``, A173): a strike that changed
+nothing there teaches that it is regrowing (until its timer), never breaks,
+or does not break with what is in hand, so the choice moves on.
+
 A step on clear ground is nearly free: ``STEP_GEMS``. Only a monster or
 another obstacle makes one dearer, by the surcharges the cost grid already
 prices in step units (``navigation.planner``: a hostile's priced ground, a
@@ -49,6 +54,7 @@ from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .break_memory import no_yield
 from .chest_sources import known_prices
 from .gem_yield import GEM_CACHE_PREFIX, GEM_WINDOW_TICKS, PRIOR_CUTS, REGROW_TICKS
 from .loot import GEM_SUPPLY_CODES
@@ -308,6 +314,15 @@ def _chest_gems(chest_id: int, w: WorldModel, kb: KnowledgeBase | None, seen: Ma
     if chest is not None and chest.contents is not None:
         return chest_value(chest.contents, w, kb, seen)
     return expected_chest_gems(w, kb)
+
+
+def struck_value(
+    gems: float, kb: KnowledgeBase | None, map_id: int | None, pos: Pos, tick: int, held: Iterable[str] | None = None
+) -> float:
+    """What striking the block at ``pos`` is worth: ``gems``, or nothing while
+    a strike that changed nothing there stands noted (``break_memory.no_yield``
+    for a strike with ``held``, A173)."""
+    return 0.0 if no_yield(kb, map_id, pos, tick, held) is not None else gems
 
 
 def step_gems(urgent: bool = False) -> float:

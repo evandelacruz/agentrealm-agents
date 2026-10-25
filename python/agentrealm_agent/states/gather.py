@@ -13,7 +13,9 @@ Each decision Gather runs one search for the place to work next:
   remembered hostile holds). For cutting, not a region its cuts showed
   barren, nor ground where cuts keep having no effect
   (``GemYieldTracker.uncuttable``), nor a cell cut too recently to have
-  grown back (``gem_yield.exhausted_cells``).
+  grown back (``gem_yield.exhausted_cells``), nor one break memory notes as
+  not yielding after a cut there changed nothing (``break_memory.no_yield_cells``,
+  A173: regrowing until its timer, or never breaking).
 - **What it may go for there** (``_targets``): grass to cut, trees to fell
   while an item that chops is held (worked from a cell beside the tree), gem
   piles to take, and the edge of unexplored ground, where more grass may
@@ -51,7 +53,7 @@ from functools import cache
 from typing import Callable
 
 from agentrealm_adk import targets as targets_mod
-from agentrealm_adk.break_memory import held_supply
+from agentrealm_adk.break_memory import held_capabilities, held_supply, no_yield_cells
 from agentrealm_adk.config import Policy
 from agentrealm_adk.executor import DEFAULT_TICK_RATE_HZ
 from agentrealm_adk.gem_yield import (
@@ -252,7 +254,10 @@ def ground(
     safe = safe_tiles(w, w.map_id) if w.map_id is not None else set()
     dead_regions, dead_cells = gem_cuts.uncuttable(w, safe) if gem_cuts is not None else (set(), set())
     skip = (barren_regions(knowledge, w.map_id) - {named}) | dead_regions
-    spent = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts)
+    # A cell a strike left unchanged stays out while its note stands (A173): regrowing, or never breaking.
+    spent = exhausted_cells(knowledge, w.map_id, w.tick, gem_cuts) | no_yield_cells(
+        knowledge, w.map_id, w.tick, held_capabilities(w, knowledge)
+    )
     rate, by_region = region_yields(knowledge, w.map_id)
     need = max(1, int(op["count"]) - (w.gems or 0)) if op is not None and "count" in op else 1
     odds = GemOdds(need, rate, by_region, _steps_to_grass(w), fell_totals(knowledge, w.map_id))

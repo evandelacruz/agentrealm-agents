@@ -12,11 +12,30 @@ A break sends ``Arm`` (when needed) and a ``Use`` on the block, and files
 Either way pending is cleared, so the next break picks again. A loop that
 replaces a queue still in flight runs ``settle_replaced_break`` on the
 queue it replaced.
+
+Any other strike on a block, a cut of grass or a bush included, is read
+against what it was for (A173): ``note_no_effect_strike`` notes a cell a
+``Use`` left unchanged as not yielding now, with why (``no_yield_why``), and
+every loop lifts a note once a ``BlockChanged`` shows the cell changed
+(``break_memory.lift_no_yield``).
 """
 
 from __future__ import annotations
 
-from .break_memory import TRANSIENT_BREAK_REJECTIONS, record_attempt
+from .break_memory import (
+    BLOCK_OPENERS,
+    NOT_BY_THESE,
+    REGROWING,
+    REGROWTH_TICKS,
+    TRANSIENT_BREAK_REJECTIONS,
+    UNBREAKABLE,
+    NoYield,
+    capabilities_for_code,
+    last_opened,
+    note_no_yield,
+    record_attempt,
+)
+from .gem_yield import last_cut
 from .item_table import use_target_block
 from .knowledge_base import KnowledgeBase
 from .memory import Memory
@@ -111,3 +130,48 @@ def settle_replaced_break(
         ran |= n == at and res.get("outcome") != "rejected"
     if m.break_pending is not None and not ran:
         m.break_pending = None
+
+
+# What opens each block a strike may be read on: Break's blocks, and grass,
+# which every cutter cuts (Manual §11 Breaking blocks).
+STRIKE_OPENERS: dict[str, frozenset[str]] = {**BLOCK_OPENERS, "grass": frozenset({"cut"})}
+
+
+def no_yield_why(
+    kb: KnowledgeBase | None, map_id: int, pos: Pos, block: str, code: str | None, tick: int,
+    regrow_ticks: int = REGROWTH_TICKS,
+) -> NoYield | None:
+    """What a ``Use`` with ``code`` in hand that changed nothing on ``pos``,
+    showing ``block``, says about the cell (A173), or None when it says
+    nothing (nothing in hand breaks anything):
+
+    - opened by a break or cut of ours within ``regrow_ticks``: it is still
+      regrowing (striking a broken block changes nothing), until its timer;
+    - struck with a capability its type's rule says opens it: this cell
+      does not break, for good;
+    - else the capabilities in hand do not break it, for good; another may."""
+    caps = capabilities_for_code(code or "", kb)
+    if not caps:
+        return None
+    opened = max((t for t in (last_opened(kb, map_id, pos), last_cut(kb, map_id, pos)) if t is not None), default=None)
+    if opened is not None and tick - opened < regrow_ticks:
+        return NoYield(REGROWING, tick, opened + regrow_ticks, tuple(sorted(caps)))
+    if caps & STRIKE_OPENERS.get(block, frozenset()):
+        return NoYield(UNBREAKABLE, tick, None, tuple(sorted(caps)))
+    return NoYield(NOT_BY_THESE, tick, None, tuple(sorted(caps)))
+
+
+def note_no_effect_strike(
+    kb: KnowledgeBase | None, w: WorldModel, pos: Pos, block: str | None, code: str | None, tick: int
+) -> NoYield | None:
+    """A ``Use`` on ``pos`` came back ``applied_no_effect`` while it showed
+    ``block``, ``code`` in hand: note the cell as not yielding now, with why
+    (``no_yield_why``), so no value prices it until the note lapses. A
+    break in flight (``Memory.break_pending``) is settled by ``note_break_use``
+    instead, per capability."""
+    if w.map_id is None or not block:
+        return None
+    note = no_yield_why(kb, w.map_id, pos, block, code, tick)
+    if note is not None:
+        note_no_yield(kb, w.map_id, pos, note)
+    return note

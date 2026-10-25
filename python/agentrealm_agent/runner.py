@@ -9,8 +9,8 @@ import time
 from dataclasses import dataclass
 from functools import partial
 
-from agentrealm_adk.break_memory import cannot_cut
-from agentrealm_adk.break_results import note_break_use, resolve_pending_break
+from agentrealm_adk.break_memory import cannot_cut, lift_no_yield
+from agentrealm_adk.break_results import note_break_use, note_no_effect_strike, resolve_pending_break
 from agentrealm_adk.gem_yield import CUT_BLOCKS, FELL_BLOCKS, GemYieldTracker, take_raises_gems
 from agentrealm_adk.navigation.rejection import learn_step_rejection, on_block_changed
 from agentrealm_adk.navigation.stuck import lapsed as lapsed_give_ups
@@ -1150,8 +1150,11 @@ class Runner:
                     # and so is a cut made with an item that does not cut (a potion),
                     # or a tree felled with one that does not chop.
                     capability = CHOP if tile in FELL_BLOCKS else CUT
-                    if not cannot_cut(code_in_hand(w, self._held_intents(), index), self.knowledge, capability):
+                    code = code_in_hand(w, self._held_intents(), index)
+                    if not cannot_cut(code, self.knowledge, capability):
                         self.gem_cuts.note_no_effect(w, block, tile, used_tick)
+                        # The cell does not yield now, with why (A173): regrowing, or it never breaks.
+                        note_no_effect_strike(self.knowledge, w, block, tile, code, used_tick)
             if intent and intent.get("verb") in LOADOUT_VERBS:
                 self._loadout_verbs.append(intent["verb"])
             if intent and intent.get("verb") == "Drop":
@@ -1506,6 +1509,7 @@ class Runner:
         # WorldModel.apply_events already parsed BlockChanged (A14).
         for map_id, p in w.changed_blocks:
             on_block_changed(m, map_id, p)
+        lift_no_yield(self.knowledge, w.changed_blocks)  # a cell that changed is not what was noted (A173)
 
     def on_error(self, call: str, e: ApiError) -> float:
         self.log(call, f"error {e}", {"error": {"status": e.status, "code": e.code}})

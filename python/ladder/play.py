@@ -28,6 +28,14 @@ owed, else a round trip (``POST tick``). Each round trip:
    holds is a stall, but for one with the question about the goal still
    out; ``STALL_ROUNDS`` of them in a row block the goal with why, and the
    next walk asks the planner once, saying so.
+5a. **No act repeats that changes nothing** (A173): every send of the op
+   that is no walk is read against what it was for (``Judged``): a block
+   ``Use`` against a ``BlockChanged`` on its cell, any other intent against
+   coming back ``applied``. A strike that changed nothing notes its cell
+   as not yielding (``break_results.note_no_effect_strike``), so gather's
+   value moves on; and the same act with no effect ``NO_EFFECT_REPEATS``
+   times in a row ends the op as "changed nothing", so no op loops on a
+   no-op act. A walk is judged by the ADK's stuck ladder (A90) instead.
 6. **A blocked goal never idles her** (A169): the walk works the tree's
    other nodes under it ("gather" always has an op), and the blocked goal
    is retried once its blocker can have changed (``ask.lift_changed``: the
@@ -54,7 +62,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from agentrealm_adk import config
 from agentrealm_adk.client import ApiError, Client
@@ -66,7 +74,14 @@ from agentrealm_adk.executor import (
     queue_horizon_intents,
     step_landing,
 )
-from agentrealm_adk.break_results import note_break_use, resolve_pending_break, settle_replaced_break
+from agentrealm_adk.break_memory import TRANSIENT_BREAK_REJECTIONS, lift_no_yield
+from agentrealm_adk.break_results import (
+    note_break_use,
+    note_no_effect_strike,
+    resolve_pending_break,
+    settle_replaced_break,
+)
+from agentrealm_adk.executor.supply_refusals import code_in_hand
 from agentrealm_adk.fording import ford_gate, loadout_memory
 from agentrealm_adk.gem_caches import note_caches
 from agentrealm_adk.item_table import use_target_block
@@ -88,7 +103,7 @@ from agentrealm_adk.trace import Trace, tick_detail
 from agentrealm_adk.travel.knowledge import load_our_drops, record_shop_cell, save_our_drops, sync_entrances, sync_town
 from agentrealm_adk.supplies import BLOCK_FOOD
 from agentrealm_adk.value import DropWatch, learn_opened_chests
-from agentrealm_adk.world import DOORS, Passage, WorldModel
+from agentrealm_adk.world import DOORS, Passage, Pos, WorldModel
 from agentrealm_adk.zone_discovery import apply_town
 
 from .act import FETCH_GOAL, OWN_WALKS, Act, Ctx, Started, act, given_up_lines, given_up_target
@@ -103,6 +118,10 @@ SELF_REFRESH = 60
 QUEUE_RESULT_SLACK = 5
 # Round trips in a row the op may send nothing, no reflex holding, before its goal is blocked (A168).
 STALL_ROUNDS = 10
+# Sends in a row of the op's same act that changed nothing before the op is over (A173).
+NO_EFFECT_REPEATS = 3
+# Refusals that say "not yet", not "this does nothing": no effect is judged on them (A173).
+NOT_YET = TRANSIENT_BREAK_REJECTIONS | {"movement_cooldown", "block_occupied", "conflict_lost", "store_unavailable"}
 # What she works with no goal while a block stands and the world is not beaten (A169).
 IDLE_OP: GoalOp = {"op": "explore_area", "radius": EXPLORE_ANYWHERE}
 
@@ -133,6 +152,23 @@ class Decision:
     by: str
     stalled: bool = False  # the turn's op sent nothing and no reflex held the round (A168)
     reflex: str | None = None  # the reflex that held the round, if one did
+
+
+@dataclass
+class Judged:
+    """One send of the op's, read against what it was for (A173): the op
+    and why it was sent (``key``, the act), the cells its block ``Use``s
+    strike, those whose ``Use`` came back ``applied`` (``landed``) and those
+    a ``BlockChanged`` showed changing (``changed``), whether anything came
+    of it (``effect``), and whether it was refused "not yet" (``not_yet``),
+    which is judged neither way."""
+
+    key: tuple[str | None, str]
+    cells: frozenset[Pos]
+    landed: set[Pos] = field(default_factory=set)
+    changed: set[Pos] = field(default_factory=set)
+    effect: bool = False
+    not_yet: bool = False
 
 
 # Said when a goal is blocked on a walk given up (A171): nothing round it
@@ -178,6 +214,8 @@ class LadderRunner:
         self.own_blocks: set[str] = set()  # nodes the loop blocked itself (a stall, every op over), not a cannot
         self.goal_since: tuple[str | None, int] = (None, 0)  # the turn's goal and the tick it became the goal
         self.last_given_up: tuple[str, ...] = ()  # the walks the goal's last op was over on, given up (A171)
+        self.judged: Judged | None = None  # the op's send running, read against what it was for (A173)
+        self.no_effect: tuple[tuple[str | None, str], int] | None = None  # the act that changed nothing, and how often in a row
 
     def log(self, call: str, detail: str, record: dict | None = None) -> None:
         self.trace.log(self.world, call, detail, record or {})
@@ -240,6 +278,7 @@ class LadderRunner:
         m = self.mem
         m.need_self = m.need_position = True
         m.path = []
+        self.judged = None  # a death or a door cut it short: no verdict (A173)
         self.drop_queue()
 
     def step(self, call: str) -> float:
@@ -327,7 +366,9 @@ class LadderRunner:
         turn's goal. Everything sent goes through the water gate (``gate``).
         An op that sends nothing with the same why as the round before is
         over (A168), so no empty round repeats, but for a wait the clock
-        clears (``Act.waits``: a cooldown, her place unread), which is no stall."""
+        clears (``Act.waits``: a cooldown, her place unread), which is no stall;
+        one whose same act changed nothing ``NO_EFFECT_REPEATS`` sends in a
+        row is over too (A173, ``judge``)."""
         saved = loadout_memory(self.mem)
         fired = reflex(self.ctx(), lambda name, intents: self.gate(intents, saved, escape=name in ESCAPES)[0])
         if fired is not None:
@@ -348,22 +389,60 @@ class LadderRunner:
             if not a.over:
                 intents, cut = self.gate(a.intents, saved)
                 why = f"{a.why}; {cut}" if cut else a.why
-                if intents:
+                if intents and self.changed_nothing((op_key(op), why)):
+                    a = Act(None, f"{why}: changed nothing {NO_EFFECT_REPEATS} times in a row", over=True)
+                elif intents:
                     self.empty = None
-                    return self.send(intents, why, op["op"], op_key(op))
-                if a.waits and not cut:  # the clock clears it: no stall, and no repeat ends the op
+                    return self.judge(self.send(intents, why, op["op"], op_key(op)), (op_key(op), why))
+                elif a.waits and not cut:  # the clock clears it: no stall, and no repeat ends the op
                     self.empty = None
                     return Decision(None, why, op["op"])
-                if self.empty != (op_key(op), why):
+                elif self.empty != (op_key(op), why):
                     self.empty = (op_key(op), why)
                     return Decision(None, why, op["op"], stalled=True)
-                a = Act(None, f"{why}, again", over=True)
+                else:
+                    a = Act(None, f"{why}, again", over=True)
             self.log("op", f"{op['op']} over: {a.why}")
             if a.given_up:
                 self.last_given_up = a.given_up
             self.end_op(a.why)
             op = self.goal_op()
         return Decision(None, self.nothing_to_work(), "tree", stalled=self.turn is not None and self.turn.goal is not None)
+
+    def changed_nothing(self, key: tuple[str | None, str]) -> bool:
+        """The act ``key`` names (the op and why) was sent ``NO_EFFECT_REPEATS``
+        times in a row and changed nothing (A173)."""
+        return self.no_effect is not None and self.no_effect[0] == key and self.no_effect[1] >= NO_EFFECT_REPEATS
+
+    def judge(self, d: Decision, key: tuple[str | None, str]) -> Decision:
+        """Read the op's send ``d`` against what it was for (A173), unless it
+        is a walk: the A90 ladder judges every walk."""
+        intents = d.intents or []
+        if not intents or any(i.get("verb") == "Step" for i in intents):
+            self.judged = None
+            return d
+        self.judged = Judged(key, frozenset(c for i in intents if (c := struck_block(i)) is not None))
+        return d
+
+    def judged_done(self) -> None:
+        """The op's send ran out: a strike that landed with no ``BlockChanged``
+        on its cell changed nothing there, so the cell is noted as an
+        ``applied_no_effect`` one is (``apply_results``); an act that changed
+        nothing counts toward ``NO_EFFECT_REPEATS`` in a row, one that changed
+        something ends the run."""
+        j, self.judged = self.judged, None
+        if j is None:
+            return
+        w = self.world
+        for p in sorted(j.landed - j.changed):
+            note_no_effect_strike(self.knowledge, w, p, w.view.tiles.get(p), w.armed_code, w.tick)
+        if j.not_yet:
+            return
+        if j.effect:
+            self.no_effect = None
+            return
+        n = self.no_effect[1] + 1 if self.no_effect is not None and self.no_effect[0] == j.key else 1
+        self.no_effect = (j.key, n)
 
     def nothing_to_work(self) -> str:
         """Why no op works this round: the blocks that stand, if any (A169)."""
@@ -424,6 +503,7 @@ class LadderRunner:
                 m.need_position = True
                 return Decision([], f"{why}: stop, {doubt}", by)
         self.queue_of = owner or by
+        self.judged = None  # what replaces the queue is judged on its own, if at all (A173)
         return Decision(intents, why, by)
 
     def running(self) -> bool:
@@ -662,6 +742,10 @@ class LadderRunner:
         events = w.apply_events(r.get("events_by_tick") or [])
         w.apply_observation(r.get("observation"))
         resolve_pending_break(self.knowledge, m, w)  # a break that opened its block (A172)
+        lift_no_yield(self.knowledge, w.changed_blocks)  # a cell that changed is not what was noted (A173)
+        if self.judged is not None:
+            self.judged.changed |= {p for map_id, p in w.changed_blocks if map_id == w.map_id and p in self.judged.cells}
+            self.judged.effect |= bool(self.judged.changed)
         note_caches(w, self.knowledge)
         w.note_level_clear(r.get("level_clear_ceremony"))
         w.learn_threat(events, earlier)
@@ -691,10 +775,18 @@ class LadderRunner:
             if idx < m.pending_next_index or idx >= len(m.pending_intents):
                 continue
             intent, tick = m.pending_intents[idx], int(res.get("tick", w.tick))
+            outcome = res.get("outcome")
             # A break in flight is settled on every result, as in every agent's loop (A172).
             block = use_target_block(intent, w.entities) if intent.get("verb") == "Use" else None
+            struck = struck_block(intent)
+            breaking = m.break_pending is not None and m.break_pending[1] == struck
             note_break_use(self.knowledge, m, w, intent, res, block, list(m.pending_intents[idx:]))
-            if res.get("outcome") == "rejected":
+            if struck is not None and outcome == "applied_no_effect" and not breaking:
+                # A strike that changed nothing: the cell does not yield now (A173).
+                in_hand = code_in_hand(w, m.pending_intents, idx)
+                note_no_effect_strike(self.knowledge, w, struck, w.view.tiles.get(struck), in_hand, tick)
+            self.note_effect(res, None if breaking else struck)
+            if outcome == "rejected":
                 if intent.get("verb") == "Step" and w.pos is not None:
                     code = (res.get("rejection") or {}).get("code")
                     nav_on_rejection(m, code)
@@ -721,7 +813,25 @@ class LadderRunner:
                 if target.get("kind") == "block" and w.view.tiles.get(cell) in BLOCK_FOOD:
                     self.drops.note_cut(w, cell, tick)  # judged for its berry from when it landed (A170)
 
+    def note_effect(self, res: dict, struck: Pos | None) -> None:
+        """Read one result of the op's send against what it was for (A173):
+        any intent but a block ``Use`` that came back ``applied`` changed
+        something; a block ``Use`` that landed changes something once its
+        cell shows a ``BlockChanged`` (``apply``), and a break in flight is
+        settled by break memory, so it is not ``struck`` here; a refusal that
+        says "not yet" is no verdict."""
+        j = self.judged
+        if j is None:
+            return
+        if res.get("outcome") == "rejected":
+            j.not_yet |= (res.get("rejection") or {}).get("code") in NOT_YET
+        elif res.get("outcome") == "applied" and struck is not None:
+            j.landed.add(struck)
+        elif res.get("outcome") == "applied":
+            j.effect = True
+
     def drop_queue(self) -> None:
+        self.judged_done()
         m = self.mem
         m.pending_intents, m.pending_queue, m.pending_next_index = None, None, 0
         self.queue_of = None
@@ -749,6 +859,15 @@ class LadderRunner:
         for e in w.entities:
             if e.kind == "supply" and e.gem_price is not None and e.gem_price > 0 and not w.is_our_drop(e.id):
                 record_shop_cell(self.knowledge, w.map_id, e.pos, e.code or None, e.gem_price)
+
+
+def struck_block(intent: dict) -> Pos | None:
+    """The block a ``Use`` strikes when it targets a block, else None (a swing at someone, a drink)."""
+    target = intent.get("target") if intent.get("verb") == "Use" else None
+    if not isinstance(target, dict) or target.get("kind") != "block":
+        return None
+    x, y = target.get("x"), target.get("y")
+    return (x, y) if isinstance(x, int) and isinstance(y, int) else None
 
 
 def op_key(op: GoalOp | None) -> str | None:

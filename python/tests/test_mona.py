@@ -252,6 +252,16 @@ class RouterTest(unittest.TestCase):
         nav.route_held = ((MAP, ("to", MAP, (16, 10))), [(10, 10), *south])
         self.assertEqual(list(route.to(at(), MAP, (16, 10), "east").path), south)  # kept, though north is as short
 
+    def test_a_hedge_the_sword_cannot_chop_is_burnt_with_matches_when_there_is_no_way_round(self):
+        rows = ["w" * 21] + ["w" + "g" * 10 + "t" + "g" * 8 + "w"] * 19 + ["w" * 21]  # a hedge from wall to wall
+        w = world(rows, at=(10, 10))
+        w.held_supplies = [InventorySupply(7, "matches")]
+        mem = Memory()
+        for y in range(21):
+            mem.changed_nothing(MAP, (11, y), "chop")  # the sword left it standing
+        action = route.to(ctx_of(w, mem), MAP, (16, 10), "east")
+        self.assertEqual((type(action), action.arm_id), (actions.UseOn, 7))
+
     def test_a_fence_is_routed_around_not_given_up_on(self):
         rows = ["g" * 21] * 9 + ["g" * 12 + "w" + "g" * 8] * 3 + ["g" * 21] * 9
         action = route.to(ctx_of(world(rows, at=(10, 10))), MAP, (16, 10), "east")

@@ -29,6 +29,8 @@ from .memory import Memory, place_key
 from .state import State
 
 BREAK_STEPS = 4  # a break priced as this many steps: the swing's cooldown, and the chance it does not break
+TOOL_BREAK_STEPS = 60  # a break that uses a tool up: worth it only when the way round is long or there is none
+BREAKERS = frozenset(c for openers in BLOCK_OPENERS.values() for c in openers)
 
 
 def grid(ctx: Ctx, *, door: bool = False) -> CostGridParams:
@@ -36,7 +38,7 @@ def grid(ctx: Ctx, *, door: bool = False) -> CostGridParams:
     and the bushes and trees a weapon we carry may break priced as passable."""
     s = ctx.state
     avoid, costly = navigation_avoid_costly(ctx.nav.nav, ctx.kb, s.map_id, s.tick)
-    breaks = {p: BREAK_STEPS for p in breakable(s, ctx.memory)}
+    breaks = breakable(s, ctx.memory)
     return CostGridParams(avoid=avoid, costly=costly, is_hostile=lambda w, e: s.is_threat(e), allow_goal_door=door,
                           break_costs=breaks)
 
@@ -50,29 +52,47 @@ def weapon_breaks(s: State) -> frozenset[str]:
     return frozenset(caps)
 
 
-def breakable(s: State, memory: Memory) -> set[tuple[int, int]]:
-    """Blocks in view that a weapon we carry may break, less those a strike has already left standing."""
-    caps = weapon_breaks(s)
-    if not caps:
-        return set()
+def tool_breaks(s: State) -> frozenset[str]:
+    """What our tools break, each at the cost of the tool (matches burn a hedge, a bomb blasts a wall)."""
+    caps: set[str] = set()
+    for c in s.carried:
+        if not supplies.is_weapon(c.code):
+            caps |= capabilities_for_code(c.code) & BREAKERS
+    return frozenset(caps)
+
+
+def breakable(s: State, memory: Memory) -> dict[tuple[int, int], int]:
+    """Blocks in view that something we carry may break, with what the break costs in steps: a weapon's a swing,
+    a tool's the tool. A way of breaking that has already left a block standing is not counted again."""
+    weapons, tools = weapon_breaks(s), tool_breaks(s)
+    if not weapons and not tools:
+        return {}
     x0, y0, width, height = s.world.perception_rect()
     tiles = s.world.view.tiles
-    out = set()
+    out = {}
     for y in range(y0, y0 + height):
         for x in range(x0, x0 + width):
-            block = tiles.get((x, y))
-            if block in BLOCK_OPENERS and BLOCK_OPENERS[block] & caps and place_key(s.map_id, (x, y)) not in memory.no_effect:
-                out.add((x, y))
+            openers = BLOCK_OPENERS.get(tiles.get((x, y)))
+            if not openers:
+                continue
+            live = {c for c in openers if memory.breaks_with(s.map_id, (x, y), c)}
+            if live & weapons:
+                out[(x, y)] = BREAK_STEPS
+            elif live & tools:
+                out[(x, y)] = TOOL_BREAK_STEPS
     return out
 
 
-def weapon_for(s: State, block: str) -> int | None:
-    """The id of a carried weapon that breaks ``block``: the armed one first, then the best weapon (so a break
-    never swaps a better fighting weapon for a worse one); None when none does."""
+def weapon_for(s: State, block: str, memory: Memory | None = None, pos: Pos | None = None) -> int | None:
+    """The id of a carried supply that breaks ``block``: a weapon first, the armed one then the best (so a break
+    never swaps a better fighting weapon for a worse one), else a tool; with ``memory`` and ``pos``, not by a way
+    that has already left that block standing. None when nothing does."""
     openers = BLOCK_OPENERS.get(block, frozenset())
-    ranked = sorted((c for c in s.carried if supplies.is_weapon(c.code)),
-                    key=lambda c: (c.where != "armed", c != s.best_weapon()))
-    return next((c.id for c in ranked if capabilities_for_code(c.code) & openers), None)
+    if memory is not None and pos is not None:
+        openers = frozenset(c for c in openers if memory.breaks_with(s.map_id, pos, c))
+    ranked = sorted((c for c in s.carried if capabilities_for_code(c.code) & openers),
+                    key=lambda c: (not supplies.is_weapon(c.code), c.where != "armed", c != s.best_weapon()))
+    return next((c.id for c in ranked), None)
 
 
 def hazards(s: State) -> set[Pos]:

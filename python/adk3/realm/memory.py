@@ -240,10 +240,17 @@ class Memory:
         k = self.kills.get(code, Yield())
         return (k.gems + prior * weight) / (k.breaks + weight)
 
-    def changed_nothing(self, map_id: int, pos: Pos) -> None:
-        key = place_key(map_id, pos)
+    def changed_nothing(self, map_id: int, pos: Pos, capability: str | None = None) -> None:
+        """A Use on this place changed nothing: with ``capability``, only that way of breaking it is spent (a hedge a
+        sword cannot chop may still burn); without, the place is not tried again at all."""
+        key = place_key(map_id, pos) + (f"/{capability}" if capability else "")
         if key not in self.no_effect:
             self.no_effect.append(key)
+
+    def breaks_with(self, map_id: int, pos: Pos, capability: str) -> bool:
+        """Whether breaking this place with ``capability`` is still worth a try."""
+        key = place_key(map_id, pos)
+        return key not in self.no_effect and f"{key}/{capability}" not in self.no_effect
 
     def use_refused(self, map_id: int, pos: Pos, code: str) -> None:
         """The game refused a Use on this block (not_allowed_in_safe_zone, ...): it is not tried again."""

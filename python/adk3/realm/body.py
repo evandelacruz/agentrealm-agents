@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+from agentrealm_adk.break_memory import BLOCK_OPENERS, capabilities_for_code
 from agentrealm_adk.client import ApiError, Client
 from agentrealm_adk.executor import (
     DEFAULT_QUEUE_HORIZON_SECONDS,
@@ -450,7 +451,9 @@ class Body:
             if outcome == "rejected" and code not in (None, "attack_cooldown", "movement_cooldown", "target_out_of_range"):
                 mem.use_refused(w.map_id, cell, code)
             elif outcome == "applied_no_effect":
-                mem.changed_nothing(w.map_id, cell)
+                tried = capabilities_for_code(w.armed_code or "") & BLOCK_OPENERS.get(w.view.tiles.get(cell, ""), frozenset())
+                for cap in tried or (None,):  # what the armed supply could have done here, each spent
+                    mem.changed_nothing(w.map_id, cell, cap)
             elif outcome == "applied":
                 mem.broke(w.map_id, cell)
                 self.cuts[cell] = w.tick

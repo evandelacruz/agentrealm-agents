@@ -32,7 +32,7 @@ def along(ctx: Ctx, path, why: str, goal: object = None) -> Action | None:
     if block is not None and not s.world.walkable(nxt) and nxt in travel.breakable(s, ctx.memory):
         if not s.attack_ready:
             return actions.Stop("waiting to swing")
-        return actions.UseOn(nxt[0], nxt[1], _arm(ctx, block), f"break the {block} in the way")
+        return actions.UseOn(nxt[0], nxt[1], _arm(ctx, block, nxt), f"break the {block} in the way")
     return actions.Walk(tuple(path), why)
 
 
@@ -60,7 +60,7 @@ def steps(ctx: Ctx, path) -> int | None:
     if path is None:
         return None
     breaks = travel.breakable(ctx.state, ctx.memory)
-    return sum(travel.BREAK_STEPS if p in breaks and not ctx.state.world.walkable(p) else 1 for p in path)
+    return sum(breaks[p] if p in breaks and not ctx.state.world.walkable(p) else 1 for p in path)
 
 
 def to(ctx: Ctx, map_id: int, cell: Pos, why: str, door: bool = False) -> Action | None:
@@ -106,7 +106,7 @@ def off_hazard(ctx: Ctx) -> Action | None:
     return actions.Walk((min(open_, key=lambda p: chebyshev(p, s.pos)),), "off the burning ground")
 
 
-def _arm(ctx: Ctx, block: str) -> int | None:
+def _arm(ctx: Ctx, block: str, pos: Pos) -> int | None:
     s = ctx.state
-    weapon = travel.weapon_for(s, block)
-    return None if weapon is None or any(c.id == weapon and c.where == "armed" for c in s.carried) else weapon
+    breaker = travel.weapon_for(s, block, ctx.memory, pos)
+    return None if breaker is None or any(c.id == breaker and c.where == "armed" for c in s.carried) else breaker

@@ -28,6 +28,7 @@ from .strategist import Ask, Strategist, kit_of, pick_of
 
 RETRY_SECONDS = 20  # a failed strategist call is asked again this long after
 PARK_SECONDS = 90  # asked to stop, how long to spend getting to safe ground first
+SAVE_SECONDS = 30  # memory is written this often (and at a death), so a run cut short loses little
 
 
 class Mona:
@@ -45,6 +46,7 @@ class Mona:
         self.trace = open(trace, "a", buffering=1)
         self.stall_minutes = stall_minutes
         self._status_at = 0.0
+        self._saved_at = time.time()
         self.stopped_why = ""
 
     # The loop.
@@ -79,6 +81,9 @@ class Mona:
                 self.out(f"milestone: {label}")
         self.take_answer(ctx)
         died = "we died" in self.body.take_surprises()
+        if died or now - self._saved_at >= SAVE_SECONDS:
+            self._saved_at = now
+            self.body.memory.save()
         if died:
             self.health.clear()
             self.flow = None

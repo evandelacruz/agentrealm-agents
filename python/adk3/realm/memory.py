@@ -338,7 +338,9 @@ class Memory:
             return
         raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news", "held_up")}
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(raw, indent=1, sort_keys=True))
+        tmp = self.path.with_suffix(".tmp")  # written whole, then swapped in: a run killed mid-save keeps the last file
+        tmp.write_text(json.dumps(raw, indent=1, sort_keys=True))
+        tmp.replace(self.path)
 
 
 def _level(raw: dict) -> Level:

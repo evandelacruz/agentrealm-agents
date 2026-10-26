@@ -204,6 +204,14 @@ class Money(Flow):
             return actions.Stop("waiting on the strategist")
         name, center = self.field
         s = ctx.state
+        home = ctx.town[0] if ctx.town else s.map_id  # fields lie around town, on its map
+        if s.map_id != home:  # inside a level or elsewhere: out to the field's map first
+            go = route.to(ctx, home, center, "to the field")
+            if go is not None:
+                return go
+            self.crossed.add(name)
+            self.field = None
+            return None
         cuts, gems = self.worked(ctx)
         if cuts >= POOR_AFTER and gems < POOR_RATE * cuts:
             self.crossed.add(name)  # a poor field: another

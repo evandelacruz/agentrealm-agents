@@ -286,6 +286,18 @@ class MoneyTest(unittest.TestCase):
         self.assertFalse(any("outer" in name for name, _ in bronze))
         self.assertTrue(any("outer" in name for name, _ in iron))
 
+    def test_on_another_map_a_field_is_not_crossed_off_as_out_of_reach(self):
+        flow = modes.Money(Kit(level=1))
+        flow.field = ("north", (10, 10))
+        w = world()
+        w.map_id = 17
+        w.maps = {17: w.maps[MAP]}
+        flow.act(ctx_of(w))  # town is on map 1; no warp known from 17, so no route: crossed, but not by the map mix-up
+        ctx = ctx_of(world())
+        flow2 = modes.Money(Kit(level=1))
+        flow2.field = ("north", (10, 10))
+        self.assertIsNotNone(flow2.act(ctx))
+
     def test_a_cut_out_field_is_crossed_off(self):
         flow = modes.Money(Kit(level=1))
         flow.field = ("bare", (10, 10))

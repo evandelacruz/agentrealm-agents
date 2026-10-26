@@ -171,6 +171,9 @@ class Mona:
     def ask(self, ask: Ask) -> None:
         if self.asker is None:
             return
+        if not ask.ctx.state.world.inventory_read:  # until then gems and gear read as none: brief it once they are known
+            self.pending = ask
+            return
         if self.asking is None and time.time() >= self.retry_at and self.asker.ask(ask):
             self.asking = ask
             self.out(f"asking the strategist: {ask.reason}")

@@ -70,8 +70,8 @@ One at a time, from the active mode's (or the subgoal's) fixed list: level N's e
 Every tick, the first that applies acts:
 
 1. **On fire or lava:** step off.
-2. **Hurt, food or a heart within 25 blocks** (or a berry bush to cut): take it and eat. Food is eaten on pickup, so at full health it is left lying.
-3. **A hostile within 10 blocks:** fight it until it is dead. She fights everything; country too rough for her gear teaches the strategist through deaths.
+2. **A hostile within 10 blocks:** fight it until it is dead. She fights everything, hurt or not; country too rough for her gear teaches the strategist through deaths. Only get health (3 and below) turns her from a fight.
+3. **Hurt, food or a heart within 25 blocks** (or a berry bush to cut): take it and eat. Food is eaten on pickup, so at full health it is left lying.
 4. **Gems, free gear or a chest within 25 blocks:** take it.
 5. **A sign or a person within 25 blocks:** read it or talk.
 6. **Otherwise:** go to the destination or do its work.

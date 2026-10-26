@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from agentrealm_adk import supplies
 from agentrealm_adk.llm import Backoff, CallBudget, LLMClient, ProviderConfig, connect, parse_reply, trace_messages
 from agentrealm_adk.planner_reference import REFERENCE_PATH, game_notes_text, read_text, split_sections
 from agentrealm_adk.world import chebyshev
@@ -36,7 +37,7 @@ You do two things only.
 
 A. The kit for level N, when asked: the gear she must carry, arm or wear before she goes in, and whether you trust it. Reply:
 {"level": N, "entrance": "<entrance key from the list, or null>", "items": ["<item code>", ...], "potions": 2, "trusted": true, "why": "..."}
-- items: the weapon and armor to fight its boss, and whatever its entrance needs (a key, a bomb for a hidden door, a raft for water). Item codes from the Supplies reference; only items sold or found in this world.
+- items: the weapon and armor to fight its boss (potions go in "potions", not here), and whatever its entrance needs (a key, a bomb for a hidden door, a raft for water). Item codes from the Supplies reference; only items sold or found in this world.
 - entrance: the entrance you judge is level N's, from the clues (rumor helpers point at level doors).
 - trusted: true when you would send her in with this kit. While learning, untrusted means "keep learning": she walks town for signs and helpers, then scouts the entrance, then attempts the level. After an attempt you must trust a kit.
 - A kit that failed (a death, a loss, an entrance that refused her, an item sold nowhere she could find) must change: more armor, a better weapon, the tool the door needs, an item that is sold.
@@ -99,11 +100,12 @@ class Strategist:
 def kit_of(answer: dict[str, Any], ask: Ask) -> Kit:
     """The answer as a kit for the level asked about; after an attempt it is trusted whatever it says."""
     learned = list(ask.kit.learned) if ask.kit is not None and ask.kit.level == ask.level else []
-    items = [str(c) for c in answer.get("items") or [] if c]
+    listed = [str(c) for c in answer.get("items") or [] if c]
+    items = [c for c in listed if not supplies.is_potion(c)]  # potions are counted in "potions", not listed twice
+    potions = max(int(answer.get("potions") or 0), len(listed) - len(items))
     trusted = bool(answer.get("trusted")) or "attempt" in learned
-    return Kit(level=ask.level, entrance=answer.get("entrance") or None, items=items,
-               potions=max(0, int(answer.get("potions") or 0)), trusted=trusted, why=str(answer.get("why", "")),
-               learned=learned)
+    return Kit(level=ask.level, entrance=answer.get("entrance") or None, items=items, potions=potions,
+               trusted=trusted, why=str(answer.get("why", "")), learned=learned)
 
 
 def pick_of(answer: dict[str, Any], ask: Ask) -> int:

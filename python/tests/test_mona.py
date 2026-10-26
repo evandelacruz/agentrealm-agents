@@ -41,6 +41,7 @@ def world(rows=OPEN, at=(10, 10), health=10, gems=0, armed="bronze_sword", safe=
     w.armed_code, w.armed_id = armed, 1 if armed else None
     w.attack_range, w.perception, w.level_count = 1, 12, 8
     w.levels_cleared = set(cleared)
+    w.inventory_read = True
     view = MapView()
     for y, row in enumerate(rows):
         for x, ch in enumerate(row):
@@ -123,9 +124,14 @@ class ReflexTest(unittest.TestCase):
         snotling(w, (11, 10))
         self.assertEqual(reflexes.first(ctx_of(w))[0], "off the fire")
 
-    def test_hurt_she_eats_before_she_fights(self):
+    def test_hurt_she_fights_the_hostile_on_her_before_she_eats(self):
         w = world(health=6)
         snotling(w, (14, 10))
+        w.entities.append(Entity("supply", 7, (8, 10), "berry"))
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "fight")
+
+    def test_hurt_with_no_hostile_near_she_eats(self):
+        w = world(health=6)
         w.entities.append(Entity("supply", 7, (8, 10), "berry"))
         self.assertEqual(reflexes.first(ctx_of(w))[0], "eat")
 
@@ -244,6 +250,14 @@ class WorldFactsTest(unittest.TestCase):
         fresh = mem.world_facts(None)
         self.assertIn("1:9,9", fresh.entrances)
         self.assertEqual(fresh.deaths, [])
+
+
+class KitAnswerTest(unittest.TestCase):
+    def test_potions_listed_as_items_are_counted_once(self):
+        from mona.strategist import Ask, kit_of
+        ask = Ask("kit", ctx_of(world()), None, 1, "x")
+        kit = kit_of({"items": ["bronze_sword", "small_potion", "small_potion"], "potions": 2, "trusted": True}, ask)
+        self.assertEqual((kit.items, kit.potions), (["bronze_sword"], 2))
 
 
 class FakeStrategist:

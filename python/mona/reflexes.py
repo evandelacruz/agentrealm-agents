@@ -97,8 +97,8 @@ def learn(ctx: Ctx) -> Action | None:
 
 REFLEXES: list[tuple[str, Callable[[Ctx], Action | None]]] = [
     ("off the fire", on_fire),
+    ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
     ("eat", eat),
-    ("fight", fight),
     ("loot", loot),
     ("learn", learn),
 ]

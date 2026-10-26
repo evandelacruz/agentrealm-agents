@@ -39,6 +39,8 @@ def main(argv: list[str] | None = None) -> int:
     run_p = sub.add_parser("run", parents=[profile_parser()], help="play until Ctrl-C or a stall")
     run_p.add_argument("--stall-minutes", type=float, default=15.0,
                        help="stop after this long with no milestone")
+    run_p.add_argument("--blank", action="store_true",
+                       help="start with no memory: not seeded from an earlier character's world facts")
     sub.add_parser("status", parents=[profile_parser()], help="print the character's self line")
     args = ap.parse_args(argv)
     try:
@@ -64,10 +66,10 @@ def main(argv: list[str] | None = None) -> int:
             print(e, file=sys.stderr)
             return 1
         return 0
-    return run(client, cfg, cid, args.stall_minutes)
+    return run(client, cfg, cid, args.stall_minutes, args.blank)
 
 
-def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: float) -> int:
+def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: float, blank: bool = False) -> int:
     print(f"supplies reference: {supplies.load()}")
     try:
         strategist = Strategist.from_env()
@@ -85,7 +87,7 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
     state_dir = config.STATE_DIR
     memory_path = state_dir / "mona" / f"{cfg.world}.{cid}.memory.json"
     memory = Memory.load(memory_path)
-    if not memory_path.exists():  # a first run: start from what any earlier character learned of this world
+    if not memory_path.exists() and not blank:  # a first run: start from what any earlier character learned of this world
         known = sorted((state_dir / "mona").glob(f"{cfg.world}.*.memory.json")) + sorted((state_dir / "lou").glob(f"{cfg.world}.*.memory.json"))
         if known:
             memory = Memory.load(known[-1]).world_facts(memory_path)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import tempfile
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from agentrealm_adk.item_table import InventorySupply
@@ -374,6 +375,14 @@ class SceneTest(unittest.TestCase):
             ctx = m.sense()
             m.decide(ctx, time.time())
             time.sleep(0.01)
+
+    def test_parking_fights_a_hostile_on_her_rather_than_walking_off_in_its_hits(self):
+        w = world(safe=[(0, 0)])
+        snotling(w, (11, 10))
+        m, body = self.mona(w)
+        with mock.patch("mona.agent.PARK_SECONDS", 0.2):
+            m.park()
+        self.assertTrue(any(isinstance(a, actions.Swing) for a in body.acted))
 
     def test_in_get_health_she_does_not_fight_on(self):
         w = world(health=3, gems=5)

@@ -224,9 +224,14 @@ class Mona:
             if ctx is None:
                 continue
             s = ctx.state
-            if s.on_safe_ground:
+            if s.on_safe_ground:  # no blow lands here
                 self.out("parked somewhere safe")
                 return
+            self.health.update(s)
+            found = reflexes.first(ctx, turned=self.health.active, only=reflexes.PARKING)
+            if found is not None:  # safe ground is the destination: fire, the weapon and a fight still come first
+                self.body.act(found[1])
+                continue
             path = travel.to_safe(ctx)
             self.body.act(actions.Walk(tuple(path), "to safe ground before stopping") if path else actions.Stop("no safe ground known"))
         self.out(f"could not reach somewhere safe in {PARK_SECONDS}s")

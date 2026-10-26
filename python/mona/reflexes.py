@@ -112,10 +112,15 @@ REFLEXES: list[tuple[str, Callable[[Ctx, bool], Action | None]]] = [
 ]
 
 
-def first(ctx: Ctx, turned: bool = False) -> tuple[str, Action] | None:
+PARKING = ("off the fire", "armed", "fight")  # stopping, she goes to safe ground: these still come first
+
+
+def first(ctx: Ctx, turned: bool = False, only: tuple[str, ...] | None = None) -> tuple[str, Action] | None:
     """The first reflex that applies and can act, with its action. ``turned`` while get health runs, the one thing
     that turns her from a fight: she does not fight, and goes for nothing a hostile stands by, so she breaks contact."""
     for name, reflex in REFLEXES:
+        if only is not None and name not in only:
+            continue
         action = reflex(ctx, turned)
         if action is not None:
             return name, action

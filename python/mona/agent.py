@@ -13,6 +13,8 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from agentrealm_adk.navigation.rejection import navigation_avoid_costly
+
 from adk3.core.asker import Asker
 from adk3.core.ledger import Ledger
 from adk3.realm import actions, milestones, travel
@@ -170,6 +172,12 @@ class Mona:
             self.kits.save(self.kit)
             self.ask_kit(ctx, f"learn step done: {f.learned}")
         if f.blocked:
+            if "no way on" in f.blocked:  # the map as she sees it, to replay offline
+                s, (avoid, costly) = ctx.state, navigation_avoid_costly(ctx.nav.nav, ctx.kb, ctx.state.map_id, ctx.state.tick)
+                self.record({"t": time.time(), "no_way_on": {
+                    "map": s.map_id, "pos": s.pos, "tiles": {f"{x},{y}": b for (x, y), b in s.world.view.tiles.items()},
+                    "entities": [[e.kind, e.id, e.pos, e.code] for e in s.world.entities], "avoid": sorted(avoid),
+                    "costly": sorted(costly)}})
             self.ask_kit(ctx, f"{self.mode.value} is blocked: {f.blocked}")
             f.blocked = ""
         if f.question is not None and not self._asked_for(f):

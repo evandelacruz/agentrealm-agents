@@ -70,7 +70,7 @@ One at a time, from the active mode's (or the subgoal's) fixed list: level N's e
 Every tick, the first that applies acts:
 
 1. **On fire or lava:** step off.
-   - **Always armed** (a standing rule): her best weapon armed and her armor worn. A potion or tool is armed only for its use, then the weapon goes straight back.
+   - **Always armed** (a standing rule, applied to whatever is decided rather than competing as a reflex): her best weapon in hand and her armor worn whenever the action needs nothing else in hand. An action that arms or uses a potion or tool (a break, a drink) keeps it until the use lands; then the weapon goes back.
 2. **A hostile within 10 blocks:** fight it until it is dead. She fights everything, hurt or not; country too rough for her gear teaches the strategist through deaths. Only get health (3 and below) turns her from a fight.
 3. **Something to take within 25 blocks, the nearest first:** gems, a heart, free gear, a chest not yet looked into, and, when hurt, food or a berry bush to cut. Food is eaten on pickup, so at full health it is left lying.
 4. **A sign or a person within 25 blocks:** read it or talk.

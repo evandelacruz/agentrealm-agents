@@ -206,11 +206,18 @@ class TakeTest(unittest.TestCase):
 
 
 class ArmedTest(unittest.TestCase):
-    def test_she_rearms_her_weapon_whatever_else_she_is_doing(self):
+    def test_walking_she_rearms_her_weapon_first(self):
         w = world(armed="small_potion")
         w.held_supplies = [InventorySupply(3, "bronze_sword")]
-        name, action = reflexes.first(ctx_of(w))
-        self.assertEqual((name, action.verb, action.code), ("armed", "Arm", "bronze_sword"))
+        action = reflexes.ready(ctx_of(w), actions.Walk(((11, 10),), "east"))
+        self.assertEqual((action.verb, action.code), ("Arm", "bronze_sword"))
+
+    def test_a_tool_armed_for_a_break_is_kept_until_the_blow_lands(self):
+        w = world(armed="bronze_mallet")
+        w.held_supplies = [InventorySupply(3, "bronze_sword")]
+        ctx = ctx_of(w)
+        for action in (actions.UseOn(11, 10, None, "break the rock"), actions.Stop("waiting to swing")):
+            self.assertIs(reflexes.ready(ctx, action), action)
 
 
 class RouterTest(unittest.TestCase):

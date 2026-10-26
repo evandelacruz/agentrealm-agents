@@ -29,15 +29,18 @@ def on_fire(ctx: Ctx, turned: bool) -> Action | None:
     return route.off_hazard(ctx)
 
 
-def armed(ctx: Ctx, turned: bool) -> Action | None:
-    """Always armed with her best weapon and wearing her armor: a potion or a tool is armed only for its use (one
-    action), and the weapon goes back on the next tick."""
+def ready(ctx: Ctx, action: Action | None) -> Action | None:
+    """The standing rule, always armed with her best weapon and wearing her armor, applied to what was decided:
+    when the action moves or deals and needs nothing in hand, the weapon goes back first. An action that arms or
+    uses something (a swing, a break, a drink) or waits on one keeps the slot until its use lands."""
+    if action is not None and not isinstance(action, (actions.Walk, actions.Take, actions.Withdraw, actions.Read, actions.Say)):
+        return action
     s = ctx.state
     best = s.best_weapon()
     if best is not None and best.where != "armed":
         return actions.Equip(best.id, "Arm", best.code)
     armor = s.unworn()
-    return actions.Equip(armor.id, "Wear", armor.code) if armor is not None else None
+    return actions.Equip(armor.id, "Wear", armor.code) if armor is not None else action
 
 
 def fight(ctx: Ctx, turned: bool = False) -> Action | None:
@@ -105,14 +108,13 @@ def learn(ctx: Ctx, turned: bool = False) -> Action | None:
 
 REFLEXES: list[tuple[str, Callable[[Ctx, bool], Action | None]]] = [
     ("off the fire", on_fire),
-    ("armed", armed),  # a standing rule: never walk or fight empty-handed
     ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
     ("take", take),  # the nearest of gems, gear, chests and, when hurt, food
     ("learn", learn),
 ]
 
 
-PARKING = ("off the fire", "armed", "fight")  # stopping, she goes to safe ground: these still come first
+PARKING = ("off the fire", "fight")  # stopping, she goes to safe ground: these still come first
 
 
 def first(ctx: Ctx, turned: bool = False, only: tuple[str, ...] | None = None) -> tuple[str, Action] | None:

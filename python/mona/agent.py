@@ -101,6 +101,9 @@ class Mona:
             who, action = "get health", self.health.act(ctx)
         else:
             who, action = self.mode.value if self.mode else "-", self.flow.act(ctx) if self.flow else None
+        readied = reflexes.ready(ctx, action)  # the standing rule: her weapon in hand whenever nothing else needs it
+        if readied is not action:
+            who, action = "armed", readied
         self.body.act(action)
         self.record({"t": now, "mode": self.mode.value if self.mode else None, "health": self.health.active,
                      "who": who, "action": str(action) if action else None, "pos": ctx.state.pos,
@@ -229,11 +232,12 @@ class Mona:
                 return
             self.health.update(s)
             found = reflexes.first(ctx, turned=self.health.active, only=reflexes.PARKING)
-            if found is not None:  # safe ground is the destination: fire, the weapon and a fight still come first
-                self.body.act(found[1])
+            if found is not None:  # safe ground is the destination: fire and a fight still come first
+                self.body.act(reflexes.ready(ctx, found[1]))
                 continue
             path = travel.to_safe(ctx)
-            self.body.act(actions.Walk(tuple(path), "to safe ground before stopping") if path else actions.Stop("no safe ground known"))
+            self.body.act(reflexes.ready(ctx, actions.Walk(tuple(path), "to safe ground before stopping")) if path
+                          else actions.Stop("no safe ground known"))
         self.out(f"could not reach somewhere safe in {PARK_SECONDS}s")
 
     def status(self, ctx: Ctx) -> str:

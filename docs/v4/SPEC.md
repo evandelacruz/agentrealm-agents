@@ -80,7 +80,7 @@ A reflex runs to its end (the thing taken, the enemy dead) and then gives the ti
 
 ## The router
 
-Every move and every attack goes through one router. Travelling, it replans each step on what is known (breaking bushes and trees a carried weapon can, avoiding known fire and lava, learning from refused steps) and reroutes around a fence or a closed gap like a map app; a reroute never changes the destination, which fails only when no route exists. Attacking, it picks the block to strike from: in reach, off safe ground, not across fire or lava.
+Every move and every attack goes through one router. Travelling, it replans each step on what is known (breaking bushes and trees a carried weapon can, avoiding known fire and lava, learning from refused steps) and reroutes around a fence or a closed gap like a map app; a reroute never changes the destination, which fails only when no route exists. The route being walked is kept while every step ahead is still passable on what is known; a fresh plan comes only when it breaks or the destination changes, so two near-equal detours never alternate. Attacking, it picks the block to strike from: in reach, off safe ground, not across fire or lava.
 
 ## The strategist
 

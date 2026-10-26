@@ -16,8 +16,14 @@ from adk3.realm.actions import Action
 from adk3.realm.context import Ctx
 
 
-def along(ctx: Ctx, path, why: str) -> Action | None:
-    """Walk the path; a bush or tree in the way that a carried weapon breaks is broken first (Manual §11)."""
+def along(ctx: Ctx, path, why: str, goal: object = None) -> Action | None:
+    """Walk the path; a bush or tree in the way that a carried weapon breaks is broken first (Manual §11).
+
+    With a ``goal``, the route already being walked to it is kept while it still holds (every step ahead
+    passable on what is known), as a map app keeps a route: a replan never flips between two near-equal
+    detours. A fresh plan is taken when the goal changes or the route breaks."""
+    if goal is not None:
+        path = _kept(ctx, goal, path)
     if not path:
         return None
     s = ctx.state
@@ -30,13 +36,32 @@ def along(ctx: Ctx, path, why: str) -> Action | None:
     return actions.Walk(tuple(path), why)
 
 
+def _kept(ctx: Ctx, goal: object, fresh) -> list[Pos]:
+    s = ctx.state
+    key = (s.map_id, goal)
+    held = getattr(ctx.nav, "route_held", None)
+    if fresh is not None and len(fresh) == 0:  # there
+        ctx.nav.route_held = None
+        return []
+    if held is not None and held[0] == key and s.pos in held[1]:
+        ahead = held[1][held[1].index(s.pos) + 1:]
+        breaks = travel.breakable(s, ctx.memory)
+        bad = travel.hazards(s)
+        if len(ahead) > 1 and all(p not in bad and (p not in s.world.view.tiles or s.world.walkable(p) or p in breaks)
+                                  for p in ahead):
+            ctx.nav.route_held = (key, [s.pos, *ahead])
+            return ahead
+    ctx.nav.route_held = (key, [s.pos, *fresh]) if fresh else None
+    return list(fresh or ())
+
+
 def to(ctx: Ctx, map_id: int, cell: Pos, why: str, door: bool = False) -> Action | None:
     """Toward a place, on any map, by known doors; None when no route is known."""
-    return along(ctx, travel.to_place(ctx, map_id, cell, door=door) or (), why)
+    return along(ctx, travel.to_place(ctx, map_id, cell, door=door) or (), why, ("to", map_id, cell))
 
 
 def beside(ctx: Ctx, cell: Pos, reach: int, why: str) -> Action | None:
-    return along(ctx, travel.to_beside(ctx, cell, reach) or (), why)
+    return along(ctx, travel.to_beside(ctx, cell, reach) or (), why, ("beside", cell, reach))
 
 
 def explore(ctx: Ctx, toward: Pos | None, why: str) -> Action | None:

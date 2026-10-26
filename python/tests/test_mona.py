@@ -229,6 +229,19 @@ class RouterTest(unittest.TestCase):
         w.armed_code, w.armed_id, w.held_supplies = "bronze_sword", 3, [InventorySupply(5, "bronze_mail")]
         self.assertEqual(route.strike(ctx_of(w), foe).verb, "Wear")
 
+    def test_a_route_being_walked_is_kept_over_an_equal_one_found_later(self):
+        rows = ["g" * 21] * 9 + ["g" * 12 + "w" + "g" * 8] * 3 + ["g" * 21] * 9
+        w = world(rows, at=(10, 10))
+        nav = NavMemory()
+        at = lambda: Ctx(State.of(w, 10, None, 6, None, 4), Memory(), None, nav, (MAP, (10, 10)))
+        first = route.to(at(), MAP, (16, 10), "east")
+        w.pos = first.path[0]
+        self.assertEqual(list(route.to(at(), MAP, (16, 10), "east").path), list(first.path[1:]))
+        south = [(11, 11), (12, 12), (13, 12), (14, 11), (15, 10), (16, 10)]
+        w.pos = (10, 10)
+        nav.route_held = ((MAP, ("to", MAP, (16, 10))), [(10, 10), *south])
+        self.assertEqual(list(route.to(at(), MAP, (16, 10), "east").path), south)  # kept, though north is as short
+
     def test_a_fence_is_routed_around_not_given_up_on(self):
         rows = ["g" * 21] * 9 + ["g" * 12 + "w" + "g" * 8] * 3 + ["g" * 21] * 9
         action = route.to(ctx_of(world(rows, at=(10, 10))), MAP, (16, 10), "east")

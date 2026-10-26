@@ -88,7 +88,7 @@ class Mona:
             self.health.clear()
             self.flow = None
             self.ask_kit(ctx, "she died; revise the kit if it was too thin")
-        if self.flow is None or self.met(ctx):
+        if (self.flow is None or self.met(ctx)) and s.world.inventory_read:  # until read, gems and gear read as none
             self.start_mode(ctx)
         self.serve_flow(ctx)
         change = self.health.update(s)

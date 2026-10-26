@@ -20,6 +20,7 @@ from . import route
 
 FIGHT_WITHIN = 10  # blocks: a hostile this near is fought (better to attack than defend)
 TAKE_WITHIN = 25  # blocks: food, gems, gear, chests, signs and people this near are gone for
+ON_THE_WAY = 3  # blocks: gems, gear and chests this near are taken whatever else she is doing (a step or two aside)
 READ_REACH = 5  # a sign is read from this near (in sight in any light)
 SAY_REACH = 20  # a Say reaches an NPC 25 blocks off (Manual §11 Speech); a little inside it
 
@@ -72,15 +73,20 @@ def fight(ctx: Ctx) -> Action | None:
     return route.strike(ctx, min(foes, key=lambda e: chebyshev(e.pos, s.pos)))
 
 
-def loot(ctx: Ctx) -> Action | None:
+def on_the_way(ctx: Ctx) -> Action | None:
+    """Gems, a heart, free gear or a chest a step or two aside: taken even on the way to food."""
+    return loot(ctx, ON_THE_WAY)
+
+
+def loot(ctx: Ctx, within: int = TAKE_WITHIN) -> Action | None:
     """Gems, a heart, free gear and chests not yet looked into."""
     s, mem = ctx.state, ctx.memory
-    things = [e for e in s.supplies() if not e.gem_price and not s.world.is_our_drop(e.id) and _near(s, e.pos)
+    things = [e for e in s.supplies() if not e.gem_price and not s.world.is_our_drop(e.id) and _near(s, e.pos, within)
               and not (supplies.eaten_on_pickup(e.code) and supplies.heal_of(e.code) > 0)  # food waits for hurt
               and place_key(s.map_id, e.pos) not in mem.no_effect]  # gems, hearts and free gear
     if things:
         return _take(ctx, min(things, key=lambda e: chebyshev(e.pos, s.pos)))
-    chests = [e for e in s.chests() if _near(s, e.pos) and place_key(s.map_id, e.pos) not in mem.no_effect
+    chests = [e for e in s.chests() if _near(s, e.pos, within) and place_key(s.map_id, e.pos) not in mem.no_effect
               and (place_key(s.map_id, e.pos) not in mem.chests_seen or s.world.chest_contents.get(e.id))]
     if not chests:
         return None
@@ -110,6 +116,7 @@ REFLEXES: list[tuple[str, Callable[[Ctx], Action | None]]] = [
     ("off the fire", on_fire),
     ("armed", armed),  # a standing rule: never walk or fight empty-handed
     ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
+    ("on the way", on_the_way),  # a gem or chest a step aside is taken even when hurt and going for food
     ("eat", eat),
     ("loot", loot),
     ("learn", learn),
@@ -128,8 +135,8 @@ def first(ctx: Ctx, fight: bool = True) -> tuple[str, Action] | None:
     return None
 
 
-def _near(s, p: Pos) -> bool:
-    return chebyshev(p, s.pos) <= TAKE_WITHIN
+def _near(s, p: Pos, within: int = TAKE_WITHIN) -> bool:
+    return chebyshev(p, s.pos) <= within
 
 
 def _take(ctx: Ctx, e: Entity) -> Action | None:

@@ -169,6 +169,15 @@ class ReflexTest(unittest.TestCase):
         self.assertIsInstance(reflexes.first(ctx_of(w))[1], actions.Read)
 
 
+class OnTheWayTest(unittest.TestCase):
+    def test_hurt_she_still_takes_a_gem_a_step_aside_before_the_berry(self):
+        w = world(health=5)
+        w.entities.append(Entity("supply", 901, (11, 10), "gem"))
+        w.entities.append(Entity("supply", 902, (14, 10), "berry"))
+        name, action = reflexes.first(ctx_of(w))
+        self.assertEqual((name, action.code), ("on the way", "gem"))
+
+
 class ArmedTest(unittest.TestCase):
     def test_she_rearms_her_weapon_whatever_else_she_is_doing(self):
         w = world(armed="small_potion")

@@ -1,0 +1,79 @@
+"""The router: every move and every attack goes through it (docs/v4/SPEC.md **The router**).
+
+Travelling, it replans every decision on what is known (``adk3.realm.travel``:
+breakable bushes and trees, known fire and lava, steps the game refused), so
+a fence is routed around and the destination stays. Attacking, it arms the
+best weapon, wears carried armor, and picks a block to strike from that is in
+reach and off safe ground.
+"""
+
+from __future__ import annotations
+
+from agentrealm_adk.world import Entity, Pos, chebyshev
+
+from adk3.realm import actions, travel
+from adk3.realm.actions import Action
+from adk3.realm.context import Ctx
+
+
+def along(ctx: Ctx, path, why: str) -> Action | None:
+    """Walk the path; a bush or tree in the way that a carried weapon breaks is broken first (Manual §11)."""
+    if not path:
+        return None
+    s = ctx.state
+    nxt = path[0]
+    block = s.world.view.tiles.get(nxt)
+    if block is not None and not s.world.walkable(nxt) and nxt in travel.breakable(s, ctx.memory):
+        if not s.attack_ready:
+            return actions.Stop("waiting to swing")
+        return actions.UseOn(nxt[0], nxt[1], _arm(ctx, block), f"break the {block} in the way")
+    return actions.Walk(tuple(path), why)
+
+
+def to(ctx: Ctx, map_id: int, cell: Pos, why: str, door: bool = False) -> Action | None:
+    """Toward a place, on any map, by known doors; None when no route is known."""
+    return along(ctx, travel.to_place(ctx, map_id, cell, door=door) or (), why)
+
+
+def beside(ctx: Ctx, cell: Pos, reach: int, why: str) -> Action | None:
+    return along(ctx, travel.to_beside(ctx, cell, reach) or (), why)
+
+
+def explore(ctx: Ctx, toward: Pos | None, why: str) -> Action | None:
+    return along(ctx, travel.to_unseen(ctx, toward) or (), why)
+
+
+def strike(ctx: Ctx, foe: Entity) -> Action | None:
+    """Fight ``foe``: the best weapon armed and carried armor worn first, then from a block in reach off safe
+    ground (no swing lands from safe ground, Manual §11 Combat), on the weapon's cooldown."""
+    s = ctx.state
+    best = s.best_weapon()
+    if best is not None and best.where != "armed":
+        return actions.Equip(best.id, "Arm", best.code)
+    armor = s.unworn()
+    if armor is not None:
+        return actions.Equip(armor.id, "Wear", armor.code)
+    stand = travel.to_strike(ctx, foe.pos, s.world.attack_range or 1)
+    if stand:
+        return along(ctx, stand, f"close on {foe.code}")
+    if stand is None:
+        return None
+    return actions.Swing(foe.id, f"{foe.code} {foe.id}") if s.attack_ready else actions.Stop("between swings")
+
+
+def off_hazard(ctx: Ctx) -> Action | None:
+    """Standing on fire or lava: the nearest block that is not."""
+    s = ctx.state
+    if s.pos not in travel.hazards(s):
+        return None
+    bad = travel.hazards(s)
+    open_ = [p for p in s.world.open_neighbours(s.pos) if p not in bad]
+    if not open_:
+        return None
+    return actions.Walk((min(open_, key=lambda p: chebyshev(p, s.pos)),), "off the burning ground")
+
+
+def _arm(ctx: Ctx, block: str) -> int | None:
+    s = ctx.state
+    weapon = travel.weapon_for(s, block)
+    return None if weapon is None or any(c.id == weapon and c.where == "armed" for c in s.carried) else weapon

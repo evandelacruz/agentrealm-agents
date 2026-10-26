@@ -318,6 +318,19 @@ class BeatTest(unittest.TestCase):
         self.assertNotEqual(getattr(action, "why", ""), "through a door not taken yet")
 
 
+class BeatStuckTest(unittest.TestCase):
+    def test_inside_a_level_with_no_way_on_she_tells_the_strategist_once(self):
+        rows = ["w" * 5] + ["wgggw"] * 3 + ["w" * 5]
+        w = world(rows, at=(2, 2))
+        w.map_level = 1
+        flow = modes.Beat(Kit(level=1, trusted=True))
+        flow.act(ctx_of(w))
+        self.assertIn("no way on", flow.blocked)
+        flow.blocked = ""
+        flow.act(ctx_of(w))
+        self.assertEqual(flow.blocked, "")
+
+
 class GearTest(unittest.TestCase):
     def test_the_death_chest_holding_a_piece_comes_before_a_shop(self):
         mem = Memory()

@@ -123,7 +123,10 @@ class Learn(Flow):
             if s.boss() is not None:
                 self.finish(f"saw level {s.level}'s boss: {s.boss().code}")
                 return None
-            return _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
+            go = _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
+            if go is None:
+                self.finish(f"inside level {s.level}, no way on to its boss: {_no_way(ctx)}")
+            return go
         if self.was_inside:
             self.finish("left the level before seeing its boss")
             return None
@@ -325,6 +328,7 @@ class Beat(Flow):
     def __init__(self, kit: Kit):
         super().__init__(kit)
         self.was_inside = False
+        self.stuck = False  # inside, with no door to try and nothing unseen: told once
 
     def act(self, ctx: Ctx) -> Action | None:
         s = ctx.state
@@ -333,7 +337,11 @@ class Beat(Flow):
             return ready
         if s.in_level:
             self.was_inside = True
-            return _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
+            go = _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
+            if go is None and not self.stuck:  # once: the strategist revises the kit (a tool, a key, a light)
+                self.stuck = True
+                self.blocked = f"inside level {self.kit.level}, no way on: {_no_way(ctx)}"
+            return go or actions.Stop("no way on")
         if self.was_inside:
             self.blocked = f"left level {self.kit.level} without clearing it"
             self.was_inside = False
@@ -381,7 +389,17 @@ def _find_boss(ctx: Ctx, came_in: Pos | None = None) -> Action | None:
         go = route.to(ctx, s.map_id, door, "through a door not taken yet", door=True)
         if go is not None:
             return go
-    return route.explore(ctx, None, "look for the boss") or actions.Stop("nothing left to look at")
+    return route.explore(ctx, None, "look for the boss")
+
+
+def _no_way(ctx: Ctx) -> str:
+    """Why a level has no way on, for the strategist: its doors and what each did."""
+    s, mem = ctx.state, ctx.memory
+    doors = []
+    for p in s.doors():
+        why = mem.refused.get(place_key(s.map_id, p)) or ("no route to it" if travel.to_place(ctx, s.map_id, p, door=True) is None else "")
+        doors.append(f"door at {p[0]},{p[1]}" + (f" ({why})" if why else ""))
+    return "; ".join(doors) or "no door seen"
 
 
 def _look_around_town(ctx: Ctx) -> Action | None:

@@ -3,7 +3,8 @@
 Enters at 3 health or below; exits at 10 or above, and nothing else ends it.
 While it runs it owns the destination: at 3 or below, drink a carried potion
 or buy one when a seller is known and she can pay; else, and always above 3,
-go where food is (town's berries, or a bush seen); else look around nearby.
+go to the nearest food she knows: a bush seen on this map, else town's
+berries; else look around nearby.
 A potion heals 10, so above 3 most of it would be spent for nothing.
 Reflexes keep running under it, so the food it walks to is eaten by them.
 """
@@ -13,9 +14,10 @@ from __future__ import annotations
 from agentrealm_adk import supplies
 from agentrealm_adk.world import chebyshev
 
-from adk3.realm import actions, value
+from adk3.realm import actions, travel, value
 from adk3.realm.actions import Action
 from adk3.realm.context import Ctx
+from adk3.realm.memory import place_key
 from adk3.realm.state import State
 
 from . import route
@@ -62,6 +64,13 @@ class GetHealth:
                 if go is not None:
                     return go
                 self.tried.add("shop")
+        bush = self._nearest_bush(ctx)
+        town_far = (ctx.town is None or ctx.town[0] != s.map_id or "town" in self.tried
+                    or bush is not None and chebyshev(bush, s.pos) < chebyshev(ctx.town[1], s.pos))
+        if bush is not None and town_far:  # the nearer of a bush seen and town
+            go = route.beside(ctx, bush, 1, "to a bush for its berry")
+            if go:
+                return go
         if ctx.town is not None and "town" not in self.tried:
             map_id, cell = ctx.town
             if s.map_id == map_id and chebyshev(cell, s.pos) <= ARRIVED:
@@ -72,6 +81,15 @@ class GetHealth:
                     return go
                 self.tried.add("town")
         return route.explore(ctx, ctx.town[1] if ctx.town else None, "look for food")
+
+    def _nearest_bush(self, ctx: Ctx):
+        """The nearest bush seen on this map that a carried weapon cuts (the take reflex cuts it once near)."""
+        s = ctx.state
+        if travel.weapon_for(s, "bush") is None:
+            return None
+        bushes = [p for p, b in s.world.view.tiles.items()
+                  if b == "bush" and place_key(s.map_id, p) not in ctx.memory.no_effect]
+        return min(bushes, key=lambda p: chebyshev(p, s.pos), default=None)
 
     def _potion_shelf(self, ctx: Ctx):
         s = ctx.state

@@ -117,6 +117,15 @@ class GetHealthTest(unittest.TestCase):
         g.active = True
         self.assertIsInstance(g.act(ctx_of(w)), actions.Walk)
 
+    def test_she_goes_to_a_bush_she_has_seen_when_it_is_nearer_than_town(self):
+        rows = ["d" * 60] * 21
+        rows[10] = "d" * 45 + "b" + "d" * 14
+        w = world(rows, health=5, at=(58, 10))  # town is at 10,10
+        g = GetHealth()
+        g.active = True
+        action = g.act(ctx_of(w))
+        self.assertEqual((type(action), action.why), (actions.Walk, "to a bush for its berry"))
+
     def test_with_no_potion_she_goes_to_town_for_food(self):
         w = world(health=3, at=(1, 1))
         g = GetHealth()

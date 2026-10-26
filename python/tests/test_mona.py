@@ -140,7 +140,7 @@ class ReflexTest(unittest.TestCase):
     def test_hurt_with_no_hostile_near_she_eats(self):
         w = world(health=6)
         w.entities.append(Entity("supply", 7, (8, 10), "berry"))
-        self.assertEqual(reflexes.first(ctx_of(w))[0], "eat")
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "take")
 
     def test_at_full_health_food_is_left_and_the_hostile_fought(self):
         w = world()
@@ -151,7 +151,7 @@ class ReflexTest(unittest.TestCase):
     def test_hurt_with_no_food_a_bush_is_cut_for_its_berry(self):
         rows = ["g" * 21] * 10 + ["g" * 11 + "b" + "g" * 9] + ["g" * 21] * 10
         name, action = reflexes.first(ctx_of(world(rows, health=7)))
-        self.assertEqual((name, type(action)), ("eat", actions.UseOn))
+        self.assertEqual((name, type(action)), ("take", actions.UseOn))
 
     def test_a_hostile_beyond_ten_blocks_is_not_gone_for(self):
         w = world(["g" * 41] * 21, at=(5, 10))
@@ -161,7 +161,7 @@ class ReflexTest(unittest.TestCase):
     def test_gems_and_free_gear_within_25_are_taken(self):
         w = world(["g" * 41] * 21, at=(5, 10))
         w.entities.append(Entity("supply", 7, (28, 10), "gem"))
-        self.assertEqual(reflexes.first(ctx_of(w))[0], "loot")
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "take")
 
     def test_a_sign_not_read_is_read(self):
         w = world()
@@ -169,13 +169,20 @@ class ReflexTest(unittest.TestCase):
         self.assertIsInstance(reflexes.first(ctx_of(w))[1], actions.Read)
 
 
-class OnTheWayTest(unittest.TestCase):
-    def test_hurt_she_still_takes_a_gem_a_step_aside_before_the_berry(self):
+class TakeTest(unittest.TestCase):
+    def test_hurt_she_takes_the_nearer_gem_before_the_berry(self):
         w = world(health=5)
         w.entities.append(Entity("supply", 901, (11, 10), "gem"))
         w.entities.append(Entity("supply", 902, (14, 10), "berry"))
         name, action = reflexes.first(ctx_of(w))
-        self.assertEqual((name, action.code), ("on the way", "gem"))
+        self.assertEqual((name, action.code), ("take", "gem"))
+
+
+    def test_a_nearer_berry_comes_before_a_gem(self):
+        w = world(health=5)
+        w.entities.append(Entity("supply", 901, (14, 10), "gem"))
+        w.entities.append(Entity("supply", 902, (11, 10), "berry"))
+        self.assertEqual(reflexes.first(ctx_of(w))[1].code, "berry")
 
 
 class ArmedTest(unittest.TestCase):

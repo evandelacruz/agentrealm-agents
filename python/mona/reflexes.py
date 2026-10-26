@@ -20,7 +20,6 @@ from . import route
 
 FIGHT_WITHIN = 10  # blocks: a hostile this near is fought (better to attack than defend)
 TAKE_WITHIN = 25  # blocks: food, gems, gear, chests, signs and people this near are gone for
-ON_THE_WAY = 3  # blocks: gems, gear and chests this near are taken whatever else she is doing (a step or two aside)
 READ_REACH = 5  # a sign is read from this near (in sight in any light)
 SAY_REACH = 20  # a Say reaches an NPC 25 blocks off (Manual §11 Speech); a little inside it
 
@@ -40,31 +39,6 @@ def armed(ctx: Ctx) -> Action | None:
     return actions.Equip(armor.id, "Wear", armor.code) if armor is not None else None
 
 
-def eat(ctx: Ctx) -> Action | None:
-    """Hurt: food or a heart near, else a bush to cut for its berry (food is eaten on pickup: none at full health)."""
-    s = ctx.state
-    if s.health >= s.max_health:
-        return None
-    food = [e for e in s.supplies() if not e.gem_price and supplies.eaten_on_pickup(e.code)
-            and supplies.heal_of(e.code) > 0 and _near(s, e.pos)]
-    if food:
-        return _take(ctx, min(food, key=lambda e: chebyshev(e.pos, s.pos)))
-    weapon = travel.weapon_for(s, "bush")
-    if weapon is None:
-        return None
-    bushes = [p for p, b in s.world.view.tiles.items()
-              if b == "bush" and _near(s, p) and place_key(s.map_id, p) not in ctx.memory.no_effect]
-    if not bushes:
-        return None
-    bush = min(bushes, key=lambda p: chebyshev(p, s.pos))
-    if chebyshev(bush, s.pos) > 1:
-        return route.beside(ctx, bush, 1, "to a bush for its berry")
-    if not s.attack_ready:
-        return actions.Stop("waiting to swing")
-    armed = any(c.id == weapon and c.where == "armed" for c in s.carried)
-    return actions.UseOn(bush[0], bush[1], None if armed else weapon, "cut a bush for its berry")
-
-
 def fight(ctx: Ctx) -> Action | None:
     s = ctx.state
     foes = [e for e in s.threats() if chebyshev(e.pos, s.pos) <= FIGHT_WITHIN]
@@ -73,27 +47,41 @@ def fight(ctx: Ctx) -> Action | None:
     return route.strike(ctx, min(foes, key=lambda e: chebyshev(e.pos, s.pos)))
 
 
-def on_the_way(ctx: Ctx) -> Action | None:
-    """Gems, a heart, free gear or a chest a step or two aside: taken even on the way to food."""
-    return loot(ctx, ON_THE_WAY)
-
-
-def loot(ctx: Ctx, within: int = TAKE_WITHIN) -> Action | None:
-    """Gems, a heart, free gear and chests not yet looked into."""
+def take(ctx: Ctx) -> Action | None:
+    """The nearest thing worth taking within 25 blocks: gems, a heart, free gear, a chest not yet looked into, and,
+    when hurt, food or a bush to cut for its berry (food is eaten on pickup, so at full health it is left lying)."""
     s, mem = ctx.state, ctx.memory
-    things = [e for e in s.supplies() if not e.gem_price and not s.world.is_our_drop(e.id) and _near(s, e.pos, within)
-              and not (supplies.eaten_on_pickup(e.code) and supplies.heal_of(e.code) > 0)  # food waits for hurt
-              and place_key(s.map_id, e.pos) not in mem.no_effect]  # gems, hearts and free gear
-    if things:
-        return _take(ctx, min(things, key=lambda e: chebyshev(e.pos, s.pos)))
-    chests = [e for e in s.chests() if _near(s, e.pos, within) and place_key(s.map_id, e.pos) not in mem.no_effect
-              and (place_key(s.map_id, e.pos) not in mem.chests_seen or s.world.chest_contents.get(e.id))]
-    if not chests:
+    hurt = s.health < s.max_health
+    found: list[tuple[int, str, object]] = []
+    for e in s.supplies():
+        if e.gem_price or s.world.is_our_drop(e.id) or not _near(s, e.pos) or place_key(s.map_id, e.pos) in mem.no_effect:
+            continue
+        food = supplies.eaten_on_pickup(e.code) and supplies.heal_of(e.code) > 0
+        if hurt or not food:
+            found.append((chebyshev(e.pos, s.pos), "supply", e))
+    for e in s.chests():
+        key = place_key(s.map_id, e.pos)
+        if _near(s, e.pos) and key not in mem.no_effect and (key not in mem.chests_seen or s.world.chest_contents.get(e.id)):
+            found.append((chebyshev(e.pos, s.pos), "chest", e))
+    weapon = travel.weapon_for(s, "bush") if hurt else None
+    if weapon is not None:
+        found += [(chebyshev(p, s.pos), "bush", p) for p, b in s.world.view.tiles.items()
+                  if b == "bush" and _near(s, p) and place_key(s.map_id, p) not in mem.no_effect]
+    if not found:
         return None
-    chest = min(chests, key=lambda e: chebyshev(e.pos, s.pos))
-    if chebyshev(chest.pos, s.pos) > 1:
-        return route.beside(ctx, chest.pos, 1, "to a chest")
-    return actions.Withdraw(chest.id)
+    _, kind, what = min(found, key=lambda f: f[0])
+    if kind == "supply":
+        return _take(ctx, what)
+    if kind == "chest":
+        if chebyshev(what.pos, s.pos) > 1:
+            return route.beside(ctx, what.pos, 1, "to a chest")
+        return actions.Withdraw(what.id)
+    if chebyshev(what, s.pos) > 1:
+        return route.beside(ctx, what, 1, "to a bush for its berry")
+    if not s.attack_ready:
+        return actions.Stop("waiting to swing")
+    armed = any(c.id == weapon and c.where == "armed" for c in s.carried)
+    return actions.UseOn(what[0], what[1], None if armed else weapon, "cut a bush for its berry")
 
 
 def learn(ctx: Ctx) -> Action | None:
@@ -116,9 +104,7 @@ REFLEXES: list[tuple[str, Callable[[Ctx], Action | None]]] = [
     ("off the fire", on_fire),
     ("armed", armed),  # a standing rule: never walk or fight empty-handed
     ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
-    ("on the way", on_the_way),  # a gem or chest a step aside is taken even when hurt and going for food
-    ("eat", eat),
-    ("loot", loot),
+    ("take", take),  # the nearest of gems, gear, chests and, when hurt, food
     ("learn", learn),
 ]
 
@@ -135,8 +121,8 @@ def first(ctx: Ctx, fight: bool = True) -> tuple[str, Action] | None:
     return None
 
 
-def _near(s, p: Pos, within: int = TAKE_WITHIN) -> bool:
-    return chebyshev(p, s.pos) <= within
+def _near(s, p: Pos) -> bool:
+    return chebyshev(p, s.pos) <= TAKE_WITHIN
 
 
 def _take(ctx: Ctx, e: Entity) -> Action | None:

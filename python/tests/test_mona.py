@@ -205,6 +205,16 @@ class TakeTest(unittest.TestCase):
         self.assertEqual((name, str(action).endswith("(to the berry)")), ("take", True))
 
 
+    def test_near_means_the_walk_not_the_line_a_berry_behind_trees_is_far(self):
+        rows = []
+        for y in range(21):
+            rows.append("".join("t" if 2 <= max(abs(x - 16), abs(y - 10)) <= 4 else "g" for x in range(21)))
+        w = world(rows, health=5)
+        w.entities.append(Entity("supply", 901, (16, 10), "berry"))  # 6 off as the crow flies, behind three trees
+        w.entities.append(Entity("supply", 902, (10, 17), "gem"))  # 7 off, in the open
+        self.assertEqual(reflexes.first(ctx_of(w))[1].why, "to the gem")
+
+
 class ArmedTest(unittest.TestCase):
     def test_walking_she_rearms_her_weapon_first(self):
         w = world(armed="small_potion")

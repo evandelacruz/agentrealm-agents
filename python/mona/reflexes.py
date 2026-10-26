@@ -22,6 +22,7 @@ FIGHT_WITHIN = 10  # blocks: a hostile this near is fought (better to attack tha
 TAKE_WITHIN = 25  # blocks: food, gems, gear, chests, signs and people this near are gone for
 READ_REACH = 5  # a sign is read from this near (in sight in any light)
 SAY_REACH = 20  # a Say reaches an NPC 25 blocks off (Manual §11 Speech); a little inside it
+ROUTED = 6  # the nearest this many in a straight line are routed to find the nearest by the walk
 CONTACT = 2  # blocks: turned from a fight, nothing this near a hostile is gone for (it would hold her in the hits)
 
 
@@ -73,9 +74,9 @@ def take(ctx: Ctx, turned: bool = False) -> Action | None:
     if weapon is not None:
         found += [(chebyshev(p, s.pos), "bush", p) for p, b in s.world.view.tiles.items()
                   if b == "bush" and _near(s, p, turned) and place_key(s.map_id, p) not in mem.no_effect]
-    if not found:
+    kind, what = _nearest_by_route(ctx, found)
+    if kind is None:
         return None
-    _, kind, what = min(found, key=lambda f: f[0])
     if kind == "supply":
         return _take(ctx, what)
     if kind == "chest":
@@ -88,6 +89,20 @@ def take(ctx: Ctx, turned: bool = False) -> Action | None:
         return actions.Stop("waiting to swing")
     armed = any(c.id == weapon and c.where == "armed" for c in s.carried)
     return actions.UseOn(what[0], what[1], None if armed else weapon, "cut a bush for its berry")
+
+
+def _nearest_by_route(ctx: Ctx, found: list[tuple[int, str, object]]) -> tuple[str | None, object]:
+    """The nearest by the walk to it, not as the crow flies: a berry three blocks off behind a row of trees is far.
+    The few nearest in a straight line are routed (the walk is never shorter), each break costing what it takes."""
+    best: tuple[int, str | None, object] = (TAKE_WITHIN + 1, None, None)
+    for line, kind, what in sorted(found, key=lambda f: f[0])[:ROUTED]:
+        if line >= best[0]:
+            break
+        pos = what if kind == "bush" else what.pos
+        steps = route.steps(ctx, travel.to_beside(ctx, pos, 1))
+        if steps is not None and steps < best[0]:
+            best = (steps, kind, what)
+    return best[1], best[2]
 
 
 def learn(ctx: Ctx, turned: bool = False) -> Action | None:

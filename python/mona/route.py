@@ -55,6 +55,14 @@ def _kept(ctx: Ctx, goal: object, fresh) -> list[Pos]:
     return list(fresh or ())
 
 
+def steps(ctx: Ctx, path) -> int | None:
+    """What a path costs to walk: a step a cell, a break what the router prices it at; None for no path."""
+    if path is None:
+        return None
+    breaks = travel.breakable(ctx.state, ctx.memory)
+    return sum(travel.BREAK_STEPS if p in breaks and not ctx.state.world.walkable(p) else 1 for p in path)
+
+
 def to(ctx: Ctx, map_id: int, cell: Pos, why: str, door: bool = False) -> Action | None:
     """Toward a place, on any map, by known doors; None when no route is known."""
     return along(ctx, travel.to_place(ctx, map_id, cell, door=door) or (), why, ("to", map_id, cell))

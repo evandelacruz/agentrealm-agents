@@ -27,6 +27,7 @@ from .kit import Kit
 
 ARRIVED = 3  # blocks: this near a destination counts as there
 FIELD = 12  # blocks around a field's center that count as the field
+CAME_IN = 2  # blocks: a door this near where she arrived on a level map is the one she came through
 POOR_AFTER = 40  # cuts in a field before its gem rate is judged
 POOR_RATE = 0.10  # a field paying under this many gems a cut is poor (ring 1 pays 0.20): another is picked
 INNER, OUTER = 45, 110  # blocks from town: the inner and outer bands (Manual §16: ring 1 near town, farther out pays more)
@@ -55,6 +56,7 @@ class Flow:
         self.question: Question | None = None  # waiting on the strategist's pick
         self.blocked: str = ""  # why the mode cannot go on: the strategist revises the kit
         self.learned: str = ""  # a learn step just finished: the strategist revises the kit
+        self.arrived: dict[int, Pos] = {}  # level map -> where she came in: the door beside it is the way out
 
     def act(self, ctx: Ctx) -> Action | None:
         raise NotImplementedError
@@ -121,7 +123,7 @@ class Learn(Flow):
             if s.boss() is not None:
                 self.finish(f"saw level {s.level}'s boss: {s.boss().code}")
                 return None
-            return _find_boss(ctx)
+            return _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
         if self.was_inside:
             self.finish("left the level before seeing its boss")
             return None
@@ -331,7 +333,7 @@ class Beat(Flow):
             return ready
         if s.in_level:
             self.was_inside = True
-            return _find_boss(ctx)
+            return _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
         if self.was_inside:
             self.blocked = f"left level {self.kit.level} without clearing it"
             self.was_inside = False
@@ -366,13 +368,14 @@ def _entrance(ctx: Ctx, kit: Kit | None) -> Entrance | None:
     return min(known, key=lambda e: chebyshev((e.x, e.y), s.pos), default=None)
 
 
-def _find_boss(ctx: Ctx) -> Action | None:
-    """Inside a level: through a door not taken yet, else to ground not seen (Manual §11 Bosses and levels)."""
+def _find_boss(ctx: Ctx, came_in: Pos | None = None) -> Action | None:
+    """Inside a level: through a door not taken yet, else to ground not seen (Manual §11 Bosses and levels). The
+    door beside where she came in is the way back out, never one to try."""
     s = ctx.state
     taken = set()
     if ctx.kb is not None:
         taken = {(int(d["x"]), int(d["y"])) for d in iter_doors(ctx.kb, s.map_id) if door_warp_known(d)}
-    untried = [p for p in s.doors() if p not in taken]
+    untried = [p for p in s.doors() if p not in taken and (came_in is None or chebyshev(p, came_in) > CAME_IN)]
     if untried:
         door = min(untried, key=lambda p: chebyshev(p, s.pos))
         go = route.to(ctx, s.map_id, door, "through a door not taken yet", door=True)

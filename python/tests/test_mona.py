@@ -307,6 +307,16 @@ class MoneyTest(unittest.TestCase):
             self.assertEqual("field" in flow.crossed, crossed, gems)
 
 
+class BeatTest(unittest.TestCase):
+    def test_the_door_she_came_in_by_is_not_a_door_to_try(self):
+        w = world(at=(10, 10))
+        w.map_level = 1
+        w.maps[MAP].tiles[(10, 11)] = "framed_door"
+        flow = modes.Beat(Kit(level=1, trusted=True))
+        action = flow.act(ctx_of(w))
+        self.assertNotEqual(getattr(action, "why", ""), "through a door not taken yet")
+
+
 class GearTest(unittest.TestCase):
     def test_the_death_chest_holding_a_piece_comes_before_a_shop(self):
         mem = Memory()

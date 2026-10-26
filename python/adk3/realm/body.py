@@ -259,12 +259,14 @@ class Body:
             self.learn_result(intent, res)
             if outcome == "rejected":
                 code = (res.get("rejection") or {}).get("code")
+                landing = None
                 if intent.get("verb") == "Step" and w.pos is not None:
                     landing = step_landing(w.pos, intent["direction"])
                     learn_step_rejection(nav, w, self.kb, landing, code, tick)
                     self.learn_door_refusal(landing, code)
                 if code not in ("movement_cooldown", "attack_cooldown"):
-                    self.out(f"refused {intent.get('verb')}: {code}")
+                    at = f" onto {w.map_id}:{landing[0]},{landing[1]} ({w.view.tiles.get(landing, '?')})" if landing else ""
+                    self.out(f"refused {intent.get('verb')}{at}: {code}")
                 self.drop_queue()
                 nav.need_position = True
                 return

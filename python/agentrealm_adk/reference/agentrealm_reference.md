@@ -1,6 +1,6 @@
 # Agent Realm reference (for the AI planner)
 
-Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-12.
+Source: https://agentrealm.gg/docs and https://agentrealm.gg/guides, every page they link. Fetched 2026-10-26.
 Regenerate with `python3 scripts/refresh_planner_reference.py`; do not edit by hand.
 Each page below starts with a `# page:` line; the planner splits on them (`reference_sections`).
 
@@ -384,7 +384,7 @@ A block targeted with a weapon or a tool armed must be within reach: the weapon'
 
 Swapping what is armed costs a tick, via `Arm`. Drinking mid-fight means a turn not swinging.
 
-An attack is `Use` with a weapon armed. Nothing armed is rejected. Each weapon subtype has an attack cooldown in real time, default 1 second, on the character's attack accumulator (Movement). An attack while that accumulator is short is rejected with `attack_cooldown`. The default roll is 1–20. To-hit and damage are two rolls, each seeded from the tick, the actor, the target, and a roll kind of `hit` or `damage`. It hits when the roll plus attack power is at least the world's hit target plus defense plus worn armor defense. The default target is 10. The lowest face misses. The highest face hits. The weapon does not change the hit roll. A miss deals 0. A hit deals a uniform roll from 1 up to the greater of 1 and attack power plus weapon damage, minus defense, minus armor defense. A hostile or a boss uses its own attack power, and as weapon damage its attack's damage when it has one; no shipped NPC does. A trap uses its grade as attack power and has no weapon damage. `Disarm` uses the same die and the world's hit target: roll plus detection grade against that target plus the trap grade. Its seed adds the roll kind `disarm`, with the character as actor and the trap as target. A world may replace the die size, the target of 10, and the minimum of 1, and those values are what gets published. Those settings are `worlds.combat_die_size` (default 20), `worlds.combat_hit_target` (default 10), and `worlds.combat_damage_minimum` (default 1). `occupy_damage` does not use this roll.
+An attack is `Use` with a weapon armed. Nothing armed is rejected. Each weapon subtype has an attack cooldown in real time, default 1 second, on the character's attack accumulator (Movement). An attack while that accumulator is short is rejected with `attack_cooldown`. The default roll is 1–20. To-hit and damage are two rolls, each seeded from the tick, the actor, the target, and a roll kind of `hit` or `damage`. It hits when the roll plus attack power, plus the world's character hit bonus when a character swings, is at least the world's hit target plus defense plus worn armor defense. The default target is 10 and the default bonus 0; a hostile, a boss, or a trap never adds the bonus, and it does not change damage (B150). The lowest face misses. The highest face hits. The weapon does not change the hit roll. A miss deals 0. A hit deals a uniform roll from 1 up to the greater of 1 and attack power plus weapon damage, minus defense, minus armor defense. A hostile or a boss uses its own attack power, and as weapon damage its attack's damage when it has one; no shipped NPC does. A trap uses its grade as attack power and has no weapon damage. `Disarm` uses the same die and the world's hit target: roll plus detection grade against that target plus the trap grade. Its seed adds the roll kind `disarm`, with the character as actor and the trap as target. A world may replace the die size, the target of 10, and the minimum of 1, and those values are what gets published. Those settings are `worlds.combat_die_size` (default 20), `worlds.combat_hit_target` (default 10), and `worlds.combat_damage_minimum` (default 1). `occupy_damage` does not use this roll.
 
 **Worn** slots are separate and passive. The wearable classes are armor and accessory. Armor uses head, body, legs, and feet. Accessory uses the accessory slot. There are five slots, and each holds one supply. Worn items apply continuously and do not occupy the armed slot. A tool is armed. An always-on light is an accessory. The outfit is a separate cosmetic layer, bought on the website with cash, points, or both, as that outfit is priced: no stats, not in the chest, and not dropped. No worn supply is purely cosmetic. A character's look is its face and its outfit, and worn supplies exist for their effect; a viewer draws the armed supply and the worn head, body, legs, and feet supplies on the character (B88).
 
@@ -753,10 +753,13 @@ What changed in Agent Realm, newest first. Each version since 0.10 is one releas
 
 ### Latest
 
+- Olympuff swings land more often: every character adds 2 to its roll to hit, so a swing at a hostile hits about 75% of the time instead of 65%. Damage is unchanged, and hostiles hit you no more often than before.
+- The watch now says whose miss it was: a swing that misses you, or any character, reads "Dodge", and your own swing that misses reads "Miss".
+- On your own character's watch and its replay, taking damage now shakes the view and flashes it red. Reduced motion keeps the flash without the shake.
 - The Manual now explains the core play rules: what each slot does, what breaks what, what a death costs, how levels and boss fights work, and how hostiles, safe zones, and regrowth behave.
 - Felling a tree in the wilds with a sword now pays a gem at least as often as cutting grass there.
 - Traps now hit as hard as their grade: a grade 1 trap hits about 60% of the time for 1, a grade 5 trap about 80% for 1 to 5, and a grade 9 trap about 95% for 1 to 9 against an unarmored character. Before, every trap hit alike.
-- Weapons now swing at different speeds: the pocket knife is quicker (0.8 s), mallets a little quicker (1.3 s), whips (1.2 s) and bows (1.5 s) slower, and swords stay at 1 s. Every tier of a weapon swings at its family's speed; damage and reach are unchanged.
+- Weapons now swing faster, and at different speeds: the pocket knife every 0.4 s, swords 0.6 s, whips 0.8 s, mallets 0.9 s, and bows 1.1 s, where most weapons used to swing once a second. Every tier of a weapon swings at its family's speed; damage and reach are unchanged.
 - **Breaking:** the Supplies reference lists what each supply does as its capabilities, each with when it acts and its numbers, and the Manual adds a table of every capability. In `/docs/supplies.json`, each row's `capabilities` list replaces `use_effects` and the separate stat fields (`attack_range`, `damage`, `heal`, `teleport_range`, `chest_capacity`, `defense`, `light_radius`, `grants`).
 - A death in the spectator events now names the block the character died on (`map_id`, `x`, `y`), as the API docs describe. What it dropped and where its chest landed are still only the owner's.
 
@@ -1329,7 +1332,7 @@ For an agent that reads only this section.
 - **Branch on errors by status, then code.** 400 = fix the request. 401 = try another key. 403 = stop: not your character, or the account needs something first (`email_not_verified`, `payment_method_required`). 409 = state (e.g. not placed yet). 429 = slow down; the world keeps moving. 503 = world paused; wait `Retry-After`; nothing moves.
 - **Branch on tick rejections by `retryability`**: `transient` → retry the same intent later; `precondition` → change something first; `permanent` → never send it again.
 - **Nothing is pushed.** No websocket, no webhook. You poll.
-- **Real time.** Worlds tick 10 times per second. Actions have real-time cooldowns: move 2.5 blocks/s to start, speak 1/s, and attack once per the weapon's cooldown (1 s by default; a weapon family sets its own, 0.8 s to 1.5 s in Olympuff). An agent may queue up to 4 seconds of intents, run one per tick, and paces moves inside a queue with `Wait`. A character with no intent for 10 minutes falls asleep and leaves the map (B45). See §7.6.
+- **Real time.** Worlds tick 10 times per second. Actions have real-time cooldowns: move 2.5 blocks/s to start, speak 1/s, and attack once per the weapon's cooldown (1 s by default; a weapon family sets its own, 0.4 s to 1.1 s in Olympuff). An agent may queue up to 4 seconds of intents, run one per tick, and paces moves inside a queue with `Wait`. A character with no intent for 10 minutes falls asleep and leaves the map (B45). See §7.6.
 
 ### 2. Quick start
 
@@ -2298,16 +2301,16 @@ The same rows are served as JSON with no key: `GET /docs/supplies.json` on the w
 | `adamant_greaves` | Adamant greaves | armor | worn (legs) | legs slot (worn); defense (worn): defense 1 | — | no | 150 (olympuff) |
 | `adamant_helm` | Adamant helm | armor | worn (head) | head slot (worn); defense (worn): defense 1 | — | no | 150 (olympuff) |
 | `adamant_mail` | Adamant mail | armor | worn (body) | body slot (worn); defense (worn): defense 3 | — | no | 300 (olympuff) |
-| `adamant_mallet` | Adamant mallet | weapon | armed | attack (Use): damage 20, attack range 1, cooldown 1300 ms; smash (Use) | no | no | 400 (olympuff) |
-| `adamant_sword` | Adamant sword | weapon | armed | attack (Use): damage 14, attack range 1, cooldown 1000 ms; chop (Use); cut (Use) | no | no | 300 (olympuff) |
+| `adamant_mallet` | Adamant mallet | weapon | armed | attack (Use): damage 20, attack range 1, cooldown 900 ms; smash (Use) | no | no | 400 (olympuff) |
+| `adamant_sword` | Adamant sword | weapon | armed | attack (Use): damage 14, attack range 1, cooldown 600 ms; chop (Use); cut (Use) | no | no | 300 (olympuff) |
 | `apple` | Apple | consumable | — | heal (on pickup): health 2 | — | eaten on pickup | — |
 | `berry` | Berry | consumable | — | heal (on pickup): health 1 | — | eaten on pickup | — |
 | `blue_chest` | Blue chest | consumable | armed | chest (Use): capacity 10 | — | no | — |
 | `bomb` | Bomb | tool | armed | blast (Use) | yes | no | 40 (olympuff) |
 | `boots_of_speed` | Boots of speed | armor | worn (feet) | feet slot (worn); movement speed (armed or worn): bonus 0.5 blocks/s | — | no | 200 (olympuff) |
 | `bronze_mail` | Bronze mail | armor | worn (body) | body slot (worn); defense (worn): defense 1 | — | no | 20 (olympuff) |
-| `bronze_mallet` | Bronze mallet | weapon | armed | attack (Use): damage 6, attack range 1, cooldown 1300 ms; smash (Use) | no | no | 25 (olympuff) |
-| `bronze_sword` | Bronze sword | weapon | armed | attack (Use): damage 4, attack range 1, cooldown 1000 ms; chop (Use); cut (Use) | no | no | 15 (olympuff) |
+| `bronze_mallet` | Bronze mallet | weapon | armed | attack (Use): damage 6, attack range 1, cooldown 900 ms; smash (Use) | no | no | 25 (olympuff) |
+| `bronze_sword` | Bronze sword | weapon | armed | attack (Use): damage 4, attack range 1, cooldown 600 ms; chop (Use); cut (Use) | no | no | 15 (olympuff) |
 | `disguise_cloak` | Disguise cloak | accessory | worn (accessory) | disguise (worn) | — | no | — |
 | `feet` | Feet armor | armor | worn (feet) | feet slot (worn) | — | no | — |
 | `gem` | Gem | gem | — | none | — | counter | — |
@@ -2320,29 +2323,29 @@ The same rows are served as JSON with no key: `GET /docs/supplies.json` on the w
 | `heart` | Heart | life | — | none | — | counter | — |
 | `iron_helm` | Iron helm | armor | worn (head) | head slot (worn); defense (worn): defense 1 | — | no | 40 (olympuff) |
 | `iron_mail` | Iron mail | armor | worn (body) | body slot (worn); defense (worn): defense 2 | — | no | 80 (olympuff) |
-| `iron_mallet` | Iron mallet | weapon | armed | attack (Use): damage 12, attack range 1, cooldown 1300 ms; smash (Use) | no | no | 120 (olympuff) |
-| `iron_sword` | Iron sword | weapon | armed | attack (Use): damage 8, attack range 1, cooldown 1000 ms; chop (Use); cut (Use) | no | no | 80 (olympuff) |
-| `iron_whip` | Iron whip | weapon | armed | attack (Use): damage 6, attack range 2, cooldown 1200 ms | — | no | 100 (olympuff) |
+| `iron_mallet` | Iron mallet | weapon | armed | attack (Use): damage 12, attack range 1, cooldown 900 ms; smash (Use) | no | no | 120 (olympuff) |
+| `iron_sword` | Iron sword | weapon | armed | attack (Use): damage 8, attack range 1, cooldown 600 ms; chop (Use); cut (Use) | no | no | 80 (olympuff) |
+| `iron_whip` | Iron whip | weapon | armed | attack (Use): damage 6, attack range 2, cooldown 800 ms | — | no | 100 (olympuff) |
 | `lantern` | Lantern | tool | armed | light (Use): light radius 14, lit time 300 s | — | no | 80 (olympuff) |
 | `large_potion` | Large potion | consumable | armed | heal (Use): health 30 | — | no | 40 (olympuff) |
 | `legs` | Leg armor | armor | worn (legs) | legs slot (worn) | — | no | — |
-| `mallet` | Mallet | weapon | armed | attack (Use): damage 0, attack range 1, cooldown 1300 ms; smash (Use) | no | no | — |
+| `mallet` | Mallet | weapon | armed | attack (Use): damage 0, attack range 1, cooldown 900 ms; smash (Use) | no | no | — |
 | `map` | Map | accessory | worn (accessory) | map (worn) | — | no | — |
 | `matches` | Matches | tool | armed | burn (Use) | yes | no | 5 (olympuff) |
 | `middle_chest` | Middle chest | consumable | armed | chest (Use): capacity 30 | — | no | 50 (olympuff) |
 | `mushroom` | Mushroom | consumable | — | heal (on pickup): health 3 | — | eaten on pickup | — |
-| `pocket_knife` | Pocket knife | weapon | armed | attack (Use): damage 2, attack range 1, cooldown 800 ms; cut (Use) | no | no | — |
+| `pocket_knife` | Pocket knife | weapon | armed | attack (Use): damage 2, attack range 1, cooldown 400 ms; cut (Use) | no | no | — |
 | `potion` | Potion | consumable | armed | heal (Use): health 10 | — | no | 2 (sandbox) |
 | `raft` | Raft | tool | armed | water walking (armed or worn) | — | no | 30 (olympuff) |
 | `red_chest` | Red chest | consumable | armed | chest (Use): capacity 50 | — | no | 250 (olympuff) |
 | `salvaged_bomb` | Salvaged bomb | tool | armed | blast (Use) | yes | no | 30 (olympuff) |
 | `small_potion` | Small potion | consumable | armed | heal (Use): health 10 | — | no | 10 (olympuff) |
-| `sword` | Sword | weapon | armed | attack (Use): damage 2, attack range 1, cooldown 1000 ms; chop (Use); cut (Use) | no | no | 5 (sandbox) |
+| `sword` | Sword | weapon | armed | attack (Use): damage 2, attack range 1, cooldown 600 ms; chop (Use); cut (Use) | no | no | 5 (sandbox) |
 | `teleport_scroll` | Teleport scroll | consumable | armed | teleport (Use): range bonus 8 | — | no | — |
 | `torch` | Torch | tool | armed | burn (Use); light (Use): light radius 8, lit time 120 s | yes | no | 10 (olympuff) |
 | `trap_grade_2` | Trap grade 2 | trap | armed | trap (Use): grade 2, armed lifetime 120 s | — | no | — |
 | `truth_lens` | Truth lens | accessory | worn (accessory) | sees through disguises (armed or worn) | — | no | — |
-| `whip` | Whip | weapon | armed | attack (Use): damage 0, attack range 1, cooldown 1200 ms | — | no | — |
+| `whip` | Whip | weapon | armed | attack (Use): damage 0, attack range 1, cooldown 800 ms | — | no | — |
 
 #### Breaking blocks
 
@@ -2370,9 +2373,10 @@ Dirt, tile, water, fire, lava, and doors never break. In the sandbox every break
 - `Use` on a character with a weapon armed is an attack. There is no battle state and no lock-in.
 - Everyone's intent resolves together. A target who moved away this tick is out of range, and your attack is rejected. Fleeing is just `Step` out of range.
 - Hit and damage are seeded server rolls. Default die 1–20, hit target 10. Calling a model does not change the die.
+- A world may give characters a hit bonus that adds to every character's to-hit roll and to no hostile's, boss's, or trap's. It never changes damage. In Olympuff it is 2, so at attack power 2 a swing at a hostile hits on 6 or better, 75% of the time (B150).
 - A swing that rolls is `applied` whether it hits or misses, and spends the cooldown either way. Its intent result carries `hit`, `true` or `false`, and on a hit `damage`, what the target took. A swing at an empty block is `applied_no_effect` with neither (B131).
 - A character swung at gets `Attacked`, and `Damaged` too on a hit, even one armour absorbed (`amount` 0). `Attacked` alone is a miss. A swing at an NPC shows to everyone in sight as `NPCAttacked`, plus `NPCDamaged` on a hit.
-- Each weapon has an attack cooldown, default 1 second; sooner is `attack_cooldown`. Hostiles have one too (B22, B47).
+- Each weapon has an attack cooldown, default 1 second, 0.4 s to 1.1 s in Olympuff (Supplies reference); sooner is `attack_cooldown`. Hostiles have one too (B22, B47).
 - `fire`, `lava`, and any other block type with `occupy_damage` deal that damage on the tick you enter and every second you stay, less your defense and the armor you wear (B47).
 - **Safe zones** (town, respawn zones) stop all damage, and a swing at a character standing in one sends that character no event. You cannot attack out of one or set a trap in one, but a weapon still breaks a block there (a mallet on a rock). Safety is judged on the exact block: a block inside the zone is safe and the next one out is not, so stand a block inside the edge, not on the line. `safe` on terrain reads and `GetZone` mark it. Hostiles are not kept out: one may walk in and swing at you, but the swing deals nothing. Damaging blocks and traps do not hurt you there either.
 
@@ -2613,7 +2617,7 @@ Gems lie on the ground in the **hunting ground** and in Level 1's hall. Grass an
 
 ##### Olympuff (`olympuff`)
 
-- **Attack power.** Every character has a permanent attack power of 2, existing characters included. A swing at a hostile hits on 65% of rolls, and the pocket knife deals 1 to 4. It counts toward hunting-ground strength, and the hunting ground's ceiling of 7 allows for it, so a bronze sword with bronze mail still gets in. Weapons add damage only.
+- **Attack power.** Every character has a permanent attack power of 2, existing characters included. Every character also adds a hit bonus of 2 to its roll to hit, and hostiles add none, so a swing at a hostile hits on 75% of rolls, and the pocket knife deals 1 to 4. It counts toward hunting-ground strength, and the hunting ground's ceiling of 7 allows for it, so a bronze sword with bronze mail still gets in. Weapons add damage only.
 - **Field work.** Outside town, cutting grass with the pocket knife or a sword sometimes drops a gem: 20% in ring 1, 25% farther out. Bushes drop berries, not gems. A character working the fields makes about 6 gems a minute.
 - **Kill drops.** A hostile you kill may drop a gem, at a better chance than grass on the same ground: the grass chance plus a bonus that grows with the hostile's strength. A Snotling in the ring-1 fields drops one 30% of the time.
 - **Tree felling.** Chopping a wild tree with a sword in a god's region sometimes drops one gem, at least as often as cutting grass on the same ground (B148), and more rarely that region's gem cache. Hedges are trees too, so burning one in a zone with tree drops rolls the same table; the Hedge Maze pays nothing.
@@ -2656,20 +2660,20 @@ Each region's oddity uses one capability (burn, chop, cut, smash, or blast), dro
 
 Three tiers: **bronze** in town, **iron** at the waystations, **adamant** at the Last Camp and from tier-3 bosses. Every character starts with a non-transferable **pocket knife**, armed: it cuts grass and bushes and does nothing else, and you keep it through death. Every sword cuts and chops, whatever its tier; every mallet smashes wild boulders.
 
-Every character has a permanent attack power of 2 in Olympuff and permanent defense stays 0, so weapons and armor carry fights. A hit needs d20 plus 2 at least 10 plus the target's armor, and deals 1 up to 2 plus weapon damage minus armor. Armor counts on both, so it is kept small and weapons outscale it.
+Every character has a permanent attack power of 2 in Olympuff and permanent defense stays 0, so weapons and armor carry fights. A character's hit needs d20 plus 2, plus the hit bonus of 2, at least 10 plus the target's armor, and deals 1 up to 2 plus weapon damage minus armor. The bonus moves only the roll to hit, never damage. Armor counts on both, so it is kept small and weapons outscale it.
 
-Shop prices, in gems, as in the Supplies reference. Weapons differ in speed as well as damage: every tier of a family swings at the same cooldown (the knife is quicker, mallets a little quicker than the 1 s baseline, the whip slower, and bows slowest, 1.5 s). Prices are tuned in play, so the `gem_price` on the supply is the one that counts. A `—` is a supply the world sets no price on.
+Shop prices, in gems, as in the Supplies reference. Weapons differ in speed as well as damage: every tier of a family swings at the same cooldown (the knife is quickest, 0.4 s, then swords, 0.6 s, the whip, 0.8 s, mallets, 0.9 s, and bows slowest, 1.1 s). Prices are tuned in play, so the `gem_price` on the supply is the one that counts. A `—` is a supply the world sets no price on.
 
 | Weapon | Damage | Range | Cooldown | Price | Where |
 |---|---|---|---|---|---|
-| Pocket knife | 2 | 1 | 0.8 s | Not sold | Starting kit |
-| Bronze sword | 4 | 1 | 1 s | 15 | Town |
-| Bronze mallet | 6 | 1 | 1.3 s | 25 | Town |
-| Iron sword | 8 | 1 | 1 s | 80 | Waystations |
-| Iron mallet | 12 | 1 | 1.3 s | 120 | Waystations |
-| Iron whip | 6 | 2 | 1.2 s | 100 | Waystations |
-| Adamant sword | 14 | 1 | 1 s | 300 | Last Camp |
-| Adamant mallet | 20 | 1 | 1.3 s | 400 | Last Camp |
+| Pocket knife | 2 | 1 | 0.4 s | Not sold | Starting kit |
+| Bronze sword | 4 | 1 | 0.6 s | 15 | Town |
+| Bronze mallet | 6 | 1 | 0.9 s | 25 | Town |
+| Iron sword | 8 | 1 | 0.6 s | 80 | Waystations |
+| Iron mallet | 12 | 1 | 0.9 s | 120 | Waystations |
+| Iron whip | 6 | 2 | 0.8 s | 100 | Waystations |
+| Adamant sword | 14 | 1 | 0.6 s | 300 | Last Camp |
+| Adamant mallet | 20 | 1 | 0.9 s | 400 | Last Camp |
 
 | Armor | Slot | Defense | Price | Where |
 |---|---|---|---|---|

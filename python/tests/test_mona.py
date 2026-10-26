@@ -234,6 +234,19 @@ class MoneyTest(unittest.TestCase):
         self.assertIsNone(flow.field)
 
 
+    def test_a_poor_field_is_crossed_off_after_forty_cuts_and_a_good_one_is_kept(self):
+        for gems, crossed in ((3, True), (8, False)):
+            mem = Memory()
+            flow = modes.Money(Kit(level=1))
+            flow.field = ("field", (10, 10))
+            ctx = ctx_of(world(), mem)
+            flow.act(ctx)  # the first cut notes where the field's count starts
+            for i in range(40):
+                mem.broke(MAP, (10, 10), 1 if i < gems else 0)
+            flow.act(ctx)
+            self.assertEqual("field" in flow.crossed, crossed, gems)
+
+
 class GearTest(unittest.TestCase):
     def test_the_death_chest_holding_a_piece_comes_before_a_shop(self):
         mem = Memory()

@@ -20,13 +20,15 @@ from agentrealm_adk.world import Pos, chebyshev
 from adk3.realm import actions, travel
 from adk3.realm.actions import Action
 from adk3.realm.context import Ctx
-from adk3.realm.memory import Entrance, place_key
+from adk3.realm.memory import Entrance, place_key, region_key
 
 from . import route
 from .kit import Kit
 
 ARRIVED = 3  # blocks: this near a destination counts as there
 FIELD = 12  # blocks around a field's center that count as the field
+POOR_AFTER = 40  # cuts in a field before its gem rate is judged
+POOR_RATE = 0.10  # a field paying under this many gems a cut is poor (ring 1 pays 0.20): another is picked
 INNER, OUTER = 45, 110  # blocks from town: the inner and outer bands (Manual §16: ring 1 near town, farther out pays more)
 IRON_DAMAGE = 8  # a weapon this strong is iron or better: the outer band is open to her
 TOWN_LOOK_SECONDS = 150  # learn: how long to walk town for signs and helpers
@@ -139,7 +141,8 @@ class Learn(Flow):
 
 class Money(Flow):
     """Work a field until her gems cover the kit; the strategist picks the field from the ones her gear can
-    handle. A field that fails (cut out, no route) is crossed off; when all are, the list resets."""
+    handle. A field that fails (cut out, no route, or under one gem in ten cuts after forty) is crossed off;
+    when all are, the list resets."""
 
     name = "money"
 
@@ -149,6 +152,16 @@ class Money(Flow):
         self.field: tuple[str, Pos] | None = None
         self.target: Pos | None = None  # the grass block being walked to
         self.options: list[tuple[str, Pos]] = []
+        self.base: dict[str, tuple[int, int]] = {}  # region -> (cuts, gems) there when this field was first cut in it
+
+    def worked(self, ctx: Ctx) -> tuple[int, int]:
+        """Cuts made and gems they paid in this field since it was picked."""
+        cuts = gems = 0
+        for key, (c0, g0) in self.base.items():
+            y = ctx.memory.yields.get(key)
+            if y is not None:
+                cuts, gems = cuts + y.breaks - c0, gems + y.gems - g0
+        return cuts, gems
 
     def fields(self, ctx: Ctx) -> list[tuple[str, Pos]]:
         town = ctx.town[1] if ctx.town else ctx.state.pos
@@ -175,7 +188,7 @@ class Money(Flow):
     def picked(self, index: int, ctx: Ctx) -> None:
         super().picked(index, ctx)
         if 0 <= index < len(self.options):
-            self.field, self.target = self.options[index], None
+            self.field, self.target, self.base = self.options[index], None, {}
 
     def act(self, ctx: Ctx) -> Action | None:
         if self.question is not None:
@@ -186,6 +199,11 @@ class Money(Flow):
             return actions.Stop("waiting on the strategist")
         name, center = self.field
         s = ctx.state
+        cuts, gems = self.worked(ctx)
+        if cuts >= POOR_AFTER and gems < POOR_RATE * cuts:
+            self.crossed.add(name)  # a poor field: another
+            self.field = None
+            return None
         cells = _grass(ctx, center)
         if cells:
             if self.target not in cells:
@@ -193,6 +211,10 @@ class Money(Flow):
             if chebyshev(self.target, s.pos) <= 1:
                 if not s.attack_ready:
                     return actions.Stop("waiting to swing")
+                key = region_key(s.map_id, self.target)
+                if key not in self.base:
+                    y = ctx.memory.yields.get(key)
+                    self.base[key] = (y.breaks, y.gems) if y is not None else (0, 0)
                 weapon = travel.weapon_for(s, "grass")
                 armed = weapon is None or any(c.id == weapon and c.where == "armed" for c in s.carried)
                 return actions.UseOn(self.target[0], self.target[1], None if armed else weapon, "cut grass for gems")

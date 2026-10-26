@@ -58,6 +58,9 @@ class Mona:
             while not stop():
                 ctx = self.sense()
                 if ctx is not None:
+                    if not ctx.state.world.alive and ctx.state.lives == 0:
+                        self.stopped_why = "the character has ended: no lives left"
+                        return self.stopped_why  # nothing to park
                     self.decide(ctx, time.time())
                 if self.ledger.minutes_since_last() >= self.stall_minutes:
                     self.stopped_why = f"no milestone for {self.stall_minutes:.0f} minutes"

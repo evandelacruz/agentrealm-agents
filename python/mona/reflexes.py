@@ -28,6 +28,17 @@ def on_fire(ctx: Ctx) -> Action | None:
     return route.off_hazard(ctx)
 
 
+def armed(ctx: Ctx) -> Action | None:
+    """Always armed with her best weapon and wearing her armor: a potion or a tool is armed only for its use (one
+    action), and the weapon goes back on the next tick."""
+    s = ctx.state
+    best = s.best_weapon()
+    if best is not None and best.where != "armed":
+        return actions.Equip(best.id, "Arm", best.code)
+    armor = s.unworn()
+    return actions.Equip(armor.id, "Wear", armor.code) if armor is not None else None
+
+
 def eat(ctx: Ctx) -> Action | None:
     """Hurt: food or a heart near, else a bush to cut for its berry (food is eaten on pickup: none at full health)."""
     s = ctx.state
@@ -97,6 +108,7 @@ def learn(ctx: Ctx) -> Action | None:
 
 REFLEXES: list[tuple[str, Callable[[Ctx], Action | None]]] = [
     ("off the fire", on_fire),
+    ("armed", armed),  # a standing rule: never walk or fight empty-handed
     ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
     ("eat", eat),
     ("loot", loot),

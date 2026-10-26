@@ -1,10 +1,11 @@
 """The subgoal: get health, the only one (docs/v4/SPEC.md **The subgoal**).
 
 Enters at 3 health or below; exits at 10 or above, and nothing else ends it.
-While it runs it owns the destination: drink a carried potion; else go where
-food is (town's berries, or a bush seen), buying a potion on the way when a
-seller is known and she can pay; else look around nearby. Reflexes keep
-running under it, so the food it walks to is eaten by them.
+While it runs it owns the destination: at 3 or below, drink a carried potion
+or buy one when a seller is known and she can pay; else, and always above 3,
+go where food is (town's berries, or a bush seen); else look around nearby.
+A potion heals 10, so above 3 most of it would be spent for nothing.
+Reflexes keep running under it, so the food it walks to is eaten by them.
 """
 
 from __future__ import annotations
@@ -44,10 +45,11 @@ class GetHealth:
 
     def act(self, ctx: Ctx) -> Action | None:
         s = ctx.state
-        potion = min((c for c in s.carried if supplies.is_potion(c.code)), key=lambda c: supplies.heal_of(c.code), default=None)
+        low = s.health <= ENTER_AT  # a potion only in danger: above it, food tops her up
+        potion = None if not low else min((c for c in s.carried if supplies.is_potion(c.code)), key=lambda c: supplies.heal_of(c.code), default=None)
         if potion is not None:
             return actions.Drink(potion.id, potion.where == "armed", potion.code)
-        shelf = self._potion_shelf(ctx)
+        shelf = self._potion_shelf(ctx) if low else None
         if shelf is not None and "shop" not in self.tried:
             item = next((e for e in s.supplies() if e.code == shelf.code and e.pos == (shelf.x, shelf.y)), None)
             if item is not None and chebyshev(item.pos, s.pos) <= 1:

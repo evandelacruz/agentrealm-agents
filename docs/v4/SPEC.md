@@ -56,7 +56,7 @@ The only subgoal. One at a time; it cannot nest.
 
 - **Enters** when health is 3 or below.
 - **Exits** when health is 10 or above. Nothing else ends it.
-- While it runs she does not fight (it is the one thing that turns her from a fight), and it owns the destination: first drink a carried potion; else the nearest food it knows (town's berries, bushes seen), else a shop with potions if she can pay, else unexplored ground nearby. Reflexes keep running.
+- While it runs she does not fight (it is the one thing that turns her from a fight), and it owns the destination: at 3 or below, drink a carried potion, else buy one at a known shop if she can pay; otherwise, and always above 3, the nearest food it knows (town's berries, bushes seen), else unexplored ground nearby. A potion heals 10, so above 3 most of it would be wasted. Reflexes keep running.
 - When it exits, the goal's destination resumes as it was (she goes back to finish the half-dead enemy: a hostile never heals while it lives).
 
 Both marks are fixed whatever her max health. A safe zone heals nothing (Manual §11 Food and potions); it is never a health destination.
@@ -70,6 +70,7 @@ One at a time, from the active mode's (or the subgoal's) fixed list: level N's e
 Every tick, the first that applies acts:
 
 1. **On fire or lava:** step off.
+   - **Always armed** (a standing rule): her best weapon armed and her armor worn. A potion or tool is armed only for its use, then the weapon goes straight back.
 2. **A hostile within 10 blocks:** fight it until it is dead. She fights everything, hurt or not; country too rough for her gear teaches the strategist through deaths. Only get health (3 and below) turns her from a fight.
 3. **Hurt, food or a heart within 25 blocks** (or a berry bush to cut): take it and eat. Food is eaten on pickup, so at full health it is left lying.
 4. **Gems, free gear or a chest within 25 blocks:** take it.

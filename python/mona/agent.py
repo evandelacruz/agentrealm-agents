@@ -98,7 +98,8 @@ class Mona:
             who, action = self.mode.value if self.mode else "-", self.flow.act(ctx) if self.flow else None
         self.body.act(action)
         self.record({"t": now, "mode": self.mode.value if self.mode else None, "health": self.health.active,
-                     "who": who, "action": str(action) if action else None})
+                     "who": who, "action": str(action) if action else None, "pos": ctx.state.pos,
+                     "path": list(getattr(action, "path", ()))[:12]})
         if now - self._status_at >= 1.0:
             self._status_at = now
             self.out(f"{self.mode.value if self.mode else '-'} ({self.flow.status() if self.flow else ''})"

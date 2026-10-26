@@ -110,6 +110,13 @@ class GetHealthTest(unittest.TestCase):
         w.held_supplies = [InventorySupply(9, "small_potion")]
         self.assertIsInstance(GetHealth().act(ctx_of(w)), actions.Drink)
 
+    def test_above_three_a_potion_is_kept_and_she_goes_for_food(self):
+        w = world(health=9, at=(1, 1))
+        w.held_supplies = [InventorySupply(9, "small_potion")]
+        g = GetHealth()
+        g.active = True
+        self.assertIsInstance(g.act(ctx_of(w)), actions.Walk)
+
     def test_with_no_potion_she_goes_to_town_for_food(self):
         w = world(health=3, at=(1, 1))
         g = GetHealth()
@@ -160,6 +167,14 @@ class ReflexTest(unittest.TestCase):
         w = world()
         w.view.readable[(12, 10)] = True
         self.assertIsInstance(reflexes.first(ctx_of(w))[1], actions.Read)
+
+
+class ArmedTest(unittest.TestCase):
+    def test_she_rearms_her_weapon_whatever_else_she_is_doing(self):
+        w = world(armed="small_potion")
+        w.held_supplies = [InventorySupply(3, "bronze_sword")]
+        name, action = reflexes.first(ctx_of(w))
+        self.assertEqual((name, action.verb, action.code), ("armed", "Arm", "bronze_sword"))
 
 
 class RouterTest(unittest.TestCase):

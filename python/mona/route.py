@@ -80,17 +80,17 @@ def strike(ctx: Ctx, foe: Entity) -> Action | None:
     """Fight ``foe``: the best weapon armed and carried armor worn first, then from a block in reach off safe
     ground (no swing lands from safe ground, Manual §11 Combat), on the weapon's cooldown."""
     s = ctx.state
+    stand = travel.to_strike(ctx, foe.pos, s.world.attack_range or 1)
+    if stand:  # on the way the armed slot is the router's (a break); the weapon comes out at the swing
+        return along(ctx, stand, f"close on {foe.code}")
+    if stand is None:
+        return None
     best = s.best_weapon()
     if best is not None and best.where != "armed":
         return actions.Equip(best.id, "Arm", best.code)
     armor = s.unworn()
     if armor is not None:
         return actions.Equip(armor.id, "Wear", armor.code)
-    stand = travel.to_strike(ctx, foe.pos, s.world.attack_range or 1)
-    if stand:
-        return along(ctx, stand, f"close on {foe.code}")
-    if stand is None:
-        return None
     return actions.Swing(foe.id, f"{foe.code} {foe.id}") if s.attack_ready else actions.Stop("between swings")
 
 

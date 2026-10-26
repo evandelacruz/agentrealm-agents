@@ -45,7 +45,7 @@ class CostGridTest(unittest.TestCase):
     def test_hazard_cost_uses_occupy_damage(self):
         w = grid([".~.", "...", "..."], at=(0, 1))
         w.view.damage[(1, 0)] = 4
-        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4)
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4 * COSTLY_STEP)
         p = cost_path(w, (2, 1), CostGridParams())
         self.assertIsNotNone(p)
         self.assertNotIn((1, 0), p)
@@ -55,9 +55,9 @@ class CostGridTest(unittest.TestCase):
         w = grid([".~.", "...", "..."], at=(0, 1))
         w.view.damage[(1, 0)] = 4
         w.armed_code = "iron_mail"
-        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4)
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 4 * COSTLY_STEP)
         w.worn_codes = {"body": "bronze_mail"}
-        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 3)
+        self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 3 * COSTLY_STEP)
         w.worn_codes = {"body": "adamant_mail", "head": "iron_helm"}
         self.assertEqual(_Grid(w, {(2, 1)}, CostGridParams()).cost((1, 0)), 1 + 0)
 

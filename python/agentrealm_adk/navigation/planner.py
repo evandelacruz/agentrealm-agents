@@ -28,8 +28,10 @@ HOSTILE_DANGER = 30
 HOSTILE_DANGER_RADIUS = 6
 # Extra cost of a step onto a `costly` tile, or onto fire/lava whose
 # occupy_damage no read has named: worth a long detour to avoid one. A named
-# occupy_damage costs what gets through: less the defense of the armor worn,
-# never below 0 (Manual §11), as the character's defense stays 0. Fire or
+# occupy_damage costs that much for each point of health that gets through
+# (less the defense of the armor worn, never below 0, Manual §11): health
+# comes back only from food, potions and respawn, so it is never traded for a
+# few steps saved. Fire or
 # lava on a known safe block costs nothing: damaging blocks do not hurt there.
 COSTLY_STEP = 100
 HAZARDS = ("fire", "lava")
@@ -235,7 +237,7 @@ class _Grid:
         safe = p in self.safe
         if block in HAZARDS and not safe:
             dmg = self.w.view.occupy_damage(p)
-            base += COSTLY_STEP if dmg is None else max(0, dmg - self.armor)
+            base += COSTLY_STEP * (1 if dmg is None else max(0, dmg - self.armor))  # health is never worth a short cut
         if p in params.costly:
             base += COSTLY_STEP
         if not safe:

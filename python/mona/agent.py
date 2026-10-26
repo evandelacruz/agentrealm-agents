@@ -76,6 +76,8 @@ class Mona:
 
     def decide(self, ctx: Ctx, now: float) -> None:
         s = ctx.state
+        if not s.world.inventory_read:  # her first full read is not in: health, gems and gear read as none
+            return
         for key, label in milestones.shown(ctx):
             if self.ledger.record(key, label, now):
                 self.out(f"milestone: {label}")
@@ -88,7 +90,7 @@ class Mona:
             self.health.clear()
             self.flow = None
             self.ask_kit(ctx, "she died; revise the kit if it was too thin")
-        if (self.flow is None or self.met(ctx)) and s.world.inventory_read:  # until read, gems and gear read as none
+        if self.flow is None or self.met(ctx):
             self.start_mode(ctx)
         self.serve_flow(ctx)
         change = self.health.update(s)

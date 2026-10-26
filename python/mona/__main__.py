@@ -3,7 +3,7 @@
 ``run`` plays until Ctrl-C, or until no milestone has come for the stall
 limit, then prints the run report. What she learns is kept under
 ``python/.state/``: ``mona/<world>.<id>.memory.json`` (clues, entrances,
-shops, levels, deaths; seeded from Lou's when the character played as her),
+shops, levels, deaths; a first run starts from an earlier character's world facts),
 ``mona/<world>.<id>.kit.json`` (the kit), the world knowledge base (tiles and
 door warps), ``<profile>.<id>.mona.ledger.json`` (milestones) and
 ``<profile>.<id>.mona.jsonl`` (the trace).

@@ -527,6 +527,26 @@ class OpportunitiesTest(unittest.TestCase):
         w.entities = [Entity("supply", 7, (6, 5), "red_chest")]
         self.assertIsInstance(engines.Opportunities().pick(ctx_of(w)), actions.Take)
 
+    def test_hurt_a_bush_beside_her_is_cut_for_a_berry(self):
+        rows = ["ggggggggggg"] * 5 + ["ggggggbgggg"] + ["ggggggggggg"] * 5
+        w = world(rows, health=5, armed="bronze_sword")
+        action = engines.Opportunities().pick(ctx_of(w))
+        self.assertIsInstance(action, actions.UseOn)
+        self.assertEqual((action.x, action.y), (6, 5))
+
+    def test_at_full_health_bushes_are_left(self):
+        rows = ["ggggggggggg"] * 5 + ["ggggggbgggg"] + ["ggggggggggg"] * 5
+        self.assertEqual(opportunities.Bushes().find(ctx_of(world(rows, armed="bronze_sword"))), [])
+
+    def test_food_in_reach_is_eaten_even_while_heading_for_another_chance(self):
+        w = world(OPEN, health=5)
+        w.entities = [Entity("supply", 7, (10, 5), "gem")]
+        opp = engines.Opportunities()
+        opp.pick(ctx_of(w))
+        w.tick += 1
+        w.entities.append(Entity("supply", 8, (6, 5), "berry"))
+        self.assertIsInstance(opp.pick(ctx_of(w)), actions.Take)
+
     def test_food_waits_until_she_is_hurt_by_its_worth(self):
         w = world(OPEN, health=10)
         w.entities = [Entity("supply", 8, (6, 5), "apple")]

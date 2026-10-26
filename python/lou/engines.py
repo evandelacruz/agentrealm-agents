@@ -454,6 +454,9 @@ class Opportunities:
             if reach is not None and chebyshev(s.pos, c.at) - c.reach > float(reach):
                 continue
             if chebyshev(s.pos, c.at) <= c.reach:
+                if c.worth > 0:  # here and now, no detour: taken at once, and the chance under way resumes after
+                    self._pick = c.action
+                    return c.action
                 path, net, action = (), c.worth, c.action
             else:
                 path = travel.to_beside(ctx, c.at, c.reach)

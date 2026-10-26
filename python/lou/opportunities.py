@@ -23,6 +23,7 @@ SAY_REACH = 20  # blocks: a Say to an NPC reaches 25 (Manual §11 Speech); a lit
 READ_REACH = 5  # blocks: near enough that the sign is in sight in any light
 CLUE_WORTH = 15  # gems a new clue is worth at curiosity 5: about two and a half minutes of field work
 ODD_BLOCK_WORTH = 5  # gems: the smallest gem cache an oddity drops (Manual §16)
+BERRY_CHANCE = 0.5  # the chance a cut bush drops a berry: the Manual gives none
 LOOT_WORTH = 2  # gems an unpriced item lying free is worth at greed 5, when it is not sold anywhere
 CHEST_LOOK_WORTH = 5  # gems a look into an unknown ground chest is worth at curiosity 5: its contents show only in reach
 
@@ -82,6 +83,26 @@ class Food:
                 continue
             out.append(Chance(actions.Take(e.id, e.code), e.pos, 1, value.health_change(heal, s.health, s.max_health),
                               f"eat {e.code}"))
+        return out
+
+
+class Bushes:
+    """Hurt, a bush we can cut is a berry (Manual §11 Breaking blocks: bushes drop berries): worth the berry's
+    heal at our health, at the chance a cut drops one. The berry lands where the bush stood; ``Food`` eats it."""
+
+    def find(self, ctx: Ctx) -> list[Chance]:
+        s, mem = ctx.state, ctx.memory
+        if s.health >= s.max_health or travel.weapon_for(s, "bush") is None:
+            return []
+        worth = value.health_change(supplies.heal_of("berry") or 1, s.health, s.max_health) * BERRY_CHANCE
+        x0, y0, width, height = s.world.perception_rect()
+        out = []
+        for y in range(y0, y0 + height):
+            for x in range(x0, x0 + width):
+                if s.world.view.tiles.get((x, y)) == "bush" and place_key(s.map_id, (x, y)) not in mem.no_effect:
+                    arm = travel.weapon_for(s, "bush")
+                    arm = None if any(c.id == arm and c.where == "armed" for c in s.carried) else arm
+                    out.append(Chance(actions.UseOn(x, y, arm, "cut a bush for a berry"), (x, y), 1, worth, "cut a bush for a berry"))
         return out
 
 
@@ -172,7 +193,7 @@ class Chests:
         return out
 
 
-ALL = [Gems(), Hearts(), Loot(), Food(), Signs(), Helpers(), OddBlocks(), DeathChest(), Chests()]
+ALL = [Gems(), Hearts(), Loot(), Food(), Bushes(), Signs(), Helpers(), OddBlocks(), DeathChest(), Chests()]
 
 
 def chances(ctx: Ctx) -> list[Chance]:

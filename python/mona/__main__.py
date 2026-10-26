@@ -88,7 +88,8 @@ def run(client: Client, cfg: config.CharacterConfig, cid: int, stall_minutes: fl
     memory_path = state_dir / "mona" / f"{cfg.world}.{cid}.memory.json"
     memory = Memory.load(memory_path)
     if not memory_path.exists() and not blank:  # a first run: start from what any earlier character learned of this world
-        known = sorted((state_dir / "mona").glob(f"{cfg.world}.*.memory.json")) + sorted((state_dir / "lou").glob(f"{cfg.world}.*.memory.json"))
+        known = sorted([*(state_dir / "mona").glob(f"{cfg.world}.*.memory.json"),
+                        *(state_dir / "lou").glob(f"{cfg.world}.*.memory.json")], key=lambda p: p.stat().st_mtime)
         if known:
             memory = Memory.load(known[-1]).world_facts(memory_path)
             print(f"memory: world facts from {known[-1].name}")

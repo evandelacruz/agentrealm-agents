@@ -22,7 +22,8 @@ FIGHT_WITHIN = 10  # blocks: a hostile this near is fought (better to attack tha
 TAKE_WITHIN = 25  # blocks: food, gems, gear, chests, signs and people this near are gone for
 READ_REACH = 5  # a sign is read from this near (in sight in any light)
 SAY_REACH = 20  # a Say reaches an NPC 25 blocks off (Manual §11 Speech); a little inside it
-DRINK_AT = 3  # health: at or below, a carried potion is drunk (the get health mark)
+DRINK_AT = 3  # health: at or below, with a hostile near, a carried potion is drunk (the get health mark)
+STRIKE_NEAR = 3  # blocks: a hostile this near can strike within a step or two
 ROUTED = 6  # the nearest this many in a straight line are routed to find the nearest by the walk
 CONTACT = 2  # blocks: turned from a fight, nothing this near a hostile is gone for (it would hold her in the hits)
 
@@ -46,9 +47,10 @@ def ready(ctx: Ctx, action: Action | None) -> Action | None:
 
 
 def drink(ctx: Ctx, turned: bool = False) -> Action | None:
-    """At 3 or below, a carried potion is drunk at once, whatever else is near (above it, food tops her up)."""
+    """A potion only against death close at hand: at 3 or below with a hostile near enough to strike next. Any other
+    time food heals her (berries first, always); the potions are the kit's."""
     s = ctx.state
-    if s.health > DRINK_AT:
+    if s.health > DRINK_AT or not any(chebyshev(e.pos, s.pos) <= STRIKE_NEAR for e in s.threats()):
         return None
     potion = min((c for c in s.carried if supplies.is_potion(c.code)), key=lambda c: supplies.heal_of(c.code), default=None)
     return actions.Drink(potion.id, potion.where == "armed", potion.code) if potion is not None else None

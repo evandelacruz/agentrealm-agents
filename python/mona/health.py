@@ -1,20 +1,18 @@
 """The subgoal: get health, the only one (docs/v4/SPEC.md **The subgoal**).
 
 Enters at 3 health or below; exits at 10 or above, and nothing else ends it.
-While it runs it owns the destination: at 3 or below (a carried potion is
-drunk by reflex, ``reflexes.drink``), buy one when a seller is known and she
-can pay; else, and always above 3, go to the nearest food she knows: a bush
-seen on this map, else town's berries; else look around nearby.
-A potion heals 10, so above 3 most of it would be spent for nothing.
+While it runs it owns the destination: the nearest food she knows, a bush
+seen on this map or town's berries; else look around nearby. Berries come
+first, always: a potion is the kit's, drunk only against death at hand (a
+hostile near at 3 or below, ``reflexes.drink``).
 Reflexes keep running under it, so the food it walks to is eaten by them.
 """
 
 from __future__ import annotations
 
-from agentrealm_adk import supplies
 from agentrealm_adk.world import chebyshev
 
-from adk3.realm import actions, travel, value
+from adk3.realm import travel
 from adk3.realm.actions import Action
 from adk3.realm.context import Ctx
 from adk3.realm.memory import place_key
@@ -47,20 +45,6 @@ class GetHealth:
 
     def act(self, ctx: Ctx) -> Action | None:
         s = ctx.state
-        low = s.health <= ENTER_AT  # a potion only in danger (drunk by reflex, ``reflexes.drink``): above it, food
-        shelf = self._potion_shelf(ctx) if low else None
-        if shelf is not None and "shop" not in self.tried:
-            item = next((e for e in s.supplies() if e.code == shelf.code and e.pos == (shelf.x, shelf.y)), None)
-            if item is not None and chebyshev(item.pos, s.pos) <= 1:
-                return actions.Take(item.id, item.code)
-            near = s.map_id == shelf.map_id and chebyshev((shelf.x, shelf.y), s.pos) <= ARRIVED
-            if near and item is None:
-                self.tried.add("shop")  # sold out now
-            else:
-                go = route.to(ctx, shelf.map_id, (shelf.x, shelf.y), "to buy a potion")
-                if go is not None:
-                    return go
-                self.tried.add("shop")
         bush = self._nearest_bush(ctx)
         town_far = (ctx.town is None or ctx.town[0] != s.map_id or "town" in self.tried
                     or bush is not None and chebyshev(bush, s.pos) < chebyshev(ctx.town[1], s.pos))
@@ -87,8 +71,3 @@ class GetHealth:
         bushes = [p for p, b in s.world.view.tiles.items()
                   if b == "bush" and place_key(s.map_id, p) not in ctx.memory.no_effect]
         return min(bushes, key=lambda p: chebyshev(p, s.pos), default=None)
-
-    def _potion_shelf(self, ctx: Ctx):
-        s = ctx.state
-        shelves = [x for x in ctx.memory.sellers("small_potion") if s.gems >= value.item("small_potion")]
-        return min(shelves, key=lambda x: (x.map_id != s.map_id, chebyshev((x.x, x.y), s.pos)), default=None)

@@ -76,7 +76,8 @@ class Mona:
 
     def decide(self, ctx: Ctx, now: float) -> None:
         s = ctx.state
-        if not s.world.inventory_read:  # her first full read is not in: health, gems and gear read as none
+        if not s.world.inventory_read:  # her first full read is not in (health, gems and gear read as none): an empty
+            self.body.act(None)  # tick brings it
             return
         for key, label in milestones.shown(ctx):
             if self.ledger.record(key, label, now):

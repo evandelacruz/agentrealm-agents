@@ -427,6 +427,13 @@ class SceneTest(unittest.TestCase):
             m.decide(ctx, time.time())
             time.sleep(0.01)
 
+    def test_before_her_first_read_she_still_ticks_so_the_read_comes(self):
+        w = world()
+        w.inventory_read = False
+        m, body = self.mona(w)
+        self.tick(m)
+        self.assertEqual(body.acted, [None])
+
     def test_parking_fights_a_hostile_on_her_rather_than_walking_off_in_its_hits(self):
         w = world(safe=[(0, 0)])
         snotling(w, (11, 10))

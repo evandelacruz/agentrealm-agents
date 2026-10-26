@@ -94,7 +94,7 @@ class Mona:
         change = self.health.update(s)
         if change:
             self.out(change)
-        found = reflexes.first(ctx, fight=not self.health.active)  # get health turns her from a fight
+        found = reflexes.first(ctx, turned=self.health.active)  # get health turns her from a fight
         if found is not None:
             who, action = found
         elif self.health.active:

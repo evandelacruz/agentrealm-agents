@@ -185,6 +185,16 @@ class TakeTest(unittest.TestCase):
         self.assertEqual(reflexes.first(ctx_of(w))[1].code, "berry")
 
 
+    def test_turned_from_a_fight_she_goes_for_nothing_a_hostile_stands_by(self):
+        w = world(health=3)
+        snotling(w, (11, 11))
+        w.entities.append(Entity("supply", 901, (11, 10), "gem"))
+        w.entities.append(Entity("supply", 902, (18, 10), "berry"))
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "fight")
+        name, action = reflexes.first(ctx_of(w), turned=True)
+        self.assertEqual((name, str(action).endswith("(to the berry)")), ("take", True))
+
+
 class ArmedTest(unittest.TestCase):
     def test_she_rearms_her_weapon_whatever_else_she_is_doing(self):
         w = world(armed="small_potion")

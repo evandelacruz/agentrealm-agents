@@ -56,7 +56,7 @@ The only subgoal. One at a time; it cannot nest.
 
 - **Enters** when health is 3 or below.
 - **Exits** when health is 10 or above. Nothing else ends it.
-- While it runs she does not fight (it is the one thing that turns her from a fight), and it owns the destination: at 3 or below, drink a carried potion, else buy one at a known shop if she can pay; otherwise, and always above 3, the nearest food it knows (town's berries, bushes seen), else unexplored ground nearby. A potion heals 10, so above 3 most of it would be wasted. Reflexes keep running.
+- While it runs she is turned from fights: she does not fight, and no reflex sends her to anything a hostile stands by, so she breaks contact rather than standing in the hits. It owns the destination: at 3 or below, drink a carried potion, else buy one at a known shop if she can pay; otherwise, and always above 3, the nearest food it knows (town's berries, bushes seen), else unexplored ground nearby. A potion heals 10, so above 3 most of it would be wasted. Reflexes keep running.
 - When it exits, the goal's destination resumes as it was (she goes back to finish the half-dead enemy: a hostile never heals while it lives).
 
 Both marks are fixed whatever her max health. A safe zone heals nothing (Manual §11 Food and potions); it is never a health destination.

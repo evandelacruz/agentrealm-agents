@@ -324,6 +324,15 @@ class Memory:
         m.deaths = [_of(Death, d) for d in raw.get("deaths", [])]
         return m
 
+    def world_facts(self, path: Path | None) -> Memory:
+        """A new memory for another character in the same world: what the world is (clues, entrances, levels,
+        shops, yields, hostiles, townsfolk), not what happened to this one (deaths, chests looked into)."""
+        m = Memory(path)
+        for name in ("clues", "signs_read", "helpers", "entrances", "levels", "shops", "yields", "kills",
+                     "no_effect", "refused", "territory", "townsfolk"):
+            setattr(m, name, getattr(self, name))
+        return m
+
     def save(self) -> None:
         if self.path is None:
             return

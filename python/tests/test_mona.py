@@ -236,6 +236,16 @@ class LearnTest(unittest.TestCase):
         self.assertIsInstance(flow.act(ctx_of(world(), mem)), actions.Walk)
 
 
+class WorldFactsTest(unittest.TestCase):
+    def test_a_new_character_inherits_the_world_not_the_deaths(self):
+        mem = Memory()
+        mem.entrance(MAP, (9, 9))
+        mem.died(Death(1.0, MAP, 4, 4, "snotling", 77, MAP, 4, 5, ["bronze_sword"]))
+        fresh = mem.world_facts(None)
+        self.assertIn("1:9,9", fresh.entrances)
+        self.assertEqual(fresh.deaths, [])
+
+
 class FakeStrategist:
     """Answers at once: a trusted kit of the bronze set, and the first of any pick."""
 

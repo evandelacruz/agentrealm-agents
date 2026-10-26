@@ -22,6 +22,7 @@ FIGHT_WITHIN = 10  # blocks: a hostile this near is fought (better to attack tha
 TAKE_WITHIN = 25  # blocks: food, gems, gear, chests, signs and people this near are gone for
 READ_REACH = 5  # a sign is read from this near (in sight in any light)
 SAY_REACH = 20  # a Say reaches an NPC 25 blocks off (Manual §11 Speech); a little inside it
+DRINK_AT = 3  # health: at or below, a carried potion is drunk (the get health mark)
 ROUTED = 6  # the nearest this many in a straight line are routed to find the nearest by the walk
 CONTACT = 2  # blocks: turned from a fight, nothing this near a hostile is gone for (it would hold her in the hits)
 
@@ -42,6 +43,15 @@ def ready(ctx: Ctx, action: Action | None) -> Action | None:
         return actions.Equip(best.id, "Arm", best.code)
     armor = s.unworn()
     return actions.Equip(armor.id, "Wear", armor.code) if armor is not None else action
+
+
+def drink(ctx: Ctx, turned: bool = False) -> Action | None:
+    """At 3 or below, a carried potion is drunk at once, whatever else is near (above it, food tops her up)."""
+    s = ctx.state
+    if s.health > DRINK_AT:
+        return None
+    potion = min((c for c in s.carried if supplies.is_potion(c.code)), key=lambda c: supplies.heal_of(c.code), default=None)
+    return actions.Drink(potion.id, potion.where == "armed", potion.code) if potion is not None else None
 
 
 def fight(ctx: Ctx, turned: bool = False) -> Action | None:
@@ -123,13 +133,14 @@ def learn(ctx: Ctx, turned: bool = False) -> Action | None:
 
 REFLEXES: list[tuple[str, Callable[[Ctx, bool], Action | None]]] = [
     ("off the fire", on_fire),
+    ("drink", drink),  # 3 or below with a potion: drunk before anything else
     ("fight", fight),  # a hostile on her is fought, hurt or not: only get health (3 and below) turns her from it
     ("take", take),  # the nearest of gems, gear, chests and, when hurt, food
     ("learn", learn),
 ]
 
 
-PARKING = ("off the fire", "fight")  # stopping, she goes to safe ground: these still come first
+PARKING = ("off the fire", "drink", "fight")  # stopping, she goes to safe ground: these still come first
 
 
 def first(ctx: Ctx, turned: bool = False, only: tuple[str, ...] | None = None) -> tuple[str, Action] | None:

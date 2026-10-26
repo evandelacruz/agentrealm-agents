@@ -106,10 +106,11 @@ class GetHealthTest(unittest.TestCase):
             g.update(ctx_of(world(health=health)).state)
             self.assertEqual(g.active, active, health)
 
-    def test_a_carried_potion_is_drunk_first(self):
+    def test_a_carried_potion_is_drunk_first_whatever_else_is_near(self):
         w = world(health=3)
         w.held_supplies = [InventorySupply(9, "small_potion")]
-        self.assertIsInstance(GetHealth().act(ctx_of(w)), actions.Drink)
+        w.entities.append(Entity("supply", 902, (11, 10), "berry"))
+        self.assertEqual(reflexes.first(ctx_of(w), turned=True)[0], "drink")
 
     def test_above_three_a_potion_is_kept_and_she_goes_for_food(self):
         w = world(health=9, at=(1, 1))

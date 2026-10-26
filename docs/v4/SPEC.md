@@ -56,7 +56,7 @@ The only subgoal. One at a time; it cannot nest.
 
 - **Enters** when health is 3 or below.
 - **Exits** when health is 10 or above. Nothing else ends it.
-- While it runs she is turned from fights: she does not fight, and no reflex sends her to anything a hostile stands by, so she breaks contact rather than standing in the hits. It owns the destination: at 3 or below, drink a carried potion, else buy one at a known shop if she can pay; otherwise, and always above 3, the nearest food it knows (town's berries, bushes seen), else unexplored ground nearby. A potion heals 10, so above 3 most of it would be wasted. Reflexes keep running.
+- While it runs she is turned from fights: she does not fight, and no reflex sends her to anything a hostile stands by, so she breaks contact rather than standing in the hits. It owns the destination: at 3 or below, a carried potion is drunk by reflex, else she buys one at a known shop if she can pay; otherwise, and always above 3, the nearest food it knows (town's berries, bushes seen), else unexplored ground nearby. A potion heals 10, so above 3 most of it would be wasted. Reflexes keep running.
 - When it exits, the goal's destination resumes as it was (she goes back to finish the half-dead enemy: a hostile never heals while it lives).
 
 Both marks are fixed whatever her max health. A safe zone heals nothing (Manual §11 Food and potions); it is never a health destination.
@@ -70,11 +70,12 @@ One at a time, from the active mode's (or the subgoal's) fixed list: level N's e
 Every tick, the first that applies acts:
 
 1. **On fire or lava:** step off.
+2. **At 3 or below with a potion:** drink it, whatever else is near.
    - **Always armed** (a standing rule, applied to whatever is decided rather than competing as a reflex): her best weapon in hand and her armor worn whenever the action needs nothing else in hand. An action that arms or uses a potion or tool (a break, a drink) keeps it until the use lands; then the weapon goes back.
-2. **A hostile within 10 blocks:** fight it until it is dead. She fights everything, hurt or not; country too rough for her gear teaches the strategist through deaths. Only get health (3 and below) turns her from a fight.
-3. **Something to take within 25 steps of walking (breaks counted at what they take), the nearest by the walk first:** gems, a heart, free gear, a chest not yet looked into, and, when hurt, food or a berry bush to cut. Food is eaten on pickup, so at full health it is left lying.
-4. **A sign or a person within 25 blocks:** read it or talk.
-5. **Otherwise:** go to the destination or do its work.
+3. **A hostile within 10 blocks:** fight it until it is dead. She fights everything, hurt or not; country too rough for her gear teaches the strategist through deaths. Only get health (3 and below) turns her from a fight.
+4. **Something to take within 25 steps of walking (breaks counted at what they take), the nearest by the walk first:** gems, a heart, free gear, a chest not yet looked into, and, when hurt, food or a berry bush to cut. Food is eaten on pickup, so at full health it is left lying.
+5. **A sign or a person within 25 blocks:** read it or talk.
+6. **Otherwise:** go to the destination or do its work.
 
 A reflex runs to its end (the thing taken, the enemy dead) and then gives the tick back; get health takes over between ticks whenever its mark is crossed.
 

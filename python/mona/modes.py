@@ -30,6 +30,7 @@ FIELD = 12  # blocks around a field's center that count as the field
 INNER, OUTER = 45, 110  # blocks from town: the inner and outer bands (Manual §16: ring 1 near town, farther out pays more)
 IRON_DAMAGE = 8  # a weapon this strong is iron or better: the outer band is open to her
 TOWN_LOOK_SECONDS = 150  # learn: how long to walk town for signs and helpers
+TOWN_RADIUS = 30  # blocks from the town's center that are town (a fenced 60 by 60, Manual changelog 0.9)
 RESTOCK_WAIT_SECONDS = 150  # a shelf found sold out restocks 2 minutes after a sale (Manual §11 Shops)
 SEARCH_REACH = 160  # blocks from town a search for a seller goes, each way
 DIRECTIONS = {"north": (0, -1), "east": (1, 0), "south": (0, 1), "west": (-1, 0),
@@ -95,8 +96,10 @@ class Learn(Flow):
             if time.time() - self.started >= TOWN_LOOK_SECONDS:
                 self.finish("walked town")
                 return None
-            toward = ctx.town[1] if ctx.town else None
-            return route.explore(ctx, toward, "look around town") or actions.Stop("town seen")
+            go = _look_around_town(ctx)
+            if go is None:
+                self.finish("walked town")
+            return go
         entrance = _entrance(ctx, self.kit)
         if entrance is None:
             self.finish("no entrance known")
@@ -354,6 +357,16 @@ def _find_boss(ctx: Ctx) -> Action | None:
         if go is not None:
             return go
     return route.explore(ctx, None, "look for the boss") or actions.Stop("nothing left to look at")
+
+
+def _look_around_town(ctx: Ctx) -> Action | None:
+    """Unseen ground inside town only (its signs and helpers are there); None when town is seen."""
+    if ctx.town is None:
+        return None
+    s = ctx.state
+    center = ctx.town[1]
+    frontier = {p for p in s.world.frontier() if chebyshev(p, center) <= TOWN_RADIUS} - {s.pos}
+    return route.along(ctx, travel.to_nearest(ctx, frontier) or (), "look around town") if frontier else None
 
 
 def _grass(ctx: Ctx, center: Pos) -> list[Pos]:

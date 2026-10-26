@@ -42,7 +42,7 @@ Learn and get money cannot block: learn's steps each run once and end with a kit
 
 ## The modes
 
-**1. Learn** (the agent's task, not the character's: the AI writes the kit). Steps in fixed order, each once: read unread signs, talk to unheard helpers, scout level N's entrance (open, locked, hidden, across water), attempt level N (go in, see the boss). After each step the strategist updates the kit and says whether it is trusted; a trusted kit ends the mode. The attempt comes only after the first three.
+**1. Learn** (the agent's task, not the character's: the AI writes the kit). Steps in fixed order, each once: walk town (inside it only, where its signs and helpers are; read and talk come by reflex), scout level N's entrance (open, locked, hidden, across water), attempt level N (go in, see the boss). After each step the strategist updates the kit and says whether it is trusted; a trusted kit ends the mode. The attempt comes only after the first three.
 
 **2. Get money.** Target: the kit's remaining cost, in gems (deterministic). How: the fields her gear can handle (inner band in bronze, outer band in iron and up), known gem piles and caches; kills come along the way. The strategist picks one at each destination moment; she works it until the target is met or it fails (cut out, no route), and a failed choice is crossed off for this mode. When all are crossed off, the list resets.
 
@@ -56,7 +56,7 @@ The only subgoal. One at a time; it cannot nest.
 
 - **Enters** when health is 3 or below.
 - **Exits** when health is 10 or above. Nothing else ends it.
-- While it runs it owns the destination: first drink a carried potion; else the nearest food it knows (town's berries, bushes seen), else a shop with potions if she can pay, else unexplored ground nearby. Reflexes keep running.
+- While it runs she does not fight (it is the one thing that turns her from a fight), and it owns the destination: first drink a carried potion; else the nearest food it knows (town's berries, bushes seen), else a shop with potions if she can pay, else unexplored ground nearby. Reflexes keep running.
 - When it exits, the goal's destination resumes as it was (she goes back to finish the half-dead enemy: a hostile never heals while it lives).
 
 Both marks are fixed whatever her max health. A safe zone heals nothing (Manual §11 Food and potions); it is never a health destination.

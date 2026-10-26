@@ -104,9 +104,12 @@ REFLEXES: list[tuple[str, Callable[[Ctx], Action | None]]] = [
 ]
 
 
-def first(ctx: Ctx) -> tuple[str, Action] | None:
-    """The first reflex that applies and can act, with its action."""
+def first(ctx: Ctx, fight: bool = True) -> tuple[str, Action] | None:
+    """The first reflex that applies and can act, with its action; ``fight`` False while get health runs, the one
+    thing that turns her from a fight."""
     for name, reflex in REFLEXES:
+        if name == "fight" and not fight:
+            continue
         action = reflex(ctx)
         if action is not None:
             return name, action

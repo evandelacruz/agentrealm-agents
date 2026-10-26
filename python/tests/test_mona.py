@@ -235,6 +235,15 @@ class LearnTest(unittest.TestCase):
         self.assertEqual((flow.done, flow.learned), (["town"], "walked town"))
         self.assertIsInstance(flow.act(ctx_of(world())), actions.Stop)  # waits on the strategist
 
+    def test_walking_town_never_leaves_it(self):
+        w = world(["g" * 81] * 81, at=(40, 40))
+        for p in [p for p in w.view.tiles if max(abs(p[0] - 40), abs(p[1] - 40)) > 10]:
+            del w.view.tiles[p]  # only the middle of town seen yet
+        ctx = Ctx(State.of(w, 10, None, 6, None, 4), Memory(), None, NavMemory(), (MAP, (40, 40)))
+        action = modes.Learn(None, []).act(ctx)
+        self.assertTrue(all(abs(x - 40) <= modes.TOWN_RADIUS + 1 and abs(y - 40) <= modes.TOWN_RADIUS + 1
+                            for x, y in action.path))
+
     def test_scouting_goes_to_the_kit_entrance(self):
         mem = Memory()
         mem.entrance(MAP, (18, 10))
@@ -302,6 +311,14 @@ class SceneTest(unittest.TestCase):
             ctx = m.sense()
             m.decide(ctx, time.time())
             time.sleep(0.01)
+
+    def test_in_get_health_she_does_not_fight_on(self):
+        w = world(health=3, gems=5)
+        snotling(w, (11, 10))
+        m, body = self.mona(w, kit=Kit(level=1, items=["bronze_sword", "bronze_mail"], trusted=True))
+        self.tick(m)
+        self.assertTrue(m.health.active)
+        self.assertFalse(isinstance(body.acted[-1], actions.Swing))
 
     def test_a_trusted_kit_short_of_gems_puts_her_in_money_and_she_stays_there(self):
         m, _ = self.mona(world(gems=5), kit=Kit(level=1, items=["bronze_sword", "bronze_mail"], trusted=True))

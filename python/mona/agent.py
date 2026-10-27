@@ -93,6 +93,9 @@ class Mona:
             self._saved_at = now
             self.body.memory.save()
         if died:
+            if self.kit is not None and self.kit.set_off:  # a death sends her back through the gate
+                self.kit.set_off = False
+                self.kits.save(self.kit)
             self.health.clear()
             self.flow = None
             self.ask_kit(ctx, "she died; revise the kit if it was too thin")
@@ -161,6 +164,9 @@ class Mona:
             self.flow = Gear(self.kit)
         else:
             self.flow = Beat(self.kit)
+            if not self.kit.set_off:  # the kit was met: she sets off, and it is not checked again on the way
+                self.kit.set_off = True
+                self.kits.save(self.kit)
         self.out(f"mode: {self.mode.value} (level {n})")
 
     def serve_flow(self, ctx: Ctx) -> None:
@@ -217,7 +223,9 @@ class Mona:
                 self.retry_at = time.time() + RETRY_SECONDS
                 self.pending = self.pending or ask
             elif ask.kind == "kit":
-                self.kit = kit_of(answer, ask)
+                kit = kit_of(answer, ask)
+                kit.set_off = kit.same_as(self.kit) and self.kit.set_off  # the same kit keeps her on her way
+                self.kit = kit
                 self.kits.save(self.kit)
                 self.out(f"kit for level {self.kit.level}: {self.kit.items} + {self.kit.potions} potions, entrance "
                          f"{self.kit.entrance}, {'trusted' if self.kit.trusted else 'not trusted'} — {self.kit.why}")

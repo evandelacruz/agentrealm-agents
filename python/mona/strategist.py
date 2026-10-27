@@ -35,7 +35,7 @@ N is the lowest level not cleared. Under the modes, fixed reflexes play every ti
 
 You do two things only.
 
-A. The kit for level N, when asked: the gear she must carry, arm or wear before she goes in, and whether you trust it. Reply:
+A. The kit for level N, when asked: the gear she must carry, arm or wear to set off for it, and whether you trust it. The kit is a gate: checked once when she sets off, never on the way or inside, so what she spends out there does not send her back to buy it again; a death or a changed kit sends her back through the gate. (Other destinations have fixed kits: the outer band wants a bronze sword, bronze mail and a potion; the inner band, town and shops want nothing.) Reply:
 {"level": N, "entrance": "<entrance key from the list, or null>", "items": ["<item code>", ...], "potions": 2, "trusted": true, "why": "..."}
 - items: the weapon and armor to fight its boss (potions go in "potions", not here), and whatever its entrance needs (a key, a bomb for a hidden door, a raft for water). Item codes from the Supplies reference; only items sold or found in this world.
 - entrance: the entrance you judge is level N's, from the clues (rumor helpers point at level doors).
@@ -129,7 +129,7 @@ def describe(ask: Ask) -> str:
     k = ask.kit
     lines += ["", "## The kit now"]
     lines.append(f"level {k.level}, entrance {k.entrance}, items {k.items}, potions {k.potions}, trusted {k.trusted}, "
-                 f"learn steps done {k.learned}; why: {k.why}" if k else "none yet")
+                 f"learn steps done {k.learned}, set off {'yes' if k.set_off else 'no'}; why: {k.why}" if k else "none yet")
     lines += ["", "## Entrances (keys as listed; unnumbered until entered)"]
     for key, e in sorted(mem.entrances.items(), key=lambda kv: chebyshev((kv[1].x, kv[1].y), s.pos)):
         facts = [f"block {e.block}" if e.block else "not seen up close", "reached" if e.reached else "",

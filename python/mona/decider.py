@@ -32,6 +32,8 @@ def next_level(s: State) -> int:
 def decide(s: State, kit: Kit | None) -> Mode:
     if kit is None or kit.level != next_level(s) or not kit.trusted:
         return Mode.LEARN
+    if kit.set_off:  # through the gate: what she spends on the way does not turn her back
+        return Mode.BEAT
     if s.gems < kit.cost(s):
         return Mode.MONEY
     if kit.missing(s):

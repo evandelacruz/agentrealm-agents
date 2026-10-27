@@ -1,8 +1,10 @@
-"""The kit: the gear the strategist believes level N needs (docs/v4/SPEC.md **The kit**).
+"""Kits: what she must carry to set off for a destination (docs/v4/SPEC.md **Kits**).
 
-The strategist owns it and may change it as it learns; the goal decider
-only reads it. It is kept per character across runs, with the learn steps
-already taken for its level.
+Every destination has one, empty or not, checked once when she sets off and
+never on the way or inside: what she spends out there does not turn her
+back. Level N's kit is the strategist's (``Kit``), kept per character across
+runs with the learn steps taken for its level. The outer band's is fixed
+(``OUTER``); every other destination's is empty.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from adk3.realm import value
 from adk3.realm.state import State
 
 POTION = "small_potion"
+OUTER = (["bronze_sword", "bronze_mail"], 1)  # the outer band's kit: a basic sword, armor and a potion
 ORDER = ("weapon", "armor", "tool", "consumable")  # get gear takes the missing pieces in this order
 
 
@@ -29,23 +32,34 @@ class Kit:
     trusted: bool = False
     why: str = ""
     learned: list[str] = field(default_factory=list)  # learn steps taken for this level
+    set_off: bool = False  # she met this kit and set off for the level: not checked again until a death or a new kit
 
     def missing(self, s: State) -> list[str]:
         """What the kit still needs, in get gear's order: each item not carried, then the potions short."""
-        carried = [c.code for c in s.carried]
-        out = []
-        for code in self.items:
-            if code in carried:
-                carried.remove(code)
-            else:
-                out.append(code)
-        short = self.potions - sum(1 for c in s.carried if supplies.is_potion(c.code))
-        out += [POTION] * max(0, short)
-        return sorted(out, key=_rank)
+        return missing(s, self.items, self.potions)
+
+    def same_as(self, other: Kit | None) -> bool:
+        """The same gear for the same level and door: a revision that changes nothing keeps her on her way."""
+        return other is not None and (self.level, self.entrance, sorted(self.items), self.potions) == \
+            (other.level, other.entrance, sorted(other.items), other.potions)
 
     def cost(self, s: State) -> int:
         """Gems the missing pieces cost, at the world's list prices."""
         return int(sum(value.item(code) for code in self.missing(s)))
+
+
+def missing(s: State, items: list[str], potions: int) -> list[str]:
+    """What a kit still needs, in get gear's order: each item not carried, then the potions short."""
+    carried = [c.code for c in s.carried]
+    out = []
+    for code in items:
+        if code in carried:
+            carried.remove(code)
+        else:
+            out.append(code)
+    short = potions - sum(1 for c in s.carried if supplies.is_potion(c.code))
+    out += [POTION] * max(0, short)
+    return sorted(out, key=_rank)
 
 
 def _rank(code: str) -> int:

@@ -13,7 +13,6 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from agentrealm_adk import supplies
 from agentrealm_adk.knowledge_maps import door_warp_known, iter_doors
 from agentrealm_adk.world import Pos, chebyshev
 
@@ -23,6 +22,7 @@ from adk3.realm.context import Ctx
 from adk3.realm.memory import Entrance, place_key, region_key
 
 from . import route
+from . import kit as kits
 from .kit import Kit
 
 ARRIVED = 3  # blocks: this near a destination counts as there
@@ -31,7 +31,6 @@ CAME_IN = 2  # blocks: a door this near where she arrived on a level map is the 
 POOR_AFTER = 40  # cuts in a field before its gem rate is judged
 POOR_RATE = 0.10  # a field paying under this many gems a cut is poor (ring 1 pays 0.20): another is picked
 INNER, OUTER = 45, 110  # blocks from town: the inner and outer bands (Manual §16: ring 1 near town, farther out pays more)
-IRON_DAMAGE = 8  # a weapon this strong is iron or better: the outer band is open to her
 TOWN_LOOK_SECONDS = 150  # learn: how long to walk town for signs and helpers
 TOWN_RADIUS = 30  # blocks from the town's center that are town (a fenced 60 by 60, Manual changelog 0.9)
 RESTOCK_WAIT_SECONDS = 150  # a shelf found sold out restocks 2 minutes after a sale (Manual §11 Shops)
@@ -170,9 +169,8 @@ class Money(Flow):
 
     def fields(self, ctx: Ctx) -> list[tuple[str, Pos]]:
         town = ctx.town[1] if ctx.town else ctx.state.pos
-        best = ctx.state.best_weapon()
         bands = [("inner", INNER)]
-        if best is not None and (supplies.weapon_damage(best.code) or 0) >= IRON_DAMAGE:
+        if not kits.missing(ctx.state, *kits.OUTER):  # the outer band's kit, checked as she sets off
             bands.append(("outer", OUTER))
         out = [(f"{band} band, {name} of town", (town[0] + dx * r, town[1] + dy * r))
                for band, r in bands for name, (dx, dy) in DIRECTIONS.items()]
@@ -335,7 +333,6 @@ class Beat(Flow):
 
     def __init__(self, kit: Kit):
         super().__init__(kit)
-        self.was_inside = False
         self.stuck = False  # inside, with no door to try and nothing unseen: told once
 
     def act(self, ctx: Ctx) -> Action | None:
@@ -344,17 +341,12 @@ class Beat(Flow):
         if ready is not None:
             return ready
         if s.in_level:
-            self.was_inside = True
             go = _find_boss(ctx, self.arrived.setdefault(s.map_id, s.pos))
             if go is None and not self.stuck:  # once: the strategist revises the kit (a tool, a key, a light)
                 self.stuck = True
                 self.blocked = f"inside level {self.kit.level}, no way on: {_no_way(ctx)}"
             return go or actions.Stop("no way on")
-        if self.was_inside:
-            self.blocked = f"left level {self.kit.level} without clearing it"
-            self.was_inside = False
-            return None
-        entrance = _entrance(ctx, self.kit)
+        entrance = _entrance(ctx, self.kit)  # out (to eat, say): back in; only a death or the boss clock is a loss
         if entrance is None:
             self.blocked = "the kit names no entrance we know"
             return None

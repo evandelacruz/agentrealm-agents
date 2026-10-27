@@ -30,9 +30,17 @@ Next level N is the lowest level not yet cleared. The mode is, in order:
 
 She is in exactly one mode at all times. The decider runs only when the current mode is met, after a death, or when the strategist changes the kit. Between those moments the mode is fixed.
 
-## The kit
+## Kits
 
-The gear the strategist believes level N needs: weapon, armor, the key, bomb or raft its entrance needs, and potions. The strategist owns it and may change it as it learns (a clue, a failed attempt, a death); the goal never changes because of it, only whether it is met. A kit is **trusted** when the strategist says so.
+Every destination has a kit: what she must carry to set off for it, empty or not. A kit is a gate, checked once when she sets off and never on the way or inside: what she spends out there (a potion drunk in a fight) does not turn her back. A death, or a changed kit, sends her back through the gate.
+
+| Destination | Kit | Decided by |
+|---|---|---|
+| Level N | weapon, armor, the key, bomb, raft or matches it needs, and potions | the strategist |
+| The outer band | a bronze sword, bronze mail and a potion | fixed |
+| The inner band, town, a shop, the death chest | nothing | fixed |
+
+The inner band's empty kit is the bootstrap: money can always be made from the starting kit alone. Level N's kit is the strategist's; it may change it as it learns (a clue, a failed attempt, a death); the goal never changes because of it, only whether it is met. A level kit is **trusted** when the strategist says so.
 
 Where a mode is blocked, the block is always about gear (every prerequisite is gear), so the way out is a kit revision:
 - **Get gear:** the item is sold nowhere she can find, or costs more than the kit allowed.
@@ -48,7 +56,7 @@ Learn and get money cannot block: learn's steps each run once and end with a kit
 
 **3. Get gear.** Order: weapon, armor, then tools and potions. Each piece from the death chest if it holds it, else a known seller; with none known, search: shops not visited, roads out toward waystations, each once. Buy, then arm or wear at once. Met when everything on the kit is held, worn or armed.
 
-**4. Beat level N.** Route to the entrance; open it with what the kit carries; in, find the boss through doors not yet taken, fight to the death. A death, or the boss clock running out, is a loss: the decider re-runs and the strategist revises the kit; N stays.
+**4. Beat level N.** Set off with the kit met; route to the entrance; open it with what the kit carries; in, find the boss through doors not yet taken, fight to the death. Stepping out (to eat, say) is not a loss: she goes back in. A death, or the boss clock running out, is a loss: the decider re-runs and the strategist revises the kit; N stays.
 
 ## The subgoal: get health
 

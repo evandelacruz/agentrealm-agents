@@ -63,6 +63,21 @@ def snotling(w: WorldModel, at, nid=100) -> Entity:
     return e
 
 
+class GateTest(unittest.TestCase):
+    def test_once_she_sets_off_a_potion_spent_on_the_way_does_not_turn_her_back(self):
+        kit = Kit(level=1, items=["bronze_mail"], potions=1, trusted=True)
+        s = ctx_of(world()).state  # no mail, no potion
+        self.assertEqual(decide(s, kit), Mode.MONEY)
+        kit.set_off = True
+        self.assertEqual(decide(s, kit), Mode.BEAT)
+
+    def test_a_revision_that_changes_nothing_keeps_her_on_her_way(self):
+        a = Kit(level=1, items=["bronze_sword", "bronze_mail"], potions=2, trusted=True)
+        b = Kit(level=1, items=["bronze_mail", "bronze_sword"], potions=2, trusted=True, why="again")
+        self.assertTrue(b.same_as(a))
+        self.assertFalse(Kit(level=1, items=["bronze_sword"], potions=2).same_as(a))
+
+
 class DeciderTest(unittest.TestCase):
     def test_no_kit_or_an_untrusted_one_is_learn(self):
         s = ctx_of(world()).state
@@ -282,11 +297,13 @@ class MoneyTest(unittest.TestCase):
         flow.field = ("here", (10, 10))
         self.assertIn(type(flow.act(ctx)), (actions.UseOn, actions.Walk))
 
-    def test_the_outer_band_opens_only_with_an_iron_weapon(self):
-        bronze = modes.Money(Kit(level=1)).fields(ctx_of(world()))
-        iron = modes.Money(Kit(level=1)).fields(ctx_of(world(armed="iron_sword")))
-        self.assertFalse(any("outer" in name for name, _ in bronze))
-        self.assertTrue(any("outer" in name for name, _ in iron))
+    def test_the_outer_band_opens_only_with_its_kit_a_sword_armor_and_a_potion(self):
+        knife = modes.Money(Kit(level=1)).fields(ctx_of(world(armed="pocket_knife")))
+        w = world(armed="bronze_sword")
+        w.held_supplies = [InventorySupply(5, "bronze_mail"), InventorySupply(6, "small_potion")]
+        kitted = modes.Money(Kit(level=1)).fields(ctx_of(w))
+        self.assertFalse(any("outer" in name for name, _ in knife))  # the inner band needs nothing: money from nothing
+        self.assertTrue(any("outer" in name for name, _ in kitted))
 
     def test_on_another_map_a_field_is_not_crossed_off_as_out_of_reach(self):
         flow = modes.Money(Kit(level=1))

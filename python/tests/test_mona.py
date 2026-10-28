@@ -280,6 +280,14 @@ class RouterTest(unittest.TestCase):
         action = route.to(ctx_of(w, mem), MAP, (16, 10), "east")
         self.assertEqual((type(action), action.arm_id), (actions.UseOn, 7))
 
+    def test_a_kept_route_is_dropped_when_a_shelf_comes_into_view_on_it(self):
+        w = world(at=(10, 10))
+        nav = NavMemory()
+        at = lambda: Ctx(State.of(w, 10, None, 6, None, 4), Memory(), None, nav, (MAP, (10, 10)))
+        nav.route_held = ((MAP, ("to", MAP, (16, 10))), [(10, 10), (11, 10), (12, 10), (13, 10), (14, 10), (15, 10), (16, 10)])
+        w.entities.append(Entity("supply", 77, (12, 10), "torch", gem_price=10))
+        self.assertNotIn((12, 10), route.to(at(), MAP, (16, 10), "east").path)
+
     def test_a_fence_is_routed_around_not_given_up_on(self):
         rows = ["g" * 21] * 9 + ["g" * 12 + "w" + "g" * 8] * 3 + ["g" * 21] * 9
         action = route.to(ctx_of(world(rows, at=(10, 10))), MAP, (16, 10), "east")

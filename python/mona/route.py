@@ -46,7 +46,7 @@ def _kept(ctx: Ctx, goal: object, fresh) -> list[Pos]:
     if held is not None and held[0] == key and s.pos in held[1]:
         ahead = held[1][held[1].index(s.pos) + 1:]
         breaks = travel.breakable(s, ctx.memory)
-        bad = travel.hazards(s)
+        bad = travel.hazards(s) | s.world.for_sale()  # stepping onto a priced supply buys it
         if len(ahead) > 1 and all(p not in bad and (p not in s.world.view.tiles or s.world.walkable(p) or p in breaks)
                                   for p in ahead):
             ctx.nav.route_held = (key, [s.pos, *ahead])

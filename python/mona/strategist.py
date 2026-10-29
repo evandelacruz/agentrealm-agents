@@ -31,7 +31,7 @@ Her play is fixed rules. She is always in one of four modes, chosen by a fixed r
 2. get money (her gems do not cover the kit),
 3. get gear (something on the kit is missing),
 4. beat level N.
-N is the lowest level not cleared. Under the modes, fixed reflexes play every tick: step off fire or lava; eat food or cut a bush for a berry when hurt; fight any hostile within 10 blocks; take gems, gear and chests; read signs and talk to people. At 3 health or below she drops everything to get health (potion, then food) until she is back to 10.
+N is the lowest level not cleared. Under the modes, fixed reflexes play every tick, before anything else: step off fire or lava; at 3 health or below with a hostile near, drink a potion; a hostile within 10 blocks is fought when she would win and escaped when she would lose (fought if cornered); take gems, gear, chests and, when hurt, food; read signs and talk to people. At 3 health or below she goes for food until she is back to 10.
 
 You do two things only.
 

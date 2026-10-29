@@ -413,10 +413,10 @@ def _look_around_town(ctx: Ctx) -> Action | None:
 
 
 def _grass(ctx: Ctx, center: Pos) -> list[Pos]:
-    s, mem = ctx.state, ctx.memory
+    s = ctx.state
     safe = s.world.view.safe
     return [p for p, b in s.world.view.tiles.items() if b == "grass" and p not in safe
-            and chebyshev(p, center) <= FIELD and place_key(s.map_id, p) not in mem.no_effect]
+            and chebyshev(p, center) <= FIELD]
 
 
 def _seen(ctx: Ctx, center: Pos) -> bool:

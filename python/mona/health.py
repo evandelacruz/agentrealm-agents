@@ -15,7 +15,6 @@ from agentrealm_adk.world import chebyshev
 from adk3.realm import travel
 from adk3.realm.actions import Action
 from adk3.realm.context import Ctx
-from adk3.realm.memory import place_key
 from adk3.realm.state import State
 
 from . import route
@@ -69,5 +68,5 @@ class GetHealth:
         if travel.weapon_for(s, "bush") is None:
             return None
         bushes = [p for p, b in s.world.view.tiles.items()
-                  if b == "bush" and place_key(s.map_id, p) not in ctx.memory.no_effect]
+                  if b == "bush" and ctx.memory.breaks_with(s.map_id, p, "cut")]
         return min(bushes, key=lambda p: chebyshev(p, s.pos), default=None)

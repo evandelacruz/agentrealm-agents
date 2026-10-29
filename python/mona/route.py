@@ -94,6 +94,71 @@ def strike(ctx: Ctx, foe: Entity) -> Action | None:
     return actions.Swing(foe.id, f"{foe.code} {foe.id}") if s.attack_ready else actions.Stop("between swings")
 
 
+ESCAPE_STEPS = 8  # the escapes looked at lie this many steps off, at most
+REACH = 1  # a hostile this near strikes
+SAFE_LEAD = 99  # safe ground: no blow lands there, whoever is near
+
+
+def chase(ctx: Ctx, foe: Pos, target: Pos, steps: int) -> Pos:
+    """Where a chaser stands after ``steps`` steps toward ``target``: each step the open neighbour that brings it
+    closest, and none when no step brings it closer (Manual §11 Hostiles: it stands still). So a tree, a wall or a
+    bush between them stops it."""
+    w = ctx.state.world
+    at = foe
+    for _ in range(steps):
+        here = chebyshev(at, target)
+        if here <= REACH:
+            break
+        steps_open = [p for p in w.open_neighbours(at) if w.walkable(p)]
+        nxt = min(steps_open, key=lambda p: chebyshev(p, target), default=None)
+        if nxt is None or chebyshev(nxt, target) >= here:
+            break
+        at = nxt
+    return at
+
+
+def reaches(ctx: Ctx, foes) -> bool:
+    """Whether any of ``foes`` can come within striking reach of her, chasing as a chaser does."""
+    s = ctx.state
+    return any(chebyshev(chase(ctx, e.pos, s.pos, ESCAPE_STEPS * 2), s.pos) <= REACH for e in foes)
+
+
+def escape(ctx: Ctx, foes) -> Action | None:
+    """The way out of a fight she would lose: toward the spot a few steps off where her lead over the chasers is
+    greatest, each chaser played out as it moves (straight at her, stopped by what stands between), safe ground
+    best of all. None when no spot gains on where she stands."""
+    s = ctx.state
+    bad = travel.hazards(s) | s.world.for_sale()
+    occupied = {e.pos for e in s.world.entities if e.kind in ("npc", "character")}
+    came = {s.pos: None}
+    frontier, dist = [s.pos], {s.pos: 0}
+    while frontier:
+        nxt = []
+        for p in frontier:
+            if dist[p] >= ESCAPE_STEPS:
+                continue
+            for q in s.world.open_neighbours(p):
+                if q in came or q in bad or q in occupied or not s.world.walkable(q):
+                    continue
+                came[q], dist[q] = p, dist[p] + 1
+                nxt.append(q)
+        frontier = nxt
+
+    def lead(p: Pos) -> int:
+        if p in s.world.view.safe:
+            return SAFE_LEAD
+        return min(chebyshev(chase(ctx, e.pos, p, dist[p]), p) for e in foes)
+
+    best = max(came, key=lambda p: (lead(p), -dist[p]))
+    if lead(best) <= max(lead(s.pos), REACH):
+        return None
+    path = []
+    while best != s.pos:
+        path.append(best)
+        best = came[best]
+    return actions.Walk(tuple(reversed(path)), "escape")
+
+
 def off_hazard(ctx: Ctx) -> Action | None:
     """Standing on fire or lava: the nearest block that is not."""
     s = ctx.state

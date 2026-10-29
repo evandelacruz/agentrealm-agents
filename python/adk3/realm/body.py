@@ -438,15 +438,11 @@ class Body:
             if npc is not None:
                 mem.greeted(npc.code, w.map_id, npc.pos, answered=False)
         elif verb == "Take" and outcome == "rejected":
-            item = next((e for e in w.entities if e.id == intent.get("supply_id")), None)
-            if item is not None:
-                mem.changed_nothing(w.map_id, item.pos)  # full, or not ours to take: not tried again
+            mem.refused_items.add(int(intent.get("supply_id", -1)))  # that item, not the cell it lies on
         elif verb == "WithdrawFromChest" and (outcome == "applied" or (res.get("rejection") or {}).get("code") == "chest_gone"):
             mem.chest_done(int(intent.get("chest_id", -1)))  # emptied, or gone: a death chest is not gone back for
         elif verb == "WithdrawFromChest" and outcome == "rejected":
-            chest = next((e for e in w.entities if e.id == intent.get("chest_id")), None)
-            if chest is not None:
-                mem.changed_nothing(w.map_id, chest.pos)  # full, or not ours to take: not tried again
+            mem.refused_items.add(int(intent.get("chest_id", -1)))  # full, or not ours: that chest, this run
         elif verb == "Use" and target.get("kind") == "block":
             cell = (int(target["x"]), int(target["y"]))
             code = (res.get("rejection") or {}).get("code")
@@ -454,7 +450,7 @@ class Body:
                 mem.use_refused(w.map_id, cell, code)
             elif outcome == "applied_no_effect":
                 tried = capabilities_for_code(w.armed_code or "") & BLOCK_OPENERS.get(w.view.tiles.get(cell, ""), frozenset())
-                for cap in tried or (None,):  # what the armed supply could have done here, each spent
+                for cap in tried:  # this block does not break this way (grass and the like: nothing to remember)
                     mem.changed_nothing(w.map_id, cell, cap)
             elif outcome == "applied":
                 mem.broke(w.map_id, cell)

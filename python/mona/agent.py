@@ -105,7 +105,7 @@ class Mona:
         change = self.health.update(s)
         if change:
             self.out(change)
-        found = reflexes.first(ctx, turned=self.health.active)  # get health turns her from a fight
+        found = reflexes.first(ctx)  # reflexes first: the subgoal and the goal only choose where she heads
         if found is not None:
             who, action = found
         elif self.health.active:
@@ -252,8 +252,7 @@ class Mona:
             if s.on_safe_ground:  # no blow lands here
                 self.out("parked somewhere safe")
                 return
-            self.health.update(s)
-            found = reflexes.first(ctx, turned=self.health.active, only=reflexes.PARKING)
+            found = reflexes.first(ctx, only=reflexes.PARKING)
             if found is not None:  # safe ground is the destination: fire and a fight still come first
                 self.body.act(reflexes.ready(ctx, found[1]))
                 continue

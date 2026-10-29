@@ -144,6 +144,7 @@ class Memory:
     yields: dict[str, Yield] = field(default_factory=dict)  # region key -> our breaks there
     kills: dict[str, Yield] = field(default_factory=dict)  # hostile type -> our kills of it and the gems they dropped
     no_effect: list[str] = field(default_factory=list)  # place keys a Use on changed nothing
+    refused_items: set[int] = field(default_factory=set)  # supply and chest ids a Take or Withdraw was refused, this run
     refused: dict[str, str] = field(default_factory=dict)  # place key -> why the game refused a Use on it
     territory: dict[str, list[str]] = field(default_factory=dict)  # hostile type -> the block types it keeps to
     townsfolk: list[str] = field(default_factory=list)  # NPC types seen standing on safe ground (State.is_threat)
@@ -343,7 +344,7 @@ class Memory:
     def save(self) -> None:
         if self.path is None:
             return
-        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news", "held_up")}
+        raw = {k: v for k, v in asdict(self).items() if k not in ("path", "revision", "happened", "news", "held_up", "refused_items")}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")  # written whole, then swapped in: a run killed mid-save keeps the last file
         tmp.write_text(json.dumps(raw, indent=1, sort_keys=True))

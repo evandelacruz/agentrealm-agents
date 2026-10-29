@@ -125,9 +125,9 @@ class GetHealthTest(unittest.TestCase):
         w = world(health=3)
         w.held_supplies = [InventorySupply(9, "small_potion")]
         w.entities.append(Entity("supply", 902, (14, 10), "berry"))
-        self.assertEqual(reflexes.first(ctx_of(w), turned=True)[0], "take")  # nothing near: the berry
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "take")  # nothing near: the berry
         snotling(w, (11, 11))
-        self.assertEqual(reflexes.first(ctx_of(w), turned=True)[0], "drink")  # a hostile on her: the potion
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "drink")  # a hostile on her: the potion
 
     def test_above_three_a_potion_is_kept_and_she_goes_for_food(self):
         w = world(health=9, at=(1, 1))
@@ -163,7 +163,7 @@ class ReflexTest(unittest.TestCase):
         w = world(health=6)
         snotling(w, (14, 10))
         w.entities.append(Entity("supply", 7, (8, 10), "berry"))
-        self.assertEqual(reflexes.first(ctx_of(w))[0], "fight")
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "danger")
 
     def test_hurt_with_no_hostile_near_she_eats(self):
         w = world(health=6)
@@ -174,7 +174,7 @@ class ReflexTest(unittest.TestCase):
         w = world()
         snotling(w, (14, 10))
         w.entities.append(Entity("supply", 7, (8, 10), "berry"))
-        self.assertEqual(reflexes.first(ctx_of(w))[0], "fight")
+        self.assertEqual(reflexes.first(ctx_of(w))[0], "danger")
 
     def test_hurt_with_no_food_a_bush_is_cut_for_its_berry(self):
         rows = ["g" * 21] * 10 + ["g" * 11 + "b" + "g" * 9] + ["g" * 21] * 10
@@ -184,7 +184,7 @@ class ReflexTest(unittest.TestCase):
     def test_a_hostile_beyond_ten_blocks_is_not_gone_for(self):
         w = world(["g" * 41] * 21, at=(5, 10))
         snotling(w, (20, 10))
-        self.assertIsNone(reflexes.fight(ctx_of(w)))
+        self.assertIsNone(reflexes.danger(ctx_of(w)))
 
     def test_gems_and_free_gear_within_25_are_taken(self):
         w = world(["g" * 41] * 21, at=(5, 10))
@@ -213,15 +213,12 @@ class TakeTest(unittest.TestCase):
         self.assertEqual(reflexes.first(ctx_of(w))[1].code, "berry")
 
 
-    def test_turned_from_a_fight_she_goes_for_nothing_a_hostile_stands_by(self):
-        w = world(health=3)
-        snotling(w, (11, 11))
-        w.entities.append(Entity("supply", 901, (11, 10), "gem"))
-        w.entities.append(Entity("supply", 902, (18, 10), "berry"))
-        self.assertEqual(reflexes.first(ctx_of(w))[0], "fight")
-        name, action = reflexes.first(ctx_of(w), turned=True)
-        self.assertEqual((name, str(action).endswith("(to the berry)")), ("take", True))
-
+    def test_a_berry_on_a_bush_that_would_not_cut_is_still_eaten(self):
+        w = world(health=5)
+        w.entities.append(Entity("supply", 902, (13, 10), "berry"))
+        mem = Memory()
+        mem.changed_nothing(MAP, (13, 10), "cut")
+        self.assertEqual(reflexes.first(ctx_of(w, mem))[0], "take")
 
     def test_near_means_the_walk_not_the_line_a_berry_behind_trees_is_far(self):
         rows = []
@@ -231,6 +228,40 @@ class TakeTest(unittest.TestCase):
         w.entities.append(Entity("supply", 901, (16, 10), "berry"))  # 6 off as the crow flies, behind three trees
         w.entities.append(Entity("supply", 902, (10, 17), "gem"))  # 7 off, in the open
         self.assertEqual(reflexes.first(ctx_of(w))[1].why, "to the gem")
+
+
+class DangerTest(unittest.TestCase):
+    def strong(self, w, at, nid=100):
+        e = snotling(w, at, nid)
+        w.threat.record(("npc", "snotling"), 9)  # it hits for 9: a fight she would lose
+        return e
+
+    def test_a_fight_she_would_win_is_fought(self):
+        w = world()
+        snotling(w, (11, 10))
+        self.assertIsInstance(reflexes.danger(ctx_of(w)), actions.Swing)
+
+    def test_a_fight_she_would_lose_is_escaped_behind_a_screen_the_chaser_cannot_pass(self):
+        rows = ["g" * 21] * 21
+        rows = [r[:12] + "w" + r[13:] if 6 <= y <= 14 else r for y, r in enumerate(rows)]  # a wall at x 12
+        w = world(rows, at=(11, 10))
+        self.strong(w, (10, 10))
+        action = reflexes.danger(ctx_of(w))
+        self.assertEqual(action.why, "escape")
+        self.assertGreater(action.path[-1][0], 12)  # round the wall, to the far side of it
+
+    def test_cornered_she_fights(self):
+        rows = ["w" * 5, "wgggw", "wgggw", "wgggw", "w" * 5]
+        w = world(rows, at=(1, 2))
+        self.strong(w, (2, 2))
+        self.assertIsInstance(reflexes.danger(ctx_of(w)), actions.Swing)
+
+    def test_a_chaser_stuck_behind_a_wall_is_no_danger(self):
+        rows = ["g" * 21] * 21
+        rows = [r[:10] + "w" + r[11:] for r in rows]  # a wall the whole height at x 10
+        w = world(rows, at=(12, 10))
+        self.strong(w, (8, 10))
+        self.assertIsNone(reflexes.danger(ctx_of(w)))
 
 
 class ArmedTest(unittest.TestCase):
@@ -494,13 +525,13 @@ class SceneTest(unittest.TestCase):
             m.park()
         self.assertTrue(any(isinstance(a, actions.Swing) for a in body.acted))
 
-    def test_in_get_health_she_does_not_fight_on(self):
+    def test_in_get_health_a_hostile_on_her_is_still_answered_first(self):
         w = world(health=3, gems=5)
         snotling(w, (11, 10))
         m, body = self.mona(w, kit=Kit(level=1, items=["bronze_sword", "bronze_mail"], trusted=True))
         self.tick(m)
         self.assertTrue(m.health.active)
-        self.assertFalse(isinstance(body.acted[-1], actions.Swing))
+        self.assertNotIn("food", str(body.acted[-1]))  # the danger reflex acts: fight or escape, never walk off to eat
 
     def test_a_trusted_kit_short_of_gems_puts_her_in_money_and_she_stays_there(self):
         m, _ = self.mona(world(gems=5), kit=Kit(level=1, items=["bronze_sword", "bronze_mail"], trusted=True))

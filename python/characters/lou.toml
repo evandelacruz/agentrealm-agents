@@ -1,0 +1,16 @@
+# Layered Lou, the v3 agent (docs/v3/SPEC.md): python -m lou run characters/lou.toml
+world = "olympuff"
+
+[policy]
+entity_refresh = 5
+
+# Lou's temperament: each lever feeds one price in her calculations (adk3/realm/value.py).
+# Another agent on the same framework is these numbers changed.
+[levers]
+risk = 5          # 0 to 10: how lightly a chance of death weighs; 0 very cautious, 10 reckless
+life_worth = 40   # gems: what losing a life costs, besides the gear a death drops
+time_worth = 6    # gems per minute: the Manual's field-work rate
+curiosity = 5     # 0 to 10: how much a sign, a helper or unseen ground is worth stopping for
+greed = 5         # 0 to 10: how much loot in view is worth stopping for
+heal_below = 0.4  # share of health: below it, heal before going on
+patience = 60     # seconds a skill may make no progress before it has failed

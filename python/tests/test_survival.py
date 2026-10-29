@@ -610,6 +610,7 @@ class SwingTest(unittest.TestCase):
 
     def test_hit_chance_follows_the_published_roll(self):
         self.assertAlmostEqual(survival.hit_chance(), 0.65)
+        self.assertAlmostEqual(survival.our_hit_chance(), 0.75, msg="characters add 2 to hit")
         self.assertAlmostEqual(survival.hit_chance(attack_power=0), 0.55)
         self.assertAlmostEqual(survival.hit_chance(attack_power=30), 0.95, msg="a 1 always misses")
         self.assertAlmostEqual(survival.hit_chance(defense=30), 0.05, msg="a 20 always hits")

@@ -1,0 +1,5 @@
+# Modal Mona, the v4 agent (docs/v4/SPEC.md): python -m mona run characters/mona.toml
+world = "olympuff"
+
+[policy]
+entity_refresh = 5
